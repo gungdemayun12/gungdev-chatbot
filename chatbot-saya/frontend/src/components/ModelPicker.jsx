@@ -1,18 +1,19 @@
 /**
  * ModelPicker.jsx — pemilih model di dalam kotak pesan (composer).
  *
- * Bentuknya tombol pil kecil bertuliskan model aktif (mis. "Pintar ▾").
- * Saat diklik muncul daftar pilihan ke ATAS agar tidak menutupi kotak
- * ketik. Ditempatkan tepat di sebelah kiri tombol kirim, mengikuti
- * kebiasaan aplikasi chat modern.
+ * Bentuknya tombol pil kecil berisi nama PENDEK model aktif (mis.
+ * "GPT-OSS 120B ▾") karena ruang di kotak ketik terbatas. Saat diklik
+ * muncul daftar berisi NAMA ASLI model (mis. "openai/gpt-oss-120b")
+ * beserta keterangan singkat.
  *
- * Semua yang tampil hanya label publik — tidak ada nama model teknis.
+ * Menu terbuka KE ATAS agar tidak menutupi kotak ketik. Ditempatkan
+ * tepat di sebelah kiri tombol kirim.
  */
 import { useEffect, useRef, useState } from 'react'
-import { Check, ChevronDown, Sparkles, Zap } from './icons.jsx'
+import { Brain, Check, ChevronDown, Sparkles, Zap } from './icons.jsx'
 import { MODEL_PILIHAN, cariModel } from '../lib/models.js'
 
-const IKON = { Sparkles, Zap }
+const IKON = { Sparkles, Zap, Brain }
 
 export default function ModelPicker({ value, onChange, disabled }) {
   const [buka, setBuka] = useState(false)
@@ -57,11 +58,11 @@ export default function ModelPicker({ value, onChange, disabled }) {
         disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={buka}
-        aria-label={`Model AI: ${aktif.label}. Klik untuk mengganti`}
-        title={`Model: ${aktif.label}`}
+        aria-label={`Model AI: ${aktif.id}. Klik untuk mengganti`}
+        title={`Model: ${aktif.id}`}
       >
         <IkonAktif size={14} aria-hidden="true" />
-        <span className="mpicker__label">{aktif.label}</span>
+        <span className="mpicker__label">{aktif.singkat}</span>
         <ChevronDown size={13} className="mpicker__caret" aria-hidden="true" />
       </button>
 
@@ -84,8 +85,8 @@ export default function ModelPicker({ value, onChange, disabled }) {
                   <Ikon size={15} aria-hidden="true" />
                 </span>
                 <span className="mpicker__item-text">
-                  <span className="mpicker__item-label">{m.label}</span>
-                  <span className="mpicker__item-hint">{m.hint}</span>
+                  <span className="mpicker__item-label">{m.id}</span>
+                  <span className="mpicker__item-hint">{m.ket}</span>
                 </span>
                 {dipilih && <Check size={15} className="mpicker__item-check" />}
               </button>

@@ -130,57 +130,65 @@ GROQ_MODEL = _model_groq_terpilih()
 _MODEL_GROQ_CADANGAN = [
     MODEL_GROQ_DEFAULT,        # openai/gpt-oss-120b -> kualitas terbaik
     "openai/gpt-oss-20b",      # lebih cepat, ringan
+    "qwen/qwen3.8-27b",        # preview, alternatif
 ]
 
 # ---------------------------------------------------------------------
-# KATALOG MODEL PUBLIK  (peta: ID publik -> nama model sebenarnya)
+# DAFTAR MODEL YANG BOLEH DIPILIH (allowlist)
 # ---------------------------------------------------------------------
-# PENTING — alasan keamanan:
-#   Frontend hanya pernah mengirim ID publik ("pintar", "cepat").
-#   Pemetaan ke nama model asli HANYA ada di server ini. Dengan begitu
-#   pengunjung tidak bisa melihat/menyalahgunakan nama model teknis,
-#   dan tidak bisa memaksa server memakai model lain di luar daftar.
+# Pemilihan model dikirim klien memakai NAMA MODEL ASLI (sesuai permintaan
+# pemilik situs). Yang dijaga di sini bukan kerahasiaan nama, melainkan
+# BATASAN: klien tidak bisa memaksa server memakai model di luar daftar.
 #
-# Menambah/mengganti model: cukup ubah dict di bawah. Tidak perlu
-# menyentuh frontend sama sekali.
-KATALOG_MODEL = {
-    "pintar": MODEL_GROQ_DEFAULT,   # -> "openai/gpt-oss-120b" (lebih teliti)
-    "cepat": "openai/gpt-oss-20b",  # -> lebih ringan & cepat
-}
+# CATATAN PENTING (per 16 Agustus 2026):
+#   "llama-3.3-70b-versatile" dan "llama-3.1-8b-instant" sudah DIMATIKAN
+#   Groq untuk akun gratis/developer - kini Enterprise (berbayar kontrak).
+#   Karena itu keduanya TIDAK dimasukkan: memakainya hanya menghasilkan
+#   error. Penggantinya: openai/gpt-oss-120b / -20b.
+#   Lihat console.groq.com/docs/deprecations
+#
+# Menambah/mengganti model: cukup ubah list di bawah.
+MODEL_DIIZINKAN = [
+    "openai/gpt-oss-120b",   # paling teliti
+    "openai/gpt-oss-20b",    # paling cepat
+    "qwen/qwen3.8-27b",      # alternatif (status preview di Groq)
+]
 
 # Model yang dipakai bila klien tidak mengirim pilihan / mengirim nilai
-# yang tidak dikenal. Dipilih "pintar" agar kualitas jawaban terjaga.
-MODEL_PUBLIK_DEFAULT = "pintar"
+# di luar daftar.
+MODEL_DEFAULT_PILIHAN = "openai/gpt-oss-120b"
 
 
 def model_dari_pilihan(pilihan: Optional[str]) -> str:
     """
-    Menerjemahkan ID publik dari UI menjadi nama model sebenarnya.
+    Memvalidasi pilihan model dari klien.
 
-    Nilai apa pun yang tidak ada di KATALOG_MODEL (termasuk None, string
-    kosong, atau percobaan menyisipkan nama model lain) akan DIABAIKAN
-    dan diganti model default. Ini mencegah klien memilih model di luar
-    daftar gratis yang diizinkan.
+    Nilai yang TIDAK ada di MODEL_DIIZINKAN (termasuk None, string kosong,
+    atau model berbayar seperti llama-3.3-70b-versatile yang sudah mati
+    untuk akun gratis) akan DIABAIKAN dan diganti model default. Ini
+    mencegah klien memakai model di luar daftar yang diizinkan - baik
+    karena tidak tersedia maupun karena berbayar.
     """
-    kunci = (pilihan or "").strip().lower()
-    if kunci in KATALOG_MODEL:
-        return KATALOG_MODEL[kunci]
-    if pilihan:
+    kunci = (pilihan or "").strip()
+    if kunci in MODEL_DIIZINKAN:
+        return kunci
+
+    # Nama lama yang sudah mati: beri peringatan jelas di log agar tidak
+    # membingungkan saat menelusuri masalah.
+    if kunci in _MODEL_GROQ_USANG:
         logger.warning(
-            "Pilihan model tidak dikenal (%r) — memakai model default.", pilihan
+            "Model %r sudah tidak tersedia untuk akun gratis (Enterprise). "
+            "Memakai %s.",
+            kunci,
+            MODEL_DEFAULT_PILIHAN,
         )
-    return KATALOG_MODEL[MODEL_PUBLIK_DEFAULT]
-
-
-def label_publik_model(nama_model: str) -> str:
-    """
-    Kebalikannya: nama model asli -> ID publik, untuk keperluan log /
-    panel usage agar nama teknis tidak ikut terekspos.
-    """
-    for kunci, nilai in KATALOG_MODEL.items():
-        if nilai == nama_model:
-            return kunci
-    return MODEL_PUBLIK_DEFAULT
+    elif pilihan:
+        logger.warning(
+            "Pilihan model tidak dikenal (%r) - memakai %s.",
+            pilihan,
+            MODEL_DEFAULT_PILIHAN,
+        )
+    return MODEL_DEFAULT_PILIHAN
 
 
 def opsi_model_aktif() -> str:
@@ -189,16 +197,17 @@ def opsi_model_aktif() -> str:
     panel Usage.
 
     Panel Usage bersifat global (bukan per pengguna), jadi dipakai model
-    yang terakhir tercatat — atau model default bila belum ada. Batas
-    kuota kedua model gratis saat ini identik, sehingga angkanya tetap
-    benar walau dua pengguna memilih model berbeda.
+    yang terakhir tercatat - atau model default bila belum ada. Batas
+    kuota model gratis saat ini identik, sehingga angkanya tetap benar
+    walau dua pengguna memilih model berbeda.
     """
     terakhir = usage.model_terakhir()
     if terakhir:
         return terakhir
     if PROVIDER == "groq":
-        return KATALOG_MODEL[MODEL_PUBLIK_DEFAULT]
+        return MODEL_DEFAULT_PILIHAN
     return OLLAMA_MODEL
+
 
 # ---- Ollama (lokal) ----
 OLLAMA_HOST = _env("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
@@ -281,9 +290,10 @@ class ChatRequest(BaseModel):
     system_prompt: Optional[str] = Field(None, description="Instruksi kustom pengguna")
     temperature: Optional[float] = Field(None, ge=0.0, le=2.0, description="Kreativitas jawaban")
     max_tokens: Optional[int] = Field(None, ge=16, le=8192, description="Panjang maksimum jawaban")
-    # Pilihan model dari UI. Nilainya adalah ID publik (mis. "pintar"),
-    # BUKAN nama model asli — supaya detail penyedia tidak terekspos.
-    model: Optional[str] = Field(None, max_length=32, description="Pilihan model dari UI")
+    # Pilihan model dari UI, berisi NAMA MODEL ASLI (mis.
+    # "openai/gpt-oss-120b"). Server memvalidasinya terhadap
+    # MODEL_DIIZINKAN; nilai di luar daftar diganti model default.
+    model: Optional[str] = Field(None, max_length=64, description="Pilihan model dari UI")
 
 
 class ChatResponse(BaseModel):

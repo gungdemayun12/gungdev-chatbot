@@ -35,9 +35,9 @@ export const DEFAULT_SETTINGS = {
   // http://localhost:8000 lalu menyimpannya, nilai itu akan terus
   // menang atas URL backend produksi dan chat selalu gagal.
   apiUrl: '',
-  // Pilihan model dari UI. Nilainya ID PUBLIK ("pintar" / "cepat"),
-  // bukan nama model teknis. Server yang menerjemahkannya.
-  model: 'pintar',
+  // Pilihan model dari UI. Nilainya NAMA MODEL ASLI, sama dengan
+  // MODEL_DIIZINKAN di backend. Server yang memvalidasi.
+  model: 'openai/gpt-oss-120b',
   temperature: 0.4,
   maxTokens: 2048,
 }
@@ -86,9 +86,14 @@ function mergeSettings(raw) {
   }
 
   // --- model ---
-  // Hanya ID publik yang diizinkan. Nilai lain (termasuk nama model
-  // teknis dari versi lama) diganti default supaya UI tetap konsisten.
-  if (!['pintar', 'cepat'].includes(merged.model)) merged.model = 'pintar'
+  // Hanya nama model yang benar-benar tersedia yang diizinkan. Nilai
+  // lain diganti default, termasuk:
+  //   - "pintar"/"cepat" (ID publik dari versi sebelumnya), dan
+  //   - "llama-3.3-70b-versatile" / "llama-3.1-8b-instant" yang sudah
+  //     dimatikan Groq untuk akun gratis (kini Enterprise).
+  if (!['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b'].includes(merged.model)) {
+    merged.model = 'openai/gpt-oss-120b'
+  }
 
   // --- bersihkan sisa data sensitif versi lama ---
   // Versi sebelumnya menyimpan system prompt di localStorage. Kunci itu

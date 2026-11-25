@@ -62,6 +62,12 @@ BATAS_KUOTA: Dict[str, Dict[str, int]] = {
         "tpm": 8000,
         "tpd": 200000,
     },
+    "qwen/qwen3.8-27b": {
+        "rpm": 30,
+        "rpd": 1000,
+        "tpm": 8000,
+        "tpd": 200000,
+    },
 }
 
 # Kuota cadangan bila model tidak dikenal (mis. model baru dari Groq).

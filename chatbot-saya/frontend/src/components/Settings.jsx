@@ -273,20 +273,25 @@ export default function Settings({
 
               <Field
                 label="Model AI"
-                hint="Pilih yang paling pas dengan kebutuhan Anda. Bisa juga diganti kapan saja dari kotak pesan."
+                hint="Pilih model yang ingin dipakai. Bisa juga diganti kapan saja dari kotak pesan."
               >
-                <div className="segmented segmented--wrap" role="group" aria-label="Pilih model AI">
+                <div className="model-list" role="radiogroup" aria-label="Pilih model AI">
                   {MODEL_PILIHAN.map((m) => {
                     const aktifModel = settings.model === m.id
                     return (
                       <button
                         key={m.id}
                         type="button"
-                        className={`segmented__btn ${aktifModel ? 'is-active' : ''}`}
-                        aria-pressed={aktifModel}
+                        role="radio"
+                        aria-checked={aktifModel}
+                        className={`model-list__item ${aktifModel ? 'is-active' : ''}`}
                         onClick={() => updateSettings({ model: m.id })}
                       >
-                        {m.label}
+                        <span className="model-list__dot" aria-hidden="true" />
+                        <span className="model-list__text">
+                          <span className="model-list__name">{m.id}</span>
+                          <span className="model-list__ket">{m.ket}</span>
+                        </span>
                       </button>
                     )
                   })}
