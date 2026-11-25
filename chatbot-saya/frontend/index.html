@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#faf9f5" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#1f1e1d" media="(prefers-color-scheme: dark)" />
+    <meta
+      name="description"
+      content="GungDev — asisten AI berbahasa Indonesia yang ramah, akurat, dan jelas."
+    />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>GungDev</title>
+
+    <!--
+      Skrip anti-flash: dijalankan SEBELUM React render, sehingga warna latar
+      dan tema sudah benar sejak frame pertama (tidak ada kedipan putih).
+    -->
+    <script>
+      (function () {
+        try {
+          var pref = localStorage.getItem('gungdev:theme') || 'system';
+          var isDark = false;
+          if (pref === 'dark') isDark = true;
+          else if (pref === 'light') isDark = false;
+          else isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          var root = document.documentElement;
+          root.setAttribute('data-theme', isDark ? 'dark' : 'light');
+
+          var size = localStorage.getItem('gungdev:settings');
+          if (size) {
+            var parsed = JSON.parse(size);
+            if (parsed && parsed.fontSize) root.setAttribute('data-fontsize', parsed.fontSize);
+          }
+          root.style.backgroundColor = isDark ? '#1f1e1d' : '#faf9f5';
+        } catch (e) {
+          document.documentElement.setAttribute('data-theme', 'light');
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

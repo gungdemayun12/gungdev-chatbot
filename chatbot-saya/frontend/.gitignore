@@ -1,0 +1,23 @@
+# File environment (jangan di-commit)
+.env
+.env.local
+.env.*.local
+
+# Dependensi
+node_modules/
+dist/
+dist-ssr/
+
+# Log
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
