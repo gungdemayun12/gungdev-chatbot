@@ -13,7 +13,14 @@
       "source": "/usage",
       "destination": "https://gungdev-chatbot-rq5l.vercel.app/usage"
     },
-    { "source": "/((?!health|usage|api/).*)", "destination": "/index.html" }
+    {
+      "source": "/capabilities",
+      "destination": "https://gungdev-chatbot-rq5l.vercel.app/capabilities"
+    },
+    {
+      "source": "/((?!health|usage|capabilities|api/).*)",
+      "destination": "/index.html"
+    }
   ],
   "headers": [
     {

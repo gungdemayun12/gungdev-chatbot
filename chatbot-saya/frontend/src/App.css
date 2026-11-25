@@ -1302,6 +1302,39 @@
   color: var(--accent);
 }
 
+/* --- Penanda kemampuan model (Gambar / Web) --- */
+.mpicker__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 3px;
+}
+
+.mpicker__tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px 1px 5px;
+  border-radius: 999px;
+  font-size: 0.625rem;
+  font-weight: 600;
+  line-height: 1.5;
+  letter-spacing: 0.01em;
+  border: 1px solid transparent;
+}
+
+.mpicker__tag--vision {
+  color: var(--accent);
+  background-color: var(--accent-ring);
+  border-color: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.mpicker__tag--web {
+  color: var(--text-secondary);
+  background-color: var(--bg-subtle);
+  border-color: var(--border);
+}
+
 /* Layar sempit: sembunyikan tulisan di tombol, sisakan ikon + caret.
    Ruang di dalam kotak ketik sangat berharga di ponsel. */
 @media (max-width: 560px) {
@@ -1360,25 +1393,99 @@
 .composer__attachment {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 3px var(--sp-2);
-  border-radius: var(--r-full);
+  gap: 7px;
+  max-width: 260px;
+  padding: 4px var(--sp-2) 4px 6px;
+  border-radius: var(--r-md);
   background-color: var(--bg-subtle);
   border: 1px solid var(--border);
   font-size: var(--fs-xs);
   color: var(--text-secondary);
 }
 
-.composer__attachment button {
-  color: var(--text-tertiary);
-  font-size: 14px;
-  line-height: 1;
-  padding: 0 2px;
-  border-radius: 4px;
+.composer__attachment--gambar {
+  padding: 3px 6px 3px 3px;
 }
 
-.composer__attachment button:hover {
+.composer__thumb {
+  width: 34px;
+  height: 34px;
+  object-fit: cover;
+  border-radius: 6px;
+  flex: 0 0 auto;
+  background-color: var(--bg-active);
+}
+
+.composer__file-icon {
+  flex: 0 0 auto;
+  color: var(--text-tertiary);
+}
+
+.composer__attachment-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.composer__attachment-name {
+  font-size: 0.75rem;
+  font-weight: 550;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 176px;
+}
+
+.composer__attachment-meta {
+  font-size: 0.6875rem;
+  line-height: 1.2;
+  color: var(--text-tertiary);
+}
+
+.composer__attachment-x {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  color: var(--text-tertiary);
+  transition: background-color var(--t-fast), color var(--t-fast);
+}
+
+.composer__attachment-x:hover {
+  background-color: var(--bg-active);
   color: var(--danger);
+}
+
+.composer__attach-error {
+  margin: 0 var(--sp-2) var(--sp-1);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--danger);
+}
+
+/* Ikon berputar saat file sedang dibaca */
+.composer__spin {
+  animation: composerSpin 0.9s linear infinite;
+}
+
+@keyframes composerSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Tombol riset web aktif */
+.composer__tool--research.is-active {
+  color: var(--accent);
+  background-color: var(--accent-ring);
+}
+
+.composer__tool:disabled {
+  opacity: 0.5;
 }
 
 .composer__footer {

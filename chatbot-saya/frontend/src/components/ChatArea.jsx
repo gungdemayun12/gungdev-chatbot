@@ -34,6 +34,10 @@ export default function ChatArea({
   apiOnline,
   model,
   onModelChange,
+  daftarModel,
+  research,
+  onResearchChange,
+  onLampiranBerubah,
 }) {
   const scrollRef = useRef(null)
   const [showScrollBtn, setShowScrollBtn] = useState(false)
@@ -229,6 +233,10 @@ export default function ChatArea({
           placeholder={isEmpty ? 'Tanya apa saja ke GungDev…' : 'Balas GungDev…'}
           model={model}
           onModelChange={onModelChange}
+          daftarModel={daftarModel}
+          research={research}
+          onResearchChange={onResearchChange}
+          onLampiranBerubah={onLampiranBerubah}
         />
       </div>
 

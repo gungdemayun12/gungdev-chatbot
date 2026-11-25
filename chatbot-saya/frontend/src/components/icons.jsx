@@ -53,6 +53,11 @@ export {
   // Konten & fitur
   Sparkles,
   Brain,
+  Globe,
+  Image,
+  FileSearch,
+  Loader2,
+  Telescope,
   MessageSquarePlus,
   MessagesSquare,
   FileText,

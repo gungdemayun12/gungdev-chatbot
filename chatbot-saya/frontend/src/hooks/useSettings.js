@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { KEYS, readJSON, writeJSON } from '../lib/storage.js'
 import { DEFAULT_API_URL } from '../lib/api.js'
 import { SYSTEM_PROMPT_DASAR } from '../lib/prompt.js'
+import { MODEL_DEFAULT, MODEL_ID } from '../lib/models.js'
 import { getThemePref, applyTheme } from '../lib/theme.js'
 
 export const DEFAULT_SETTINGS = {
@@ -37,7 +38,7 @@ export const DEFAULT_SETTINGS = {
   apiUrl: '',
   // Pilihan model dari UI. Nilainya NAMA MODEL ASLI, sama dengan
   // MODEL_DIIZINKAN di backend. Server yang memvalidasi.
-  model: 'openai/gpt-oss-120b',
+  model: MODEL_DEFAULT,
   temperature: 0.4,
   maxTokens: 2048,
 }
@@ -91,8 +92,8 @@ function mergeSettings(raw) {
   //   - "pintar"/"cepat" (ID publik dari versi sebelumnya), dan
   //   - "llama-3.3-70b-versatile" / "llama-3.1-8b-instant" yang sudah
   //     dimatikan Groq untuk akun gratis (kini Enterprise).
-  if (!['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b'].includes(merged.model)) {
-    merged.model = 'openai/gpt-oss-120b'
+  if (!MODEL_ID.includes(merged.model)) {
+    merged.model = MODEL_DEFAULT
   }
 
   // --- bersihkan sisa data sensitif versi lama ---

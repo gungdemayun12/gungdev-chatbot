@@ -99,6 +99,25 @@ export async function fetchUsage(baseUrl, { signal } = {}) {
 }
 
 /**
+ * Mengambil kemampuan tiap model (gambar / riset web).
+ *
+ * Dipakai untuk menandai model di menu dan memilih model otomatis saat
+ * pengguna melampirkan gambar. Mengembalikan null bila backend lama
+ * belum punya /capabilities, agar UI tetap berjalan.
+ */
+export async function fetchCapabilities(baseUrl, { signal } = {}) {
+  try {
+    const res = await fetch(`${normalizeUrl(baseUrl)}/capabilities`, { signal })
+    if (!res.ok) return null
+    const data = await res.json()
+    if (!Array.isArray(data?.models)) return null
+    return data
+  } catch {
+    return null
+  }
+}
+
+/**
  * Memanggil /chat/stream dan memanggil callback untuk tiap potongan teks.
  *
  * @param {object} params
@@ -108,10 +127,15 @@ export async function fetchUsage(baseUrl, { signal } = {}) {
  * @param {string} params.systemPrompt Instruksi kustom (opsional)
  * @param {number} params.temperature
  * @param {number} params.maxTokens
- * @param {string} params.model        ID publik model ("pintar" / "cepat").
- *                                     Server yang menerjemahkan ke model asli.
+ * @param {string} params.model        Nama model yang dipilih pengguna.
+ *                                     Server memvalidasi & bisa menggantinya
+ *                                     (mis. gambar butuh model vision).
+ * @param {string[]} params.images     Gambar sebagai data URL base64.
+ * @param {Array}  params.files        File teks hasil ekstraksi: [{name, text}]
+ * @param {boolean} params.research    True = minta riset web.
  * @param {AbortSignal} params.signal  Untuk tombol "Stop"
  * @param {(delta: string) => void} params.onDelta
+ * @param {(meta: object) => void} params.onMeta  Info model yang dipakai
  * @param {() => void} params.onDone
  */
 export async function streamChat({
@@ -122,8 +146,12 @@ export async function streamChat({
   temperature,
   maxTokens,
   model,
+  images = [],
+  files = [],
+  research = false,
   signal,
   onDelta,
+  onMeta,
   onDone,
 }) {
   const res = await fetch(`${normalizeUrl(baseUrl)}/chat/stream`, {
@@ -136,6 +164,11 @@ export async function streamChat({
       temperature: typeof temperature === 'number' ? temperature : undefined,
       max_tokens: typeof maxTokens === 'number' ? maxTokens : undefined,
       model: model || undefined,
+      // Field baru: hanya dikirim bila benar-benar dipakai, supaya body
+      // tetap kecil dan kompatibel dengan backend versi lama.
+      images: images.length ? images : undefined,
+      files: files.length ? files : undefined,
+      research: research || undefined,
     }),
     signal,
   })
@@ -190,6 +223,10 @@ export async function streamChat({
           }
 
           if (obj.error) throw new Error(obj.error)
+          // Info model yang benar-benar dipakai (mis. gambar -> model
+          // vision). Klien lama mengabaikan ini; UI baru memakainya
+          // untuk memberi tahu pengguna dengan jujur.
+          if (obj.meta && typeof onMeta === 'function') onMeta(obj.meta)
           if (typeof obj.delta === 'string' && obj.delta.length > 0) onDelta(obj.delta)
           if (obj.done) {
             onDone()

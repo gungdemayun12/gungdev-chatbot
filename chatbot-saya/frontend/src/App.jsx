@@ -7,7 +7,7 @@
  *   - pintasan keyboard global
  *   - dialog: ganti nama, konfirmasi hapus, pengaturan, pintasan
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 
 import Sidebar from './components/Sidebar.jsx'
@@ -20,7 +20,8 @@ import ToastStack from './components/Toast.jsx'
 import { useSettings, resolveApiUrl } from './hooks/useSettings.js'
 import { useSessions } from './hooks/useSessions.js'
 import { useToasts } from './hooks/useToasts.js'
-import { checkHealth, streamChat, fetchUsage } from './lib/api.js'
+import { checkHealth, streamChat, fetchUsage, fetchCapabilities } from './lib/api.js'
+import { gabungKemampuan, modelUntukGambar, modelUntukRiset, cariModel } from './lib/models.js'
 import {
   downloadFile,
   safeFilename,
@@ -63,6 +64,34 @@ export default function App() {
   const [streamingText, setStreamingText] = useState('')
   const [streamingId, setStreamingId] = useState(null)
   const [apiOnline, setApiOnline] = useState(false)
+
+  /* ---------------- Kemampuan model (gambar / riset) ---------------- */
+  // Diambil dari backend sekali saat muat, lalu dipakai untuk menandai
+  // menu model dan memilih model otomatis. Bila backend lama belum punya
+  // /capabilities, nilai cadangan di models.js yang dipakai.
+  const [capabilities, setCapabilities] = useState(null)
+  const [research, setResearch] = useState(false)
+
+  const daftarModel = useMemo(() => gabungKemampuan(capabilities), [capabilities])
+
+  useEffect(() => {
+    let batal = false
+    const ambil = async () => {
+      const data = await fetchCapabilities(apiUrl)
+      if (!batal) setCapabilities(data)
+    }
+    const boot = setTimeout(ambil, 400)
+    return () => {
+      batal = true
+      clearTimeout(boot)
+    }
+  }, [apiUrl])
+
+  /* Model aktif beserta kemampuannya. */
+  const modelAktif = useMemo(
+    () => daftarModel.find((m) => m.id === settings.model) || cariModel(settings.model),
+    [daftarModel, settings.model],
+  )
 
   /* UI: sidebar & modal */
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -126,7 +155,7 @@ export default function App() {
 
   /* ---------------- Inti: mengirim pesan ---------------- */
   const runCompletion = useCallback(
-    async ({ session, history, message, assistantMessageId = null }) => {
+    async ({ session, history, message, assistantMessageId = null, images = [], files = [], pakaiRiset = false }) => {
       setLoading(true)
       setError(null)
       setStreamingText('')
@@ -145,6 +174,7 @@ export default function App() {
       }
 
       let buffer = ''
+      let catatanModel = null
 
       try {
         await streamChat({
@@ -155,7 +185,16 @@ export default function App() {
           temperature: settings.temperature,
           maxTokens: settings.maxTokens,
           model: settings.model,
+          images,
+          files,
+          research: pakaiRiset,
           signal: controller.signal,
+          onMeta: (meta) => {
+            /* Server memberi tahu bila model diganti otomatis
+               (mis. gambar butuh model vision). Disimpan dulu, lalu
+               ditampilkan bersama jawaban agar tidak mendahului teks. */
+            if (meta?.penyesuaian) catatanModel = meta.penyesuaian
+          },
           onDelta: (delta) => {
             buffer += delta
             const id = ensureAssistantSlot()
@@ -164,7 +203,9 @@ export default function App() {
           },
           onDone: () => {
             const id = ensureAssistantSlot()
-            setMessageContent(session.id, id, buffer)
+            const akhir = catatanModel ? `${buffer}\n\n> ℹ️ ${catatanModel}` : buffer
+            setMessageContent(session.id, id, akhir)
+            buffer = akhir
           },
         })
 
@@ -233,20 +274,47 @@ export default function App() {
 
   /** Mengirim pesan dari kotak input (membuat sesi bila belum ada). */
   const handleSend = useCallback(
-    async (rawText) => {
-      const text = (rawText ?? input).trim()
-      if (!text || loading) return
+    async (payload) => {
+      /* Composer mengirim objek {text, images, files, research, ringkas}.
+         Dukungan bentuk lama (string) dipertahankan agar tidak ada
+         pemanggil lain yang rusak. */
+      const data =
+        typeof payload === 'string' ? { text: payload } : payload || {}
+      const text = (data.text ?? input).trim()
+      const images = data.images || []
+      const files = data.files || []
+      const pakaiRiset = Boolean(data.research)
+
+      if ((!text && !images.length && !files.length) || loading) return
 
       const session = ensureSession()
 
       /* Simpan riwayat SEBELUM pesan baru ditambahkan. */
       const history = session.messages.map((m) => ({ role: m.role, content: m.content }))
 
-      addMessage(session.id, { role: 'user', content: text })
-      setInput('')
-      lastRequestRef.current = { sessionId: session.id, message: text, history }
+      /* Gelembung pesan pengguna: teks + penanda lampiran, supaya
+         riwayat tetap bisa dibaca setelah halaman dimuat ulang
+         (isi gambar tidak disimpan, hanya namanya). */
+      const penanda = []
+      if (images.length) penanda.push(`🖼️ ${images.length} gambar`)
+      if (files.length) penanda.push(`📎 ${files.map((f) => f.name).join(', ')}`)
+      if (pakaiRiset) penanda.push('🌐 riset web')
+      const teksTampil = penanda.length
+        ? `${text}\n\n_${penanda.join(' · ')}_`
+        : text
 
-      await runCompletion({ session, history, message: text })
+      addMessage(session.id, { role: 'user', content: teksTampil })
+      setInput('')
+      lastRequestRef.current = {
+        sessionId: session.id,
+        message: text,
+        history,
+        images,
+        files,
+        pakaiRiset,
+      }
+
+      await runCompletion({ session, history, message: text, images, files, pakaiRiset })
     },
     [input, loading, ensureSession, addMessage, runCompletion],
   )
@@ -262,7 +330,14 @@ export default function App() {
     }
     const session = sessions.find((s) => s.id === req.sessionId)
     if (!session) return
-    await runCompletion({ session, history: req.history, message: req.message })
+    await runCompletion({
+      session,
+      history: req.history,
+      message: req.message,
+      images: req.images,
+      files: req.files,
+      pakaiRiset: req.pakaiRiset,
+    })
   }, [sessions, runCompletion, ping, apiOnline, toast])
 
   /** Regenerasi jawaban pada index tertentu. */
@@ -387,6 +462,56 @@ export default function App() {
 
   const handleCopyNotice = useCallback(() => toast('Tersalin ke clipboard.', 'success'), [toast])
 
+  /* ---------------- Lampiran & riset: ganti model otomatis ------------- */
+  /**
+   * Dipanggil Composer setiap kali lampiran berubah.
+   *
+   * Bila pengguna melampirkan gambar tetapi model aktifnya bukan model
+   * vision, model diganti otomatis ke model vision — sehingga gambar
+   * benar-benar terbaca, bukan gagal. Pengguna diberi tahu lewat toast
+   * agar tidak bingung melihat nama model berubah.
+   */
+  const handleLampiranBerubah = useCallback(
+    (info) => {
+      const adaGambar = info?.gambar?.length > 0
+      if (!adaGambar) return
+
+      const target = modelUntukGambar(capabilities)
+      if (modelAktif?.vision || settings.model === target) return
+
+      updateSettings({ model: target })
+      toast(
+        `Model diganti ke ${target} karena gambar hanya bisa dibaca model tersebut.`,
+        'info',
+      )
+    },
+    [capabilities, modelAktif, settings.model, updateSettings, toast],
+  )
+
+  /**
+   * Mengaktifkan/mematikan riset web.
+   *
+   * Sama seperti gambar: model yang tidak punya browser_search diganti
+   * otomatis, supaya "riset" benar-benar mencari di internet dan bukan
+   * jawaban dari ingatan yang terlihat seperti riset.
+   */
+  const handleResearchChange = useCallback(
+    (aktif) => {
+      setResearch(aktif)
+      if (!aktif) return
+
+      const target = modelUntukRiset(capabilities)
+      if (modelAktif?.browser || settings.model === target) return
+
+      updateSettings({ model: target })
+      toast(
+        `Model diganti ke ${target} karena hanya model itu yang bisa riset web.`,
+        'info',
+      )
+    },
+    [capabilities, modelAktif, settings.model, updateSettings, toast],
+  )
+
   const handleFeedback = useCallback(
     (messageId, fb) => {
       if (!activeSession) return
@@ -484,6 +609,10 @@ export default function App() {
           apiOnline={apiOnline}
           model={settings.model}
           onModelChange={(id) => updateSettings({ model: id })}
+          daftarModel={daftarModel}
+          research={research}
+          onResearchChange={handleResearchChange}
+          onLampiranBerubah={handleLampiranBerubah}
         />
       </main>
 

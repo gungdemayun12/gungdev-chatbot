@@ -40,6 +40,7 @@ CATATAN DEPLOY VERCEL:
 # ---------------------------------------------------------------------
 # 1. IMPORT LIBRARY
 # ---------------------------------------------------------------------
+import base64               # decode file biner yang dikirim klien
 import json                 # payload SSE (streaming)
 import logging              # log rapi di terminal
 import os                   # membaca environment variable
@@ -51,6 +52,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+import lampiran             # ekstraksi teks file & validasi gambar
 import usage                # pencatat & penyedia data kuota (usage)
 
 # python-dotenv hanya dipakai saat pengembangan lokal.
@@ -158,6 +160,39 @@ MODEL_DIIZINKAN = [
 # di luar daftar.
 MODEL_DEFAULT_PILIHAN = "openai/gpt-oss-120b"
 
+# ---------------------------------------------------------------------
+# KEMAMPUAN KHUSUS PER MODEL
+# ---------------------------------------------------------------------
+# Tidak semua model bisa melakukan semua hal. Dua daftar di bawah adalah
+# SATU-SATUNYA sumber kebenaran, dan sengaja di sisi server supaya
+# perilakunya tetap benar walau frontend diubah orang lain.
+#
+# 1. MODEL_VISION — bisa "melihat" gambar.
+#    Per dokumentasi Groq (console.groq.com/docs/vision), dari model
+#    gratis hanya qwen/qwen3.8-27b yang multimodal. Model GPT-OSS
+#    TIDAK bisa menerima gambar: bila dikirimi gambar, Groq membalas
+#    error 400. Karena itu server otomatis memindahkan permintaan
+#    bergambar ke model vision, bukan membiarkannya gagal.
+MODEL_VISION = {
+    "qwen/qwen3.8-27b",
+}
+
+# Model yang dipakai bila pesan berisi gambar tetapi pilihan pengguna
+# bukan model vision.
+MODEL_VISION_DEFAULT = "qwen/qwen3.8-27b"
+
+# 2. MODEL_BROWSER — bisa melakukan riset web memakai tool bawaan Groq
+#    "browser_search" (dijalankan di sisi Groq, tanpa API key tambahan).
+#    Per dokumentasi Groq, hanya keluarga GPT-OSS yang mendukungnya.
+MODEL_BROWSER = {
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+}
+
+# Model pengganti bila pengguna meminta riset web dengan model yang
+# tidak mendukung browser_search.
+MODEL_BROWSER_DEFAULT = "openai/gpt-oss-120b"
+
 
 def model_dari_pilihan(pilihan: Optional[str]) -> str:
     """
@@ -191,9 +226,87 @@ def model_dari_pilihan(pilihan: Optional[str]) -> str:
     return MODEL_DEFAULT_PILIHAN
 
 
+def model_untuk_permintaan(
+    pilihan: Optional[str],
+    ada_gambar: bool = False,
+    penelitian: bool = False,
+) -> tuple[str, Optional[str]]:
+    """
+    Memilih model yang BENAR-BENAR dipakai, sesuai kebutuhan permintaan.
+
+    Aturan:
+      - Ada gambar  -> model harus multimodal (MODEL_VISION).
+      - Minta riset -> model harus bisa browser_search (MODEL_BROWSER).
+      - Selain itu  -> hormati pilihan pengguna apa adanya.
+
+    Bila pilihan pengguna tidak memenuhi syarat, model diganti otomatis
+    dan dikembalikan catatan penyesuaian, sehingga UI bisa memberi tahu
+    pengguna dengan jujur alih-alih membiarkan permintaan gagal dengan
+    error 400 dari penyedia.
+
+    Bila gambar DAN riset diminta sekaligus, riset diutamakan: model
+    vision tidak punya browser_search, dan jawaban riset yang dikarang
+    lebih berbahaya daripada gambar yang diabaikan (pengguna tetap
+    mendapat pemberitahuan lewat `catatan`).
+
+    Mengembalikan: (nama_model, catatan_penyesuaian_atau_None)
+    """
+    dipilih = model_dari_pilihan(pilihan)
+    model = dipilih
+
+    if penelitian and model not in MODEL_BROWSER:
+        logger.info(
+            "Riset web diminta dengan model %s yang tidak mendukung "
+            "browser_search. Beralih ke %s.",
+            model,
+            MODEL_BROWSER_DEFAULT,
+        )
+        model = MODEL_BROWSER_DEFAULT
+    elif ada_gambar and model not in MODEL_VISION:
+        logger.info(
+            "Gambar dilampirkan tetapi model %s bukan model vision. "
+            "Beralih ke %s.",
+            model,
+            MODEL_VISION_DEFAULT,
+        )
+        model = MODEL_VISION_DEFAULT
+
+    return model, _catatan_penyesuaian(model, dipilih, ada_gambar, penelitian)
+
+
+def _catatan_penyesuaian(
+    model_final: str,
+    dipilih: str,
+    ada_gambar: bool,
+    penelitian: bool,
+) -> Optional[str]:
+    """Menjelaskan ke pengguna mengapa modelnya diganti (bahasa awam)."""
+    if model_final == dipilih:
+        return None
+
+    if penelitian and model_final in MODEL_BROWSER:
+        alasan = "belum mendukung riset web"
+        if ada_gambar:
+            alasan = "belum bisa riset web sekaligus membaca gambar"
+        return (
+            f"Model {dipilih} {alasan}, jadi permintaan ini diproses oleh "
+            f"{model_final}."
+        )
+
+    if model_final in MODEL_VISION:
+        return (
+            f"Model {dipilih} belum bisa membaca gambar, jadi permintaan ini "
+            f"otomatis diproses oleh {model_final}."
+        )
+
+    return (
+        f"Model {dipilih} belum mendukung permintaan ini, jadi diproses "
+        f"oleh {model_final}."
+    )
+
+
 def opsi_model_aktif() -> str:
     """
-    Nama model yang dianggap aktif untuk menghitung batas kuota di
     panel Usage.
 
     Panel Usage bersifat global (bukan per pengguna), jadi dipakai model
@@ -295,6 +408,43 @@ class ChatRequest(BaseModel):
     # MODEL_DIIZINKAN; nilai di luar daftar diganti model default.
     model: Optional[str] = Field(None, max_length=64, description="Pilihan model dari UI")
 
+    # --- Lampiran (semua opsional; body lama tetap sah) ---
+
+    # Gambar sebagai data URL base64: "data:image/png;base64,...".
+    # Maks 3 gambar (batas Groq). Hanya diproses model vision; bila model
+    # yang dipilih bukan model vision, server otomatis mengalihkannya.
+    images: List[str] = Field(
+        default_factory=list,
+        description="Gambar dalam format data URL base64 (maks 3)",
+    )
+
+    # File yang isinya SUDAH diekstrak jadi teks di browser, format:
+    #   [{"name": "laporan.pdf", "text": "..."}]
+    #
+    # Kenapa diekstrak di browser: agar tidak perlu mengunggah file biner
+    # besar ke serverless function (batas body Vercel 4,5 MB), dan agar
+    # PDF/gambar-scan bisa dibaca memakai pustaka yang sudah ada di
+    # browser. Backend tetap mengekstrak sendiri bila klien hanya
+    # mengirim base64 mentah (lihat `file_base64`).
+    files: List[dict] = Field(
+        default_factory=list,
+        description="File berupa teks hasil ekstraksi: [{name, text}]",
+    )
+
+    # Jalur cadangan: file biner base64 yang diekstrak di SERVER.
+    # Format: [{"name": "laporan.pdf", "data": "<base64>"}]
+    # Berguna untuk klien non-browser / API langsung.
+    file_base64: List[dict] = Field(
+        default_factory=list,
+        description="File biner base64 untuk diekstrak di server: [{name, data}]",
+    )
+
+    # Minta AI melakukan riset di web (memakai browser_search bawaan Groq).
+    research: bool = Field(
+        False,
+        description="True = lakukan riset web sebelum menjawab",
+    )
+
 
 class ChatResponse(BaseModel):
     """Response /chat (kontrak lama, tidak berubah): {"reply": "..."}"""
@@ -326,8 +476,24 @@ def build_messages(
     message: str,
     history: Optional[Sequence[dict]] = None,
     system_prompt: Optional[str] = None,
+    images: Optional[Sequence[str]] = None,
+    blok_lampiran: str = "",
 ) -> List[dict]:
-    """Menyusun [system] + [riwayat 20 terakhir] + [pesan baru]."""
+    """
+    Menyusun [system] + [riwayat 20 terakhir] + [pesan baru].
+
+    Pesan baru berisi `message` + blok isi file (bila ada). Bila ada
+    gambar, isi pesan diubah menjadi format multimodal OpenAI:
+
+        {"role": "user", "content": [
+            {"type": "text", "text": "..."},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}},
+        ]}
+
+    Riwayat lama TIDAK ikut membawa gambar (hanya teks). Ini disengaja:
+    gambar berukuran besar per pesan akan cepat menghabiskan kuota token,
+    dan model hanya perlu melihat gambar pada giliran pertanyaannya.
+    """
     messages: List[dict] = [
         {"role": "system", "content": (system_prompt or DEFAULT_SYSTEM_PROMPT).strip()}
     ]
@@ -341,7 +507,17 @@ def build_messages(
         if role in ("user", "assistant") and isinstance(content, str) and content.strip():
             messages.append({"role": role, "content": content})
 
-    messages.append({"role": "user", "content": message})
+    teks_final = f"{message}{blok_lampiran}"
+    daftar_gambar = [g for g in (images or []) if isinstance(g, str) and g.strip()]
+
+    if not daftar_gambar:
+        messages.append({"role": "user", "content": teks_final})
+        return messages
+
+    isi: List[dict] = [{"type": "text", "text": teks_final}]
+    for url in daftar_gambar:
+        isi.append({"type": "image_url", "image_url": {"url": url}})
+    messages.append({"role": "user", "content": isi})
     return messages
 
 
@@ -349,12 +525,20 @@ def resolve_options(request: ChatRequest) -> dict:
     """
     Menentukan model, temperature, & batas token final.
 
-    `model` di sini adalah NAMA MODEL ASLI hasil terjemahan dari ID
-    publik yang dikirim UI — bukan nilai mentah dari klien.
+    Model dipilih dengan mempertimbangkan isi permintaan: gambar butuh
+    model vision, riset web butuh model dengan browser_search. Bila
+    pilihan pengguna tidak memenuhi syarat, model diganti otomatis dan
+    `penyesuaian` berisi penjelasan untuk pengguna.
     """
-    model = model_dari_pilihan(request.model)
+    ada_gambar = bool(request.images)
+    model, penyesuaian = model_untuk_permintaan(
+        request.model,
+        ada_gambar=ada_gambar,
+        penelitian=bool(request.research),
+    )
     return {
         "model": model,
+        "penyesuaian": penyesuaian,
         "temperature": (
             request.temperature
             if request.temperature is not None
@@ -366,6 +550,84 @@ def resolve_options(request: ChatRequest) -> dict:
             else DEFAULT_MAX_TOKENS
         ),
     }
+
+
+def siapkan_lampiran(request: ChatRequest) -> tuple[str, List[str]]:
+    """
+    Mengubah lampiran pada request menjadi (blok_teks, daftar_gambar).
+
+    Tiga sumber digabung:
+      1. `files`       -> teks yang sudah diekstrak di browser (paling umum)
+      2. `file_base64` -> file biner yang diekstrak di server (klien API)
+      3. `images`      -> data URL gambar, diteruskan ke model vision
+
+    Semua kesalahan dilaporkan sebagai HTTP 400 dengan pesan Bahasa
+    Indonesia yang jelas, supaya pengguna tahu file mana yang bermasalah.
+    """
+    hasil: List[dict] = []
+
+    # --- 1. Teks yang sudah diekstrak klien ---
+    for item in request.files[: lampiran.MAKS_JUMLAH_FILE]:
+        if not isinstance(item, dict):
+            continue
+        nama = str(item.get("name") or "lampiran").strip()[:120]
+        teks = item.get("text")
+
+        # Klien bisa mengirim string mentah; samakan bentuknya.
+        if isinstance(teks, (list, dict)):
+            teks = json.dumps(teks, ensure_ascii=False)
+        teks = "" if teks is None else str(teks)
+
+        if not teks.strip():
+            continue
+
+        teks = teks.replace("\r\n", "\n").strip()
+        terpotong = len(teks) > lampiran.MAKS_KARAKTER_PER_FILE
+        if terpotong:
+            teks = teks[: lampiran.MAKS_KARAKTER_PER_FILE]
+
+        hasil.append(
+            {
+                "nama": nama,
+                "teks": teks,
+                "terpotong": terpotong,
+                "jenis": str(item.get("type") or "teks")[:40],
+            }
+        )
+
+    # --- 2. File biner yang diekstrak server ---
+    for item in request.file_base64[: lampiran.MAKS_JUMLAH_FILE]:
+        if not isinstance(item, dict):
+            continue
+        nama = str(item.get("name") or "lampiran").strip()[:120]
+        data_b64 = item.get("data")
+        if not isinstance(data_b64, str) or not data_b64.strip():
+            continue
+        try:
+            mentah = base64.b64decode(data_b64, validate=False)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=400,
+                detail=f"File '{nama}' tidak dapat dibaca (base64 tidak valid).",
+            ) from exc
+
+        try:
+            hasil.append(lampiran.ekstrak_file(nama, mentah))
+        except lampiran.LampiranError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # --- 3. Gambar ---
+    try:
+        gambar = lampiran.validasi_gambar(request.images)
+    except lampiran.LampiranError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if hasil:
+        logger.info("Lampiran diproses: %s", lampiran.ringkas_untuk_log(hasil))
+    if gambar:
+        logger.info("%d gambar dilampirkan.", len(gambar))
+
+    return lampiran.susun_blok_lampiran(hasil), gambar
 
 
 # ---------------------------------------------------------------------
@@ -512,6 +774,71 @@ def _groq_headers() -> dict:
     }
 
 
+def _groq_payload(model: str, messages: List[dict], opsi: dict, streaming: bool) -> dict:
+    """
+    Menyusun body permintaan ke Groq.
+
+    Riset web memakai tool bawaan Groq `browser_search`, yang berjalan
+    di sisi server Groq — tidak perlu API key pencarian tambahan dan
+    tidak perlu layanan pihak ketiga.
+
+    Catatan penting dari dokumentasi Groq:
+      - browser_search hanya untuk keluarga GPT-OSS.
+      - `tool_choice: "required"` membuat model WAJIB mencari dulu,
+        bukan menjawab dari ingatan. Itu yang membuat risetnya nyata.
+      - reasoning rendah disarankan agar sesi browsing tidak terlalu
+        panjang (hemat token kuota gratis).
+      - browser_search tidak kompatibel dengan structured outputs; kita
+        tidak memakainya, jadi aman.
+    """
+    payload = {
+        "model": model,
+        "messages": messages,
+        "temperature": opsi["temperature"],
+        "max_completion_tokens": opsi["max_tokens"],
+        "stream": streaming,
+    }
+
+    if opsi.get("penelitian"):
+        payload["tools"] = [{"type": "browser_search"}]
+        payload["tool_choice"] = "required"
+        # Riset butuh waktu; beri ruang token lebih besar agar jawaban
+        # tidak terpotong di tengah. Tetap di bawah batas 8.000 TPM.
+        payload["max_completion_tokens"] = max(opsi["max_tokens"], 2048)
+
+    return payload
+
+
+def _teks_dari_pesan(pesan: dict) -> str:
+    """
+    Mengambil teks jawaban dari satu objek message Groq.
+
+    Model dengan tool kadang mengembalikan `content` kosong dan
+    menaruh hasilnya di `reasoning`/`annotations`. Kita tetap
+    mengutamakan `content`, lalu memakai cadangan bila kosong.
+    """
+    isi = pesan.get("content")
+    if isinstance(isi, str) and isi.strip():
+        return isi.strip()
+
+    # Sebagian respons membungkus konten dalam list (format multimodal).
+    if isinstance(isi, list):
+        bagian = [
+            b.get("text", "")
+            for b in isi
+            if isinstance(b, dict) and isinstance(b.get("text"), str)
+        ]
+        gabung = "".join(bagian).strip()
+        if gabung:
+            return gabung
+
+    cadangan = pesan.get("reasoning")
+    if isinstance(cadangan, str) and cadangan.strip():
+        return cadangan.strip()
+
+    return ""
+
+
 async def groq_complete(messages: List[dict], opsi: dict) -> str:
     """
     Meminta jawaban lengkap (non-streaming) ke Groq.
@@ -520,21 +847,21 @@ async def groq_complete(messages: List[dict], opsi: dict) -> str:
     umumnya karena model berubah jadi Enterprise), otomatis dicoba
     model gratis lain sebelum menyerah. Dengan begitu situs tetap
     hidup meski GROQ_MODEL di environment sudah usang.
+
+    PENTING: cadangan model DINONAKTIFKAN bila ada gambar. Mengganti ke
+    model yang tidak multimodal hanya akan menghasilkan error 400 dan
+    pesan yang membingungkan pengguna.
     """
-    kandidat = [opsi.get("model") or GROQ_MODEL] + [
-        m for m in _MODEL_GROQ_CADANGAN if m != (opsi.get("model") or GROQ_MODEL)
-    ]
+    utama = opsi.get("model") or GROQ_MODEL
+    if opsi.get("ada_gambar"):
+        kandidat = [utama]
+    else:
+        kandidat = [utama] + [m for m in _MODEL_GROQ_CADANGAN if m != utama]
     error_terakhir: Optional[HTTPException] = None
 
     async with httpx.AsyncClient(timeout=TIMEOUT_GROQ) as http:
         for model in kandidat:
-            payload = {
-                "model": model,
-                "messages": messages,
-                "temperature": opsi["temperature"],
-                "max_completion_tokens": opsi["max_tokens"],
-                "stream": False,
-            }
+            payload = _groq_payload(model, messages, opsi, streaming=False)
             res = await http.post(
                 f"{GROQ_BASE_URL}/chat/completions",
                 headers=_groq_headers(),
@@ -560,16 +887,18 @@ async def groq_complete(messages: List[dict], opsi: dict) -> str:
 
             data = res.json()
             try:
-                isi = data["choices"][0]["message"]["content"] or ""
+                pesan = data["choices"][0]["message"] or {}
             except (KeyError, IndexError, TypeError):
-                isi = ""
+                pesan = {}
 
-            if not isi.strip():
+            isi = _teks_dari_pesan(pesan)
+
+            if not isi:
                 raise HTTPException(
                     status_code=502,
                     detail="Layanan AI mengembalikan jawaban kosong. Silakan coba lagi.",
                 )
-            return isi.strip()
+            return isi
 
     raise error_terakhir or HTTPException(
         status_code=502, detail=pesan_error_http(404)
@@ -583,21 +912,18 @@ async def groq_stream(messages: List[dict], opsi: dict) -> AsyncIterator[str]:
     Punya mekanisme cadangan model yang sama dengan groq_complete():
     bila model utama 404, coba model gratis berikutnya. Penentuan model
     dilakukan SEBELUM data dikirim ke pengguna, jadi aman untuk dialihkan.
+    Cadangan dinonaktifkan bila ada gambar (lihat groq_complete).
     """
-    kandidat = [opsi.get("model") or GROQ_MODEL] + [
-        m for m in _MODEL_GROQ_CADANGAN if m != (opsi.get("model") or GROQ_MODEL)
-    ]
+    utama = opsi.get("model") or GROQ_MODEL
+    if opsi.get("ada_gambar"):
+        kandidat = [utama]
+    else:
+        kandidat = [utama] + [m for m in _MODEL_GROQ_CADANGAN if m != utama]
 
     async with httpx.AsyncClient(timeout=TIMEOUT_GROQ) as http:
         res = None
         for model in kandidat:
-            payload = {
-                "model": model,
-                "messages": messages,
-                "temperature": opsi["temperature"],
-                "max_completion_tokens": opsi["max_tokens"],
-                "stream": True,
-            }
+            payload = _groq_payload(model, messages, opsi, streaming=True)
             permintaan = http.build_request(
                 "POST",
                 f"{GROQ_BASE_URL}/chat/completions",
@@ -657,7 +983,14 @@ async def groq_stream(messages: List[dict], opsi: dict) -> AsyncIterator[str]:
                     delta = obj["choices"][0]["delta"].get("content") or ""
                 except (KeyError, IndexError, TypeError):
                     delta = ""
-                if delta:
+                # Sebagian respons mengirim content berupa list bagian.
+                if isinstance(delta, list):
+                    delta = "".join(
+                        b.get("text", "")
+                        for b in delta
+                        if isinstance(b, dict) and isinstance(b.get("text"), str)
+                    )
+                if isinstance(delta, str) and delta:
                     yield delta
         finally:
             # Tutup koneksi HTTP ke Groq, termasuk bila pengguna
@@ -668,11 +1001,64 @@ async def groq_stream(messages: List[dict], opsi: dict) -> AsyncIterator[str]:
 # ---------------------------------------------------------------------
 # 10. PEMANGGILAN KE OLLAMA (lokal)
 # ---------------------------------------------------------------------
+def _pesan_untuk_ollama(messages: List[dict]) -> List[dict]:
+    """
+    Mengubah pesan format OpenAI (dipakai Groq) ke format Ollama.
+
+    Bedanya: Ollama menerima `content` sebagai STRING dan gambar
+    diletakkan di field terpisah `images` berisi base64 MURNI (tanpa
+    awalan "data:image/png;base64,").
+
+    Tanpa konversi ini, permintaan bergambar akan ditolak Ollama dengan
+    error "cannot unmarshal array into ... field content of type string"
+    — persis yang terjadi saat pengembangan lokal.
+    """
+    hasil: List[dict] = []
+
+    for pesan in messages:
+        isi = pesan.get("content")
+
+        # Sudah string biasa (mayoritas riwayat & system prompt).
+        if isinstance(isi, str):
+            hasil.append({"role": pesan.get("role", "user"), "content": isi})
+            continue
+
+        # Format multimodal OpenAI: list berisi teks + image_url.
+        if isinstance(isi, list):
+            bagian_teks: List[str] = []
+            gambar: List[str] = []
+            for bagian in isi:
+                if not isinstance(bagian, dict):
+                    continue
+                if bagian.get("type") == "text" and isinstance(bagian.get("text"), str):
+                    bagian_teks.append(bagian["text"])
+                elif bagian.get("type") == "image_url":
+                    url = (bagian.get("image_url") or {}).get("url") or ""
+                    # Ollama mau base64 tanpa header data URL.
+                    if url.startswith("data:"):
+                        url = url.split(",", 1)[-1]
+                    if url:
+                        gambar.append(url)
+
+            baru = {
+                "role": pesan.get("role", "user"),
+                "content": "\n".join(bagian_teks),
+            }
+            if gambar:
+                baru["images"] = gambar
+            hasil.append(baru)
+            continue
+
+        hasil.append({"role": pesan.get("role", "user"), "content": str(isi or "")})
+
+    return hasil
+
+
 async def ollama_complete(messages: List[dict], opsi: dict) -> str:
     """Meminta jawaban lengkap ke Ollama lokal via HTTP API."""
     payload = {
         "model": OLLAMA_MODEL,
-        "messages": messages,
+        "messages": _pesan_untuk_ollama(messages),
         "stream": False,
         "options": {
             "temperature": opsi["temperature"],
@@ -697,7 +1083,7 @@ async def ollama_stream(messages: List[dict], opsi: dict) -> AsyncIterator[str]:
     """Menghasilkan potongan teks dari Ollama secara bertahap."""
     payload = {
         "model": OLLAMA_MODEL,
-        "messages": messages,
+        "messages": _pesan_untuk_ollama(messages),
         "stream": True,
         "options": {
             "temperature": opsi["temperature"],
@@ -749,7 +1135,6 @@ async def stream(messages: List[dict], opsi: dict) -> AsyncIterator[str]:
     async for delta in ollama_stream(messages, opsi):
         yield delta
 
-
 # ---------------------------------------------------------------------
 # 11b. PERKIRAAN TOKEN (untuk pencatatan usage)
 # ---------------------------------------------------------------------
@@ -761,9 +1146,27 @@ def _perkiraan_token(messages: List[dict], jawaban: str) -> int:
     tidak selalu tersedia (mis. saat streaming). Perkiraan kasar
     ~4 karakter per token sudah cukup untuk indikator pemakaian —
     dan angka PASTI tetap datang dari header kuota penyedia.
+
+    `content` bisa berupa string (biasa) atau list bagian (multimodal),
+    jadi keduanya dihitung dengan aman.
     """
+    def panjang_isi(isi) -> int:
+        if isinstance(isi, str):
+            return len(isi)
+        if isinstance(isi, list):
+            total = 0
+            for bagian in isi:
+                if isinstance(bagian, dict):
+                    total += len(str(bagian.get("text", "")))
+                    # Gambar memakan token jauh lebih besar; beri
+                    # perkiraan tetap agar angka tidak menyesatkan.
+                    if bagian.get("type") == "image_url":
+                        total += 1000
+            return total
+        return len(str(isi or ""))
+
     try:
-        panjang = sum(len(str(m.get("content", ""))) for m in messages)
+        panjang = sum(panjang_isi(m.get("content")) for m in messages)
         panjang += len(jawaban or "")
         return max(1, panjang // 4)
     except Exception:  # noqa: BLE001
@@ -815,6 +1218,132 @@ async def usage_check():
 
 
 # ---------------------------------------------------------------------
+# 11d. SYSTEM PROMPT TAMBAHAN: RISET WEB & LAMPIRAN
+# ---------------------------------------------------------------------
+# Instruksi ini ditambahkan HANYA bila fiturnya dipakai, sehingga
+# percakapan biasa tetap memakai prompt dasar yang ringkas (hemat token).
+PROMPT_RISET = (
+    "Pengguna meminta RISET WEB. Kamu punya akses penjelajah web. "
+    "Aturan: (1) Selalu cari informasi terbaru di web sebelum menjawab, "
+    "jangan mengandalkan ingatan. (2) Utamakan sumber yang kredibel dan "
+    "terbaru. (3) Sebutkan sumbernya secara ringkas (nama situs + tanggal "
+    "bila ada) agar pengguna bisa memeriksa sendiri. (4) Bila informasi "
+    "tidak ditemukan atau sumber saling bertentangan, katakan terus "
+    "terang. (5) Jangan mengarang kutipan, angka, atau tautan."
+)
+
+PROMPT_LAMPIRAN = (
+    "Pengguna melampirkan berkas. Baca seluruh isinya dengan teliti lalu "
+    "jawab berdasarkan ISI BERKAS itu, bukan dugaan. Bila pertanyaan tidak "
+    "bisa dijawab dari berkas, katakan bagian mana yang tidak ada. Jangan "
+    "mengarang isi berkas."
+)
+
+PROMPT_GAMBAR = (
+    "Pengguna melampirkan gambar. Amati isinya secara rinci (teks, objek, "
+    "tata letak, angka) lalu jawab berdasarkan apa yang benar-benar "
+    "terlihat. Bila ada bagian yang buram atau tidak terbaca, katakan "
+    "demikian alih-alih menebak."
+)
+
+
+def susun_system_prompt(
+    dasar: Optional[str],
+    penelitian: bool = False,
+    ada_lampiran: bool = False,
+    ada_gambar: bool = False,
+) -> str:
+    """
+    Menggabungkan system prompt dasar dengan instruksi tambahan yang
+    relevan. Tambahan ditaruh di AKHIR agar mudah dibaca model dan tidak
+    menimpa kepribadian dasar GungDev.
+    """
+    bagian = [(dasar or DEFAULT_SYSTEM_PROMPT).strip()]
+    if penelitian:
+        bagian.append(PROMPT_RISET)
+    if ada_lampiran:
+        bagian.append(PROMPT_LAMPIRAN)
+    if ada_gambar:
+        bagian.append(PROMPT_GAMBAR)
+    return "\n\n".join(b for b in bagian if b)
+
+
+def siapkan_permintaan(request: ChatRequest) -> tuple[List[dict], dict]:
+    """
+    Mengerjakan semua persiapan yang sama untuk /chat dan /chat/stream:
+
+      - memvalidasi pesan
+      - mengekstrak lampiran (file -> teks, gambar -> divalidasi)
+      - memilih model yang tepat (vision / browser / biasa)
+      - menyusun messages + opsi
+
+    Dikumpulkan di satu tempat agar kedua endpoint tidak mungkin
+    berperilaku berbeda.
+    """
+    user_message = request.message.strip()
+    if not user_message:
+        raise HTTPException(status_code=400, detail="Pesan tidak boleh kosong.")
+
+    blok_lampiran, gambar = siapkan_lampiran(request)
+    opsi = resolve_options(request)
+    opsi["penelitian"] = bool(request.research)
+    opsi["ada_gambar"] = bool(gambar)
+
+    prompt = susun_system_prompt(
+        request.system_prompt,
+        penelitian=opsi["penelitian"],
+        ada_lampiran=bool(blok_lampiran),
+        ada_gambar=bool(gambar),
+    )
+
+    messages = build_messages(
+        user_message,
+        history=request.history,
+        system_prompt=prompt,
+        images=gambar,
+        blok_lampiran=blok_lampiran,
+    )
+    return messages, opsi
+
+
+# ---------------------------------------------------------------------
+# 12c. ENDPOINT GET /capabilities — kemampuan tiap model
+# ---------------------------------------------------------------------
+@app.get("/capabilities")
+async def capabilities():
+    """
+    Memberi tahu UI model mana yang bisa membaca gambar dan mana yang
+    bisa riset web, supaya pilihan bisa ditandai di menu dan pengguna
+    tidak kaget ketika modelnya berganti otomatis.
+
+    Yang dikirim hanya hal yang MEMANG terlihat pengguna (nama model
+    sudah tampil di UI sejak awal): tidak ada URL, key, atau detail
+    infrastruktur.
+    """
+    return {
+        "models": [
+            {
+                "id": m,
+                "vision": m in MODEL_VISION,
+                "browser": m in MODEL_BROWSER,
+            }
+            for m in MODEL_DIIZINKAN
+        ],
+        "vision_default": MODEL_VISION_DEFAULT,
+        "browser_default": MODEL_BROWSER_DEFAULT,
+        # Kemampuan tingkat fitur (bukan per model).
+        "fitur": {
+            "gambar": True,
+            "file": True,
+            "riset": True,
+            "maks_gambar": lampiran.MAKS_JUMLAH_GAMBAR,
+            "maks_file": lampiran.MAKS_JUMLAH_FILE,
+            "maks_file_mb": lampiran.MAKS_FILE_BYTES // (1024 * 1024),
+        },
+    }
+
+
+# ---------------------------------------------------------------------
 # 13. ENDPOINT POST /chat  (non-streaming, kontrak lama)
 # ---------------------------------------------------------------------
 @app.post("/chat", response_model=ChatResponse)
@@ -823,18 +1352,9 @@ async def chat(request: ChatRequest):
     Menerima {"message": "..."} lalu mengembalikan {"reply": "..."}.
 
     Kontrak lama TETAP SAMA. Field tambahan (history, system_prompt,
-    temperature, max_tokens) bersifat opsional.
+    temperature, max_tokens, model, images, files, research) opsional.
     """
-    user_message = request.message.strip()
-    if not user_message:
-        raise HTTPException(status_code=400, detail="Pesan tidak boleh kosong.")
-
-    messages = build_messages(
-        user_message,
-        history=request.history,
-        system_prompt=request.system_prompt,
-    )
-    opsi = resolve_options(request)
+    messages, opsi = siapkan_permintaan(request)
 
     try:
         isi = await complete(messages, opsi)
@@ -856,25 +1376,33 @@ async def chat_stream(request: ChatRequest):
     Versi streaming dari /chat. Format SSE (satu JSON per baris data:):
 
         data: {"delta": "Halo"}          <- potongan teks baru
+        data: {"meta": {...}}            <- info model yang dipakai (opsional)
         data: {"done": true}             <- selesai
         data: {"error": "pesan error"}   <- terjadi masalah
-    """
-    user_message = request.message.strip()
-    if not user_message:
-        raise HTTPException(status_code=400, detail="Pesan tidak boleh kosong.")
 
-    messages = build_messages(
-        user_message,
-        history=request.history,
-        system_prompt=request.system_prompt,
-    )
-    opsi = resolve_options(request)
+    `meta` dikirim paling awal dan hanya muncul bila model diganti
+    otomatis (mis. gambar diproses model vision). Klien lama yang tidak
+    mengenal field ini akan mengabaikannya, jadi kontrak tetap aman.
+    """
+    messages, opsi = siapkan_permintaan(request)
 
     def sse(obj: dict) -> str:
         return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
 
     async def event_stream() -> AsyncIterator[str]:
         try:
+            # Beri tahu lebih dulu bila model berbeda dari pilihan
+            # pengguna, supaya UI bisa menjelaskannya dengan jujur.
+            if opsi.get("penyesuaian"):
+                yield sse(
+                    {
+                        "meta": {
+                            "model": opsi["model"],
+                            "penyesuaian": opsi["penyesuaian"],
+                        }
+                    }
+                )
+
             ada_isi = False
             jawaban = []
             async for delta in stream(messages, opsi):

@@ -5,13 +5,30 @@
  *   - textarea auto-grow (maks 8 baris)
  *   - Enter = kirim, Shift+Enter = baris baru
  *   - tombol kirim bulat; berubah jadi tombol Stop saat AI menjawab
- *   - tombol lampirkan file (menyisipkan nama file ke pesan)
+ *   - lampirkan GAMBAR (dibaca model vision) dan FILE (PDF/DOCX/XLSX/
+ *     PPTX/TXT/CSV/kode) yang isinya diekstrak jadi teks di browser
+ *   - tombol "Riset web" untuk meminta AI mencari di internet dulu
+ *   - pratinjau lampiran (thumbnail gambar, nama & ukuran file)
  *   - hint keyboard hanya tampil di desktop
  *   - disclaimer kecil di bawah
  */
 import { useEffect, useRef, useState } from 'react'
-import { ArrowUp, Paperclip, Square } from './icons.jsx'
+import {
+  ArrowUp,
+  FileText,
+  Globe,
+  Loader2,
+  Paperclip,
+  Square,
+  X,
+} from './icons.jsx'
 import ModelPicker from './ModelPicker.jsx'
+import {
+  MAKS_FILE,
+  MAKS_GAMBAR,
+  bacaLampiran,
+  formatUkuran,
+} from '../lib/lampiran.js'
 
 const MAX_ROWS = 8
 const LINE_HEIGHT = 24 // px, harus sama dengan CSS
@@ -29,10 +46,16 @@ export default function Composer({
   large = false,
   model,
   onModelChange,
+  daftarModel,
+  research,
+  onResearchChange,
+  onLampiranBerubah,
 }) {
   const textareaRef = useRef(null)
   const fileRef = useRef(null)
-  const [attachments, setAttachments] = useState([])
+  const [lampiran, setLampiran] = useState([])
+  const [membaca, setMembaca] = useState(false)
+  const [galat, setGalat] = useState(null)
 
   /* Auto-grow: sesuaikan tinggi dengan isi, maksimal 8 baris. */
   useEffect(() => {
@@ -49,6 +72,17 @@ export default function Composer({
     if (autoFocus && !loading) textareaRef.current?.focus()
   }, [autoFocus, loading])
 
+  /* Beri tahu induk setiap kali lampiran berubah, supaya model bisa
+     dialihkan otomatis ke model vision saat ada gambar. */
+  const jumlahGambar = lampiran.filter((l) => l.jenis === 'gambar').length
+  useEffect(() => {
+    onLampiranBerubah?.({
+      gambar: lampiran.filter((l) => l.jenis === 'gambar'),
+      file: lampiran.filter((l) => l.jenis === 'teks'),
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lampiran])
+
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault()
@@ -58,48 +92,124 @@ export default function Composer({
 
   const submit = () => {
     const text = value.trim()
-    if (!text || loading || disabled) return
+    const adaGambar = jumlahGambar > 0
+    const adaFile = lampiran.some((l) => l.jenis === 'teks')
 
-    // Sertakan daftar lampiran sebagai konteks teks.
-    const attachmentNote = attachments.length
-      ? `\n\n(Lampiran: ${attachments.map((a) => a.name).join(', ')})`
-      : ''
+    // Boleh kirim tanpa teks bila ada lampiran (mis. "apa isi gambar ini?").
+    if ((!text && !adaGambar && !adaFile) || loading || disabled || membaca) return
 
-    onSend(text + attachmentNote)
-    setAttachments([])
+    const pesanDefault = adaGambar
+      ? 'Tolong jelaskan isi gambar ini.'
+      : adaFile
+        ? 'Tolong rangkum dan jelaskan isi file ini.'
+        : ''
+
+    onSend({
+      text: text || pesanDefault,
+      images: lampiran.filter((l) => l.jenis === 'gambar').map((l) => l.dataUrl),
+      files: lampiran
+        .filter((l) => l.jenis === 'teks')
+        .map((l) => ({ name: l.nama, text: l.teks, type: l.tipe })),
+      research: Boolean(research),
+      // Label yang tampil di gelembung pesan pengguna.
+      ringkas: lampiran.map((l) => l.nama),
+    })
+    setLampiran([])
+    setGalat(null)
   }
 
-  const handleFiles = (e) => {
+  const handleFiles = async (e) => {
     const files = Array.from(e.target.files || [])
-    if (!files.length) return
-    setAttachments((prev) => [
-      ...prev,
-      ...files.map((f) => ({ name: f.name, size: f.size })),
-    ])
     e.target.value = ''
+    if (!files.length) return
+
+    setGalat(null)
+    setMembaca(true)
+
+    const baru = []
+    const masalah = []
+
+    for (const file of files) {
+      /* Batas jumlah: gambar & file dihitung terpisah. */
+      const gambarSekarang = lampiran.filter((l) => l.jenis === 'gambar').length + baru.filter((l) => l.jenis === 'gambar').length
+      const fileSekarang = lampiran.filter((l) => l.jenis === 'teks').length + baru.filter((l) => l.jenis === 'teks').length
+
+      try {
+        const hasil = await bacaLampiran(file)
+        if (hasil.jenis === 'gambar' && gambarSekarang >= MAKS_GAMBAR) {
+          masalah.push(`Maksimal ${MAKS_GAMBAR} gambar per pesan.`)
+          continue
+        }
+        if (hasil.jenis === 'teks' && fileSekarang >= MAKS_FILE) {
+          masalah.push(`Maksimal ${MAKS_FILE} file per pesan.`)
+          continue
+        }
+        baru.push({ ...hasil, id: `${file.name}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}` })
+      } catch (err) {
+        masalah.push(err?.message || `Gagal membaca "${file.name}".`)
+      }
+    }
+
+    if (baru.length) setLampiran((prev) => [...prev, ...baru])
+    if (masalah.length) setGalat(masalah.join(' '))
+    setMembaca(false)
     textareaRef.current?.focus()
   }
 
-  const canSend = value.trim().length > 0 && !loading && !disabled
+  const lepas = (id) => {
+    setLampiran((prev) => prev.filter((l) => l.id !== id))
+    setGalat(null)
+  }
+
+  const canSend =
+    (value.trim().length > 0 || lampiran.length > 0) && !loading && !disabled && !membaca
 
   return (
     <div className={`composer ${large ? 'composer--large' : ''}`}>
-      {attachments.length > 0 && (
+      {/* ---------------- PRATINJAU LAMPIRAN ---------------- */}
+      {lampiran.length > 0 && (
         <ul className="composer__attachments">
-          {attachments.map((a, i) => (
-            <li key={`${a.name}-${i}`} className="composer__attachment">
-              <Paperclip size={12} aria-hidden="true" />
-              <span>{a.name}</span>
+          {lampiran.map((l) => (
+            <li
+              key={l.id}
+              className={`composer__attachment composer__attachment--${l.jenis}`}
+              title={l.nama}
+            >
+              {l.jenis === 'gambar' ? (
+                <img
+                  src={l.pratinjau}
+                  alt={`Pratinjau ${l.nama}`}
+                  className="composer__thumb"
+                />
+              ) : (
+                <FileText size={13} aria-hidden="true" className="composer__file-icon" />
+              )}
+              <span className="composer__attachment-text">
+                <span className="composer__attachment-name">{l.nama}</span>
+                <span className="composer__attachment-meta">
+                  {l.jenis === 'gambar' ? 'Gambar' : l.tipe || 'Teks'}
+                  {l.ukuran ? ` · ${formatUkuran(l.ukuran)}` : ''}
+                  {l.terpotong ? ' · dipotong' : ''}
+                </span>
+              </span>
               <button
                 type="button"
-                onClick={() => setAttachments((prev) => prev.filter((_, idx) => idx !== i))}
-                aria-label={`Lepas lampiran ${a.name}`}
+                onClick={() => lepas(l.id)}
+                aria-label={`Lepas lampiran ${l.nama}`}
+                title="Lepas"
+                className="composer__attachment-x"
               >
-                ×
+                <X size={12} />
               </button>
             </li>
           ))}
         </ul>
+      )}
+
+      {galat && (
+        <p className="composer__attach-error" role="alert">
+          {galat}
+        </p>
       )}
 
       <div className="composer__box">
@@ -107,10 +217,15 @@ export default function Composer({
           type="button"
           className="composer__tool"
           onClick={() => fileRef.current?.click()}
-          aria-label="Lampirkan file"
-          title="Lampirkan file"
+          disabled={membaca || disabled}
+          aria-label="Lampirkan file atau gambar"
+          title="Lampirkan file atau gambar (PDF, DOCX, XLSX, TXT, JPG, PNG)"
         >
-          <Paperclip size={18} />
+          {membaca ? (
+            <Loader2 size={18} className="composer__spin" aria-hidden="true" />
+          ) : (
+            <Paperclip size={18} />
+          )}
         </button>
         <input
           ref={fileRef}
@@ -118,6 +233,7 @@ export default function Composer({
           multiple
           className="sr-only"
           onChange={handleFiles}
+          accept=".pdf,.docx,.xlsx,.pptx,.txt,.md,.markdown,.csv,.tsv,.json,.yaml,.yml,.xml,.html,.htm,.css,.js,.jsx,.ts,.tsx,.py,.java,.c,.h,.cpp,.cs,.go,.rs,.rb,.php,.sql,.sh,.bash,.ini,.toml,.conf,.log,.srt,.tex,image/png,image/jpeg,image/webp"
           tabIndex={-1}
         />
 
@@ -131,11 +247,38 @@ export default function Composer({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={placeholder}
+          placeholder={
+            lampiran.length
+              ? 'Tanya tentang lampiran ini…'
+              : placeholder
+          }
           rows={1}
           disabled={disabled}
           aria-label="Tulis pesan untuk GungDev"
         />
+
+        {/* Tombol riset web: hanya di luar mode streaming. */}
+        {!loading && onResearchChange && (
+          <button
+            type="button"
+            className={`composer__tool composer__tool--research ${research ? 'is-active' : ''}`}
+            onClick={() => onResearchChange(!research)}
+            disabled={disabled}
+            aria-pressed={Boolean(research)}
+            aria-label={
+              research
+                ? 'Riset web aktif. Klik untuk mematikan'
+                : 'Aktifkan riset web'
+            }
+            title={
+              research
+                ? 'Riset web AKTIF — AI akan mencari di internet dulu'
+                : 'Riset web — AI mencari di internet dulu'
+            }
+          >
+            <Globe size={18} />
+          </button>
+        )}
 
         {loading ? (
           <button
@@ -154,6 +297,7 @@ export default function Composer({
                 value={model}
                 onChange={onModelChange}
                 disabled={disabled}
+                daftarModel={daftarModel}
               />
             )}
             <button
