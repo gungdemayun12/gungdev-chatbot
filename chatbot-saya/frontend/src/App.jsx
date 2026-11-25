@@ -1,5 +1,5 @@
-/**
- * App.jsx — komponen utama GungDev.
+﻿/**
+ * App.jsx â€” komponen utama GungDev.
  *
  * Tanggung jawab:
  *   - menyatukan state (sesi, pengaturan, tema, toast, modal)
@@ -16,7 +16,7 @@ import Settings from './components/Settings.jsx'
 import Modal from './components/Modal.jsx'
 import ToastStack from './components/Toast.jsx'
 
-import { useSettings } from './hooks/useSettings.js'
+import { useSettings, resolveApiUrl } from './hooks/useSettings.js'
 import { useSessions } from './hooks/useSessions.js'
 import { useToasts } from './hooks/useToasts.js'
 import { checkHealth, streamChat } from './lib/api.js'
@@ -32,6 +32,10 @@ const MOBILE_BREAKPOINT = 1024
 export default function App() {
   /* ---------------- State global ---------------- */
   const { settings, updateSettings, resetSettings, systemPromptFinal } = useSettings()
+
+  // URL backend efektif: pakai isian pengguna bila ada, jika tidak
+  // pakai bawaan build (VITE_API_URL di produksi / localhost saat dev).
+  const apiUrl = resolveApiUrl(settings)
   const {
     sessions,
     activeSession,
@@ -74,10 +78,10 @@ export default function App() {
 
   /* ---------------- Cek status backend ---------------- */
   const ping = useCallback(async () => {
-    const ok = await checkHealth(settings.apiUrl)
+    const ok = await checkHealth(apiUrl)
     setApiOnline(ok)
     return ok
-  }, [settings.apiUrl])
+  }, [apiUrl])
 
   useEffect(() => {
     const id = setInterval(ping, 20000)
@@ -121,7 +125,7 @@ export default function App() {
 
       try {
         await streamChat({
-          baseUrl: settings.apiUrl,
+          baseUrl: apiUrl,
           message,
           history,
           systemPrompt: systemPromptFinal,
@@ -158,8 +162,14 @@ export default function App() {
         } else {
           const isNetwork =
             err instanceof TypeError || /failed to fetch|network|load failed/i.test(err?.message || '')
+
+          // Pesan disesuaikan konteks: di situs publik pengguna tidak
+          // mungkin menjalankan uvicorn/Ollama di komputernya.
+          const lokal = /^(https?:\/\/)?(localhost|127\.0\.0\.1|\[::1\])/i.test(apiUrl)
           const text = isNetwork
-            ? `Gagal terhubung ke ${settings.apiUrl}. Pastikan backend berjalan ("uvicorn main:app --reload") dan Ollama aktif.`
+            ? lokal
+              ? `Gagal terhubung ke ${apiUrl}. Backend lokal belum berjalan. Jalankan "uvicorn main:app --reload" di folder backend.`
+              : 'Tidak dapat menghubungi server GungDev. Periksa koneksi internet Anda, lalu coba lagi.'
             : err?.message || 'Terjadi kesalahan tak terduga.'
 
           setError(text)
@@ -180,7 +190,7 @@ export default function App() {
       }
     },
     [
-      settings.apiUrl,
+      apiUrl,
       settings.temperature,
       settings.maxTokens,
       systemPromptFinal,
@@ -502,7 +512,7 @@ export default function App() {
         }
       >
         <p className="modal__text">
-          Percakapan <strong>“{deleteTarget?.title}”</strong> akan dihapus permanen. Tindakan ini
+          Percakapan <strong>â€œ{deleteTarget?.title}â€</strong> akan dihapus permanen. Tindakan ini
           tidak dapat dibatalkan.
         </p>
       </Modal>
@@ -534,3 +544,4 @@ export default function App() {
     </div>
   )
 }
+

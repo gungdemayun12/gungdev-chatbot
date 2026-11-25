@@ -25,8 +25,16 @@ export const DEFAULT_SETTINGS = {
   saveHistory: true,
 
   // Lanjutan
-  apiUrl: DEFAULT_API_URL,
-  model: 'deepseek-r1:7b',
+  //
+  // apiUrl SENGAJA dibiarkan kosong ('').
+  // Artinya: "ikuti nilai bawaan aplikasi" (VITE_API_URL saat produksi,
+  // atau http://localhost:8000 saat dev).
+  //
+  // Ini mencegah masalah lama: bila pengguna pernah mengisi
+  // http://localhost:8000 lalu menyimpannya, nilai itu akan terus
+  // menang atas URL backend produksi dan chat selalu gagal.
+  apiUrl: '',
+  model: 'openai/gpt-oss-120b',
   temperature: 0.4,
   maxTokens: 2048,
   systemPrompt:
@@ -34,6 +42,16 @@ export const DEFAULT_SETTINGS = {
     'jelas. Jawab dalam bahasa yang digunakan pengguna. Jika tidak yakin dengan ' +
     'sebuah fakta, katakan terus terang, jangan mengarang. Gunakan format Markdown ' +
     'seperlunya. Jawab langsung ke inti tanpa basa-basi berlebihan.',
+}
+
+/** Alamat lokal yang TIDAK mungkin dijangkau pengunjung situs publik. */
+const POLA_LOKAL = /^(https?:\/\/)?(localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)(:\d+)?(\/|$)/i
+
+/** Apakah aplikasi sedang dibuka dari domain publik (bukan komputer sendiri)? */
+function sedangDiPublik() {
+  if (typeof window === 'undefined' || !window.location) return false
+  const h = window.location.hostname
+  return !(h === 'localhost' || h === '127.0.0.1' || h === '[::1]' || h === '')
 }
 
 /** Menggabungkan nilai tersimpan dengan default (tahan data lama/rusak). */
@@ -54,9 +72,39 @@ function mergeSettings(raw) {
   if (!['concise', 'balanced', 'detailed'].includes(merged.responseStyle))
     merged.responseStyle = 'balanced'
   if (!['casual', 'formal'].includes(merged.tone)) merged.tone = 'casual'
-  if (typeof merged.apiUrl !== 'string' || !merged.apiUrl.trim())
-    merged.apiUrl = DEFAULT_API_URL
+
+  // --- apiUrl ---
+  // Selalu berupa string.
+  if (typeof merged.apiUrl !== 'string') merged.apiUrl = ''
+  merged.apiUrl = merged.apiUrl.trim()
+
+  // PENYEMBUHAN OTOMATIS:
+  // Bila situs dibuka dari domain publik tetapi tersimpan alamat lokal
+  // (mis. http://localhost:8000 dari masa pengembangan), buang nilainya
+  // agar kembali memakai URL backend dari build (VITE_API_URL).
+  // Tanpa ini, pengguna akan terus melihat "Backend tidak terhubung".
+  if (merged.apiUrl && POLA_LOKAL.test(merged.apiUrl) && sedangDiPublik()) {
+    merged.apiUrl = ''
+  }
+
+  // Model lama DeepSeek/Llama yang kini hanya jalan di Ollama lokal.
+  // Di situs publik model ditentukan server (GROQ_MODEL), jadi nilai
+  // ini hanya catatan — tetapi dibuat masuk akal agar tidak membingungkan.
+  const modelLokal = ['deepseek-r1:7b', 'deepseek-r1:1.5b', 'llama3.2', 'qwen2.5:7b']
+  if (modelLokal.includes(merged.model) && sedangDiPublik()) {
+    merged.model = DEFAULT_SETTINGS.model
+  }
+
   return merged
+}
+
+/**
+ * URL backend yang benar-benar dipakai.
+ * Kosong -> pakai bawaan build (VITE_API_URL / localhost saat dev).
+ */
+export function resolveApiUrl(settings) {
+  const manual = (settings?.apiUrl || '').trim()
+  return manual || DEFAULT_API_URL
 }
 
 /**

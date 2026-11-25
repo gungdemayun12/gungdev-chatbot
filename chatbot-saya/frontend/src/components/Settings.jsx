@@ -7,6 +7,7 @@
  */
 import { useState } from 'react'
 import Modal from './Modal.jsx'
+import { DEFAULT_API_URL } from '../lib/api.js'
 import {
   AlignLeft,
   Download,
@@ -261,7 +262,11 @@ export default function Settings({
             <>
               <Field
                 label="URL backend"
-                hint={`Status: ${apiOnline ? 'terhubung' : 'tidak terhubung'}`}
+                hint={
+                  settings.apiUrl
+                    ? `Status: ${apiOnline ? 'terhubung' : 'tidak terhubung'} — memakai isian manual.`
+                    : `Status: ${apiOnline ? 'terhubung' : 'tidak terhubung'} — memakai bawaan aplikasi (${DEFAULT_API_URL}).`
+                }
                 htmlFor="set-api"
               >
                 <input
@@ -270,8 +275,19 @@ export default function Settings({
                   type="url"
                   value={settings.apiUrl}
                   onChange={(e) => updateSettings({ apiUrl: e.target.value })}
-                  placeholder="http://localhost:8000"
+                  placeholder={DEFAULT_API_URL}
                 />
+                {settings.apiUrl && (
+                  <div className="btn-row" style={{ marginTop: 8 }}>
+                    <button
+                      type="button"
+                      className="btn btn--ghost btn--sm"
+                      onClick={() => updateSettings({ apiUrl: '' })}
+                    >
+                      Kembalikan ke bawaan
+                    </button>
+                  </div>
+                )}
               </Field>
 
               <Field
@@ -286,8 +302,6 @@ export default function Settings({
                   onChange={(e) => updateSettings({ model: e.target.value })}
                 >
                   <optgroup label="Groq (cloud)">
-                    <option value="llama-3.3-70b-versatile">llama-3.3-70b-versatile</option>
-                    <option value="llama-3.1-8b-instant">llama-3.1-8b-instant</option>
                     <option value="openai/gpt-oss-120b">openai/gpt-oss-120b</option>
                     <option value="openai/gpt-oss-20b">openai/gpt-oss-20b</option>
                   </optgroup>
