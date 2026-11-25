@@ -5,7 +5,53 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import Message from './Message.jsx'
 import EmptyState from './EmptyState.jsx'
 import Composer from './Composer.jsx'
-import { ArrowDown, Menu, MoreHorizontal, RefreshCw, Square, Share2, TriangleAlert, X } from './icons.jsx'
+import {
+  ArrowDown,
+  Lock,
+  Menu,
+  MoreHorizontal,
+  RefreshCw,
+  Sparkles,
+  Square,
+  Share2,
+  TriangleAlert,
+  X,
+} from './icons.jsx'
+
+/**
+ * Banner kecil di atas kotak pesan.
+ *
+ * Dua keadaan:
+ *   - tamu, masih ada sisa  -> pengingat lembut "riwayat tidak disimpan"
+ *   - tamu, batas habis     -> ajakan masuk (tombol Google)
+ * Pengguna yang sudah login tidak melihat banner ini sama sekali.
+ */
+function GuestBanner({ sisa, onOpenLogin }) {
+  const habis = sisa <= 0
+  return (
+    <div className={`guest-note ${habis ? 'is-limit' : ''}`} role="status">
+      <span className="guest-note__icon" aria-hidden="true">
+        {habis ? <Lock size={14} /> : <Sparkles size={14} />}
+      </span>
+      <p className="guest-note__text">
+        {habis ? (
+          <>
+            Batas tamu hari ini tercapai. <strong>Masuk dengan Google</strong> untuk
+            melanjutkan — riwayat Anda juga akan tersimpan.
+          </>
+        ) : (
+          <>
+            Anda memakai mode tamu — <strong>riwayat tidak disimpan</strong>. Sisa{' '}
+            {sisa} pesan hari ini.
+          </>
+        )}
+      </p>
+      <button type="button" className="guest-note__btn" onClick={onOpenLogin}>
+        Masuk
+      </button>
+    </div>
+  )
+}
 
 export default function ChatArea({
   session,
@@ -38,6 +84,11 @@ export default function ChatArea({
   research,
   onResearchChange,
   onLampiranBerubah,
+  /* --- Status login --- */
+  masuk = false,
+  guestSisa = null,
+  onOpenLogin,
+  onLogout,
 }) {
   const scrollRef = useRef(null)
   const [showScrollBtn, setShowScrollBtn] = useState(false)
@@ -136,6 +187,29 @@ export default function ChatArea({
           >
             <Share2 size={17} />
           </button>
+
+          {/* Login / nama akun. Tamu melihat tombol "Masuk" yang jelas;
+              pengguna login melihat namanya dan bisa keluar dari menu. */}
+          {!masuk ? (
+            <button
+              type="button"
+              className="chat__login"
+              onClick={onOpenLogin}
+              title="Masuk dengan Google agar riwayat tersimpan"
+            >
+              Masuk
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="chat__account"
+              onClick={onLogout}
+              title={`Keluar dari ${nickname || 'akun Google'}`}
+            >
+              Keluar
+            </button>
+          )}
+
           <button
             type="button"
             className="icon-btn"
@@ -222,6 +296,11 @@ export default function ChatArea({
 
       {/* ---------------- INPUT ---------------- */}
       <div className="chat__composer">
+        {/* Pengingat mode tamu / ajakan masuk */}
+        {!masuk && guestSisa !== null && (
+          <GuestBanner sisa={guestSisa} onOpenLogin={onOpenLogin} />
+        )}
+
         <Composer
           value={input}
           onChange={setInput}

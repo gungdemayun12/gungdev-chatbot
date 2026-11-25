@@ -16,12 +16,20 @@ import Settings from './components/Settings.jsx'
 import UsagePanel from './components/UsagePanel.jsx'
 import Modal from './components/Modal.jsx'
 import ToastStack from './components/Toast.jsx'
+import LoginModal from './components/LoginModal.jsx'
 
 import { useSettings, resolveApiUrl } from './hooks/useSettings.js'
 import { useSessions } from './hooks/useSessions.js'
 import { useToasts } from './hooks/useToasts.js'
+import { useAuth } from './hooks/useAuth.js'
 import { checkHealth, streamChat, fetchUsage, fetchCapabilities } from './lib/api.js'
 import { gabungKemampuan, modelUntukGambar, modelUntukRiset, cariModel } from './lib/models.js'
+import {
+  catatPesanTamu,
+  bacaPemakaianTamu,
+  resetPemakaianTamu,
+  ringkasTamu,
+} from './lib/guest.js'
 import {
   downloadFile,
   safeFilename,
@@ -34,6 +42,17 @@ const MOBILE_BREAKPOINT = 1024
 export default function App() {
   /* ---------------- State global ---------------- */
   const { settings, updateSettings, resetSettings, systemPromptFinal } = useSettings()
+
+  /* ---------------- Login Google ---------------- */
+  // `user` = akun Google yang sedang login di perangkat ini, atau null
+  // untuk tamu. Semua data login disimpan lokal (lihat lib/auth.js).
+  const { user, masuk, inisialNama, masukSebagai, keluar } = useAuth()
+  const [loginOpen, setLoginOpen] = useState(false)
+  const [loginMode, setLoginMode] = useState('info') // 'info' | 'batas'
+
+  /* Pemakaian tamu: 3 pesan/hari, dihitung di perangkat ini. */
+  const [tamuPemakaian, setTamuPemakaian] = useState(() => bacaPemakaianTamu())
+  const tamu = useMemo(() => ringkasTamu(tamuPemakaian), [tamuPemakaian])
 
   // URL backend efektif: pakai isian pengguna bila ada, jika tidak
   // pakai bawaan build (VITE_API_URL di produksi / localhost saat dev).
@@ -54,7 +73,8 @@ export default function App() {
     togglePin,
     deleteSession,
     clearAll,
-  } = useSessions(settings)
+    tersimpan,
+  } = useSessions(settings, user?.sub || null)
 
   const { toasts, toast, dismiss } = useToasts()
 
@@ -287,6 +307,26 @@ export default function App() {
 
       if ((!text && !images.length && !files.length) || loading) return
 
+      /* ---- Batas tamu: 3 pesan per hari ----
+         Diperiksa SEBELUM pesan ditambahkan, supaya tidak ada gelembung
+         pesan yang tetap muncul padahal tidak boleh dikirim. */
+      if (!masuk) {
+        const sekarang = ringkasTamu(bacaPemakaianTamu())
+        if (sekarang.habis) {
+          setLoginMode('batas')
+          setLoginOpen(true)
+          return
+        }
+        const baru = catatPesanTamu()
+        setTamuPemakaian(baru)
+        /* Pengingat halus pada pesan terakhir: arahkan ke login,
+           jangan tunggu sampai diblokir. */
+        const sisaSetelah = ringkasTamu(baru).sisa
+        if (sisaSetelah === 0) {
+          toast('Itu pesan tamu terakhir hari ini. Masuk agar bisa lanjut.', 'info')
+        }
+      }
+
       const session = ensureSession()
 
       /* Simpan riwayat SEBELUM pesan baru ditambahkan. */
@@ -316,7 +356,7 @@ export default function App() {
 
       await runCompletion({ session, history, message: text, images, files, pakaiRiset })
     },
-    [input, loading, ensureSession, addMessage, runCompletion],
+    [input, loading, ensureSession, addMessage, runCompletion, masuk, toast],
   )
 
   /** "Coba lagi" pada banner error. */
@@ -392,6 +432,68 @@ export default function App() {
     setError(null)
     if (isMobile()) setSidebarOpen(false)
   }, [newSession])
+
+  /* ---------------- Aksi login Google ---------------- */
+  const openLogin = useCallback(
+    (mode = 'info') => {
+      setLoginMode(mode)
+      setLoginOpen(true)
+    },
+    [],
+  )
+
+  /**
+   * Setelah Google berhasil: simpan identitas, tutup dialog, dan beri
+   * tahu pengguna apa yang berubah. Riwayat tamu TIDAK dimigrasikan —
+   * memang tidak tersimpan, dan mencampurnya ke akun akan mengejutkan.
+   */
+  const handleLoginBerhasil = useCallback(
+    (akun) => {
+      masukSebagai(akun)
+      setLoginOpen(false)
+      resetPemakaianTamu()
+      setTamuPemakaian(bacaPemakaianTamu())
+      if (isMobile()) setSidebarOpen(false)
+      toast(`Selamat datang, ${akun.name.split(' ')[0]}! Riwayat kini tersimpan.`, 'success')
+    },
+    [masukSebagai, toast],
+  )
+
+  const handleLoginGagal = useCallback(
+    (pesan) => toast(pesan || 'Login Google gagal. Silakan coba lagi.', 'error'),
+    [toast],
+  )
+
+  /**
+   * Keluar: riwayat dan hitungan tamu dipulihkan ke keadaan tamu.
+   * Riwayat milik akun TETAP tersimpan di perangkat (di bawah kuncinya
+   * sendiri) sehingga saat masuk lagi, percakapan lama muncul kembali.
+   */
+  const handleLogout = useCallback(() => {
+    keluar()
+    setInput('')
+    setError(null)
+    setTamuPemakaian(bacaPemakaianTamu())
+    toast('Anda sudah keluar. Riwayat akun tetap tersimpan di perangkat ini.', 'info')
+  }, [keluar, toast])
+
+  /* Bila sesi login sudah ada saat halaman dimuat (pengguna menutup tab
+     lalu kembali), hitungan tamu tidak relevan lagi: bersihkan sekali.
+     Ini juga menjaga data lama agar tidak "menghantui" kuota akun. */
+  useEffect(() => {
+    if (!masuk) return
+    resetPemakaianTamu()
+  }, [masuk])
+
+  /* Bila batas tamu habis saat halaman baru dibuka, tampilkan ajakan
+     login sekali — tapi jangan memaksa; pengguna tetap bisa menutupnya. */
+  useEffect(() => {
+    if (masuk || !tamu.habis) return
+    const t = setTimeout(() => openLogin('batas'), 900)
+    return () => clearTimeout(t)
+    // Hanya dievaluasi saat status login berubah / pertama dimuat.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [masuk])
 
   /* ---------------- Pintasan keyboard ---------------- */
   useEffect(() => {
@@ -575,6 +677,12 @@ export default function App() {
         onDelete={(s) => setDeleteTarget(s)}
         onExport={handleExportSession}
         onOpenSettings={() => setSettingsOpen(true)}
+        user={user}
+        inisialAkun={inisialNama}
+        onOpenLogin={() => openLogin(tamu.habis ? 'batas' : 'info')}
+        onLogout={handleLogout}
+        guestSisa={masuk ? null : tamu.sisa}
+        guestHabis={tamu.habis}
       />
 
       <main className="app__main">
@@ -613,6 +721,10 @@ export default function App() {
           research={research}
           onResearchChange={handleResearchChange}
           onLampiranBerubah={handleLampiranBerubah}
+          masuk={masuk}
+          guestSisa={masuk ? null : tamu.sisa}
+          onOpenLogin={() => openLogin(tamu.habis ? 'batas' : 'info')}
+          onLogout={handleLogout}
         />
       </main>
 
@@ -627,6 +739,11 @@ export default function App() {
         onExportAll={handleExportAll}
         apiOnline={apiOnline}
         apiUrl={apiUrl}
+        user={user}
+        onOpenLogin={() => {
+          setSettingsOpen(false)
+          openLogin('info')
+        }}
       />
 
       {/* Panel pemakaian & kuota */}
@@ -638,6 +755,15 @@ export default function App() {
         }}
         apiUrl={apiUrl}
         apiOnline={apiOnline}
+      />
+
+      {/* Masuk dengan Google */}
+      <LoginModal
+        open={loginOpen}
+        mode={loginMode}
+        onClose={() => setLoginOpen(false)}
+        onAkun={handleLoginBerhasil}
+        onError={handleLoginGagal}
       />
 
       {/* Ganti nama */}
@@ -716,6 +842,11 @@ export default function App() {
           Seluruh percakapan ({sessions.length} sesi) akan dihapus dari peramban ini. Pastikan Anda
           sudah mengekspornya bila masih diperlukan.
         </p>
+        {!tersimpan && (
+          <p className="modal__text modal__text--muted">
+            Anda sedang memakai mode tamu, jadi percakapan ini memang tidak tersimpan permanen.
+          </p>
+        )}
       </Modal>
 
       <ToastStack toasts={toasts} onDismiss={dismiss} />

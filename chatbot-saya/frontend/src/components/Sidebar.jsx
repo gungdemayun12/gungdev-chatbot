@@ -8,7 +8,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ChevronRight,
+  CloudOff,
   Download,
+  LogIn,
+  LogOut,
   MoreHorizontal,
   PanelLeftClose,
   Pencil,
@@ -142,6 +145,70 @@ function HistoryItem({ session, active, onSelect, onRename, onPin, onDelete, onE
   )
 }
 
+/** Kotak akun setelah login: inisial + nama, klik untuk menu akun. */
+function AccountBox({ user, inisial, onOpenSettings, onLogout }) {
+  const [menuOpen, setMenuOpen] = useState(false)
+  const wrapRef = useRef(null)
+
+  useEffect(() => {
+    if (!menuOpen) return
+    const handler = (e) => {
+      if (!wrapRef.current?.contains(e.target)) setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [menuOpen])
+
+  return (
+    <div className="sb-account" ref={wrapRef}>
+      <button
+        type="button"
+        className="sb-profile sb-profile--akun"
+        onClick={() => setMenuOpen((v) => !v)}
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
+        title={user.email || user.name}
+      >
+        <span className="sb-avatar sb-avatar--akun" aria-hidden="true">
+          {inisial}
+        </span>
+        <span className="sb-account__text">
+          <span className="sb-profile__name">{user.name}</span>
+          <span className="sb-account__sub">{user.email || 'Masuk dengan Google'}</span>
+        </span>
+      </button>
+
+      {menuOpen && (
+        <div className="sb-menu sb-menu--akun" role="menu">
+          <button
+            type="button"
+            role="menuitem"
+            className="sb-menu__item"
+            onClick={() => {
+              setMenuOpen(false)
+              onOpenSettings()
+            }}
+          >
+            <Settings size={14} /> Pengaturan
+          </button>
+          <div className="sb-menu__sep" />
+          <button
+            type="button"
+            role="menuitem"
+            className="sb-menu__item sb-menu__item--danger"
+            onClick={() => {
+              setMenuOpen(false)
+              onLogout()
+            }}
+          >
+            <LogOut size={14} /> Keluar
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function Sidebar({
   open,
   collapsed,
@@ -159,6 +226,12 @@ export default function Sidebar({
   onDelete,
   onExport,
   onOpenSettings,
+  user,
+  inisialAkun,
+  onOpenLogin,
+  onLogout,
+  guestSisa,
+  guestHabis,
 }) {
   const [query, setQuery] = useState('')
   const [collapsedGroups, setCollapsedGroups] = useState({})
@@ -334,12 +407,25 @@ export default function Sidebar({
 
         {/* Footer: profil + pengaturan */}
         <div className="sb-footer">
-          <div className="sb-profile">
-            <span className="sb-avatar" aria-hidden="true">
-              {(nickname || 'K').charAt(0).toUpperCase()}
-            </span>
-            <span className="sb-profile__name">{nickname || 'Kamu'}</span>
-          </div>
+          {user ? (
+            <AccountBox
+              user={user}
+              inisial={inisialAkun}
+              onOpenSettings={onOpenSettings}
+              onLogout={onLogout}
+            />
+          ) : (
+            <div className="sb-profile sb-profile--tamu">
+              <span className="sb-avatar" aria-hidden="true">
+                {(nickname || 'K').charAt(0).toUpperCase()}
+              </span>
+              <span className="sb-account__text">
+                <span className="sb-profile__name">{nickname || 'Kamu'}</span>
+                <span className="sb-account__sub">Belum masuk</span>
+              </span>
+            </div>
+          )}
+
           <button
             type="button"
             className="icon-btn"
@@ -350,6 +436,29 @@ export default function Sidebar({
             <Settings size={17} />
           </button>
         </div>
+
+        {/* Tombol masuk / status tamu — selalu di bawah, mudah ditemukan */}
+        {!user && (
+          <div className="sb-login">
+            <button
+              type="button"
+              className="sb-login__btn"
+              onClick={onOpenLogin}
+              title="Masuk dengan Google"
+            >
+              <LogIn size={15} aria-hidden="true" />
+              <span>Masuk dengan Google</span>
+            </button>
+            <p className="sb-login__note">
+              <CloudOff size={12} aria-hidden="true" />
+              {guestHabis
+                ? 'Batas tamu hari ini tercapai.'
+                : guestSisa !== null
+                  ? `Sisa ${guestSisa} pesan tamu hari ini.`
+                  : 'Riwayat tidak disimpan bila belum masuk.'}
+            </p>
+          </div>
+        )}
       </aside>
     </>
   )

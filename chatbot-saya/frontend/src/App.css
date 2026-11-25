@@ -1,4 +1,11 @@
 /* =====================================================================
+   LOGIN GOOGLE (tamu vs akun)
+   Diimpor paling awal (aturan CSS: @import harus di atas). File ini
+   terpisah agar tidak menyentuh satu baris pun gaya lama.
+   ===================================================================== */
+@import './auth.css';
+
+/* =====================================================================
    GungDev — App.css
    Struktur:
      1. Layout aplikasi
@@ -3156,3 +3163,4 @@ select.input {
     text-align: left;
   }
 }
+

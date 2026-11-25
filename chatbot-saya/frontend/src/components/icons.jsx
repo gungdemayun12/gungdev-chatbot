@@ -72,4 +72,9 @@ export {
   SlidersHorizontal,
   Wand2,
   User,
+  LogIn,
+  LogOut,
+  ShieldCheck,
+  Lock,
+  CloudOff,
 } from 'lucide-react'

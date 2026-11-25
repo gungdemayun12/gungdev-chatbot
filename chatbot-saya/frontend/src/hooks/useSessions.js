@@ -11,7 +11,15 @@
  * dalam satu objek session, jadi sidebar menampilkan satu baris per sesi.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { KEYS, readJSON, writeJSON, readString, writeString } from '../lib/storage.js'
+import {
+  KEYS,
+  keyActiveSession,
+  keySessions,
+  readJSON,
+  removeKey,
+  writeJSON,
+  writeString,
+} from '../lib/storage.js'
 import { makeTitle } from '../lib/text.js'
 
 /** ID unik sederhana (aman untuk localStorage). */
@@ -57,12 +65,46 @@ function sanitizeSessions(value) {
     }))
 }
 
-export function useSessions(settings) {
-  const [sessions, setSessions] = useState(() =>
-    sanitizeSessions(readJSON(KEYS.SESSIONS, [])),
-  )
-  const [activeId, setActiveId] = useState(() => readString(KEYS.ACTIVE_SESSION, null))
+export function useSessions(settings, akunSub = null) {
+  /* ---------------------------------------------------------------
+     Riwayat dipisah per akun Google.
+
+     `akunSub` = ID unik akun yang sedang login (null untuk tamu).
+
+       tamu   -> tidak ada riwayat tersimpan (selalu mulai kosong)
+       login  -> gungdev:sessions:<sub>  &  gungdev:active-session:<sub>
+     --------------------------------------------------------------- */
+
+  /** Muat riwayat milik akun (atau kosong untuk tamu). */
+  function muatUntuk(sub) {
+    if (!sub) return { sessions: [], activeId: null }
+    const sessions = sanitizeSessions(readJSON(keySessions(sub), []))
+    let activeId = null
+    try {
+      activeId = localStorage.getItem(keyActiveSession(sub))
+    } catch {
+      activeId = null
+    }
+    if (!activeId || !sessions.some((s) => s.id === activeId)) activeId = null
+    return { sessions, activeId }
+  }
+
+  const awal = useMemo(() => muatUntuk(akunSub), [akunSub])
+
+  const [sessions, setSessions] = useState(awal.sessions)
+  const [activeId, setActiveId] = useState(awal.activeId)
   const [loaded, setLoaded] = useState(false)
+
+  /* Berganti akun (login / keluar): ganti isi riwayat seketika.
+     Ini juga yang membuat riwayat tamu tidak "terbawa" ke akun dan
+     riwayat akun tidak tertinggal untuk tamu berikutnya. */
+  const [subTerpasang, setSubTerpasang] = useState(akunSub)
+  if (subTerpasang !== akunSub) {
+    setSubTerpasang(akunSub)
+    const baru = muatUntuk(akunSub)
+    setSessions(baru.sessions)
+    setActiveId(baru.activeId)
+  }
 
   /* Simulasikan pembacaan riwayat (untuk skeleton di sidebar).
      Data sebenarnya sudah tersedia sinkron; delay kecil ini membuat
@@ -72,16 +114,29 @@ export function useSessions(settings) {
     return () => clearTimeout(t)
   }, [])
 
-  /* Persistensi: simpan sesi setiap kali berubah (bila diizinkan). */
+  /* Bersihkan sisa riwayat versi lama (sebelum ada login).
+
+     Versi sebelumnya menyimpan riwayat tamu di gungdev:sessions tanpa
+     nama akun. Sekarang riwayat tamu TIDAK boleh tersimpan, jadi kunci
+     lama itu dibuang sekali saat aplikasi dimuat. */
   useEffect(() => {
-    if (!settings.saveHistory) return
-    writeJSON(KEYS.SESSIONS, sessions)
-  }, [sessions, settings.saveHistory])
+    removeKey(KEYS.SESSIONS)
+    removeKey(KEYS.ACTIVE_SESSION)
+  }, [])
+
+  /* Persistensi: HANYA untuk pengguna yang login DAN mengizinkan
+     riwayat disimpan. Tamu tidak pernah menulis apa pun. */
+  const bolehSimpan = Boolean(akunSub) && Boolean(settings.saveHistory)
+  useEffect(() => {
+    if (!bolehSimpan) return
+    writeJSON(keySessions(akunSub), sessions)
+  }, [sessions, bolehSimpan, akunSub])
 
   /* Simpan sesi aktif agar refresh mengembalikan posisi terakhir. */
   useEffect(() => {
-    if (activeId) writeString(KEYS.ACTIVE_SESSION, activeId)
-  }, [activeId])
+    if (!bolehSimpan) return
+    if (activeId) writeString(keyActiveSession(akunSub), activeId)
+  }, [activeId, bolehSimpan, akunSub])
 
   const activeSession = useMemo(
     () => sessions.find((s) => s.id === activeId) || null,
@@ -201,8 +256,11 @@ export function useSessions(settings) {
   const clearAll = useCallback(() => {
     setSessions([])
     setActiveId(null)
-    if (settings.saveHistory) writeJSON(KEYS.SESSIONS, [])
-  }, [settings.saveHistory])
+    if (akunSub) {
+      writeJSON(keySessions(akunSub), [])
+      removeKey(keyActiveSession(akunSub))
+    }
+  }, [akunSub])
 
   return {
     sessions,
@@ -221,5 +279,8 @@ export function useSessions(settings) {
     deleteSession,
     clearAll,
     setActiveId,
+    // False = riwayat tidak disimpan (tamu). Dipakai UI untuk jujur
+    // memberi tahu pengguna bahwa percakapannya akan hilang.
+    tersimpan: bolehSimpan,
   }
 }

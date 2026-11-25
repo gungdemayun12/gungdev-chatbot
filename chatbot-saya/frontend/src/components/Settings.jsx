@@ -22,6 +22,7 @@ import {
   SlidersHorizontal,
   Sun,
   Type,
+  User,
   Wand2,
   Trash2,
 } from './icons.jsx'
@@ -81,6 +82,8 @@ export default function Settings({
   onExportAll,
   apiOnline,
   apiUrl,
+  user,
+  onOpenLogin,
 }) {
   const [tab, setTab] = useState('umum')
 
@@ -215,19 +218,51 @@ export default function Settings({
           {/* ---------------- PERCAKAPAN ---------------- */}
           {tab === 'percakapan' && (
             <>
+              {/* Status akun: apakah riwayat benar-benar tersimpan. */}
+              <Field
+                label="Akun"
+                hint={
+                  user
+                    ? 'Riwayat percakapan disimpan di perangkat ini dan terikat ke akun Google Anda.'
+                    : 'Anda memakai mode tamu. Riwayat tidak disimpan dan pemakaian dibatasi.'
+                }
+              >
+                {user ? (
+                  <div className="set-account">
+                    <span className="set-account__avatar" aria-hidden="true">
+                      {user.name.charAt(0).toUpperCase()}
+                    </span>
+                    <span className="set-account__text">
+                      <span className="set-account__name">{user.name}</span>
+                      <span className="set-account__mail">{user.email}</span>
+                    </span>
+                    <span className="set-account__ok">Terhubung</span>
+                  </div>
+                ) : (
+                  <button type="button" className="btn btn--primary" onClick={onOpenLogin}>
+                    <User size={15} /> Masuk dengan Google
+                  </button>
+                )}
+              </Field>
+
               <Field
                 label="Simpan riwayat"
-                hint="Jika dimatikan, percakapan tidak disimpan setelah tab ditutup."
+                hint={
+                  user
+                    ? 'Jika dimatikan, percakapan tidak disimpan setelah tab ditutup.'
+                    : 'Aktifkan dengan masuk ke akun Google Anda terlebih dahulu.'
+                }
               >
                 <label className="switch">
                   <input
                     type="checkbox"
                     checked={settings.saveHistory}
+                    disabled={!user}
                     onChange={(e) => updateSettings({ saveHistory: e.target.checked })}
                   />
                   <span className="switch__track" aria-hidden="true" />
                   <span className="switch__label">
-                    {settings.saveHistory ? 'Aktif' : 'Nonaktif'}
+                    {!user ? 'Perlu masuk' : settings.saveHistory ? 'Aktif' : 'Nonaktif'}
                   </span>
                 </label>
               </Field>
