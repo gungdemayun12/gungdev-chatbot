@@ -673,6 +673,20 @@ app.add_middleware(
 def pesan_error_http(status: int, detail_asli: str = "") -> str:
     """Menerjemahkan status HTTP provider menjadi pesan Bahasa Indonesia."""
     if status == 400:
+        # Alasan asli dari penyedia sangat penting untuk menelusuri
+        # masalah format (mis. gambar ditolak). Tercatat di log server;
+        # pengguna tetap menerima pesan yang mudah dimengerti.
+        if detail_asli:
+            logger.error("HTTP 400 dari provider: %s", detail_asli)
+            # Bila masalahnya soal gambar/media, beri pesan yang lebih
+            # spesifik agar pengguna tahu apa yang harus dilakukan.
+            rendah = detail_asli.lower()
+            if any(k in rendah for k in ("image", "media", "vision", "modal")):
+                return (
+                    "Gambar tidak dapat diproses. Coba gunakan JPG/PNG "
+                    "berukuran lebih kecil, atau pilih model yang bisa "
+                    "membaca gambar."
+                )
         return "Permintaan tidak valid. Coba ubah atau pendekkan pesan Anda."
     if status in (401, 403):
         if PROVIDER == "groq":
@@ -790,6 +804,15 @@ def _groq_payload(model: str, messages: List[dict], opsi: dict, streaming: bool)
         panjang (hemat token kuota gratis).
       - browser_search tidak kompatibel dengan structured outputs; kita
         tidak memakainya, jadi aman.
+
+    KHUSUS GAMBAR (vision):
+      Dokumentasi Groq selalu memakai konfigurasi
+      `temperature=1, top_p=1` untuk model multimodal. Nilai temperature
+      lain membuat qwen/qwen3.8-27b membalas HTTP 400
+      ("temperature must be 1 for this model"), yang oleh penerjemah
+      error hanya tampak sebagai "permintaan tidak valid". Karena itu
+      khusus permintaan bergambar, temperature & top_p DIPAKSA 1 dan
+      disertakan eksplisit.
     """
     payload = {
         "model": model,
@@ -798,6 +821,11 @@ def _groq_payload(model: str, messages: List[dict], opsi: dict, streaming: bool)
         "max_completion_tokens": opsi["max_tokens"],
         "stream": streaming,
     }
+
+    # Model vision memerlukan temperature=1 & top_p=1.
+    if opsi.get("ada_gambar"):
+        payload["temperature"] = 1
+        payload["top_p"] = 1
 
     if opsi.get("penelitian"):
         payload["tools"] = [{"type": "browser_search"}]
