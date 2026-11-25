@@ -272,20 +272,24 @@ async def ringkasan(
     if sisa_header is None:
         sisa_header = ambil_header_kuota()
 
-    # Prioritas 1: sisa kuota versi penyedia.
-    # Prioritas 2: hitung sendiri dari batas - terpakai.
+    # PENTING — semantik header Groq (sudah diverifikasi lewat pengujian):
+    #   x-ratelimit-remaining-requests -> sisa REQUEST PER HARI (RPD)
+    #   x-ratelimit-remaining-tokens   -> sisa TOKEN PER MENIT (TPM)
+    #
+    # Header token TIDAK mewakili kuota harian. Memakainya sebagai
+    # kuota harian membuat panel melaporkan "96% habis" padahal itu
+    # hanya jendela 60 detik yang pulih segera. Karena itu:
+    #   - request : pakai header (benar-benar harian)
+    #   - token   : pakai hitungan server terhadap batas harian (TPD)
     sisa_request_penyedia = (sisa_header or {}).get("remaining_requests")
-    sisa_token_penyedia = (sisa_header or {}).get("remaining_tokens")
 
     if isinstance(sisa_request_penyedia, int):
         sisa_request = sisa_request_penyedia
     else:
         sisa_request = max(0, batas["rpd"] - harian["requests"])
 
-    if isinstance(sisa_token_penyedia, int):
-        sisa_token = sisa_token_penyedia
-    else:
-        sisa_token = max(0, batas["tpd"] - harian["tokens"])
+    # Token harian selalu dari pencatatan server (perkiraan jujur).
+    sisa_token = max(0, batas["tpd"] - harian["tokens"])
 
     terpakai_request = batas["rpd"] - sisa_request
     terpakai_token = batas["tpd"] - sisa_token
@@ -295,19 +299,21 @@ async def ringkasan(
     return {
         "provider": provider,
         "model": model,
-        # Request (RPD)
+        # Request (RPD) — angka penyedia bila tersedia
         "requests": {
             "terpakai": max(0, terpakai_request),
             "batas": batas["rpd"],
             "sisa": max(0, sisa_request),
             "persen": _persen(terpakai_request, batas["rpd"]),
+            "akurat": isinstance(sisa_request_penyedia, int),
         },
-        # Token (TPD)
+        # Token (TPD) — dari pencatatan server
         "tokens": {
             "terpakai": max(0, terpakai_token),
             "batas": batas["tpd"],
             "sisa": max(0, sisa_token),
             "persen": _persen(terpakai_token, batas["tpd"]),
+            "akurat": False,
         },
         # Kuota per menit (dipakai untuk peringatan "terlalu cepat")
         "per_menit": {
@@ -329,8 +335,9 @@ async def ringkasan(
             "penyedia" if isinstance(sisa_request_penyedia, int) else "perkiraan"
         ),
         "catatan": (
-            "Angka sisa kuota berasal langsung dari penyedia AI. "
-            "Nilai 'perkiraan' berarti dihitung dari batas resmi dikurangi "
-            "pemakaian yang tercatat server."
+            "Jumlah permintaan dibaca langsung dari penyedia AI sehingga akurat. "
+            "Jumlah token dihitung server dari panjang percakapan, jadi bisa "
+            "sedikit berbeda dari dashboard penyedia."
         ),
+        "token_per_menit_sisa": (sisa_header or {}).get("remaining_tokens"),
     }

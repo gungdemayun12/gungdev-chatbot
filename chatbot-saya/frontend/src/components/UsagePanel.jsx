@@ -122,7 +122,6 @@ export default function UsagePanel({ open, onClose, apiUrl, apiOnline }) {
     }
   }, [open, ambil])
 
-  const dariPenyedia = data?.sumber === 'penyedia'
   const persenRequest = data?.requests?.persen ?? 0
   const hampirHabis = persenRequest >= 90
 
@@ -219,19 +218,19 @@ export default function UsagePanel({ open, onClose, apiUrl, apiOnline }) {
                 </div>
               </div>
               <div className="usage__cell">
-                <div className="usage__cell-label">Sumber angka</div>
+                <div className="usage__cell-label">Akurasi permintaan</div>
                 <div className="usage__cell-value">
-                  {dariPenyedia ? 'Penyedia AI (akurat)' : 'Perkiraan server'}
+                  {data.requests?.akurat ? 'Langsung dari penyedia' : 'Perkiraan server'}
                 </div>
               </div>
             </div>
 
             {/* --- Penjelasan jujur --- */}
             <p className="usage__fineprint">
-              {dariPenyedia
-                ? 'Angka sisa kuota berasal langsung dari penyedia AI, jadi mencerminkan pemakaian sebenarnya.'
-                : 'Angka ini dihitung dari batas resmi dikurangi pemakaian yang tercatat server. Bisa sedikit berbeda dari dashboard penyedia.'}
-              {' '}Panel ini tidak memakai kuota saat dibuka.
+              Jumlah permintaan dibaca langsung dari penyedia AI, jadi akurat.
+              Jumlah token dihitung server dari panjang percakapan dan bisa
+              sedikit berbeda dari dashboard penyedia. Panel ini tidak memakai
+              kuota saat dibuka.
             </p>
 
             <button
