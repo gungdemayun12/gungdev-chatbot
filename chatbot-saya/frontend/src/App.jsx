@@ -13,13 +13,14 @@ import './App.css'
 import Sidebar from './components/Sidebar.jsx'
 import ChatArea from './components/ChatArea.jsx'
 import Settings from './components/Settings.jsx'
+import UsagePanel from './components/UsagePanel.jsx'
 import Modal from './components/Modal.jsx'
 import ToastStack from './components/Toast.jsx'
 
 import { useSettings, resolveApiUrl } from './hooks/useSettings.js'
 import { useSessions } from './hooks/useSessions.js'
 import { useToasts } from './hooks/useToasts.js'
-import { checkHealth, streamChat } from './lib/api.js'
+import { checkHealth, streamChat, fetchUsage } from './lib/api.js'
 import {
   downloadFile,
   safeFilename,
@@ -92,6 +93,28 @@ export default function App() {
     }
   }, [ping])
 
+  /* ---------------- Pemakaian & kuota AI ---------------- */
+  // Data ringkas untuk indikator di header. Panel rincian mengambil
+  // datanya sendiri saat dibuka (lewat UsagePanel).
+  const [usage, setUsage] = useState(null)
+  const [usageOpen, setUsageOpen] = useState(false)
+
+  const segarkanUsage = useCallback(async () => {
+    const data = await fetchUsage(apiUrl)
+    // Backend lama belum punya /usage -> null, panel disembunyikan.
+    setUsage(data)
+  }, [apiUrl])
+
+  useEffect(() => {
+    const boot = setTimeout(segarkanUsage, 600)
+    // Segarkan tiap 60 detik; /usage tidak memakai kuota AI.
+    const id = setInterval(segarkanUsage, 60000)
+    return () => {
+      clearTimeout(boot)
+      clearInterval(id)
+    }
+  }, [segarkanUsage])
+
   /* Tutup sidebar mobile saat layar diperbesar. */
   useEffect(() => {
     const onResize = () => {
@@ -148,6 +171,8 @@ export default function App() {
           throw new Error('GungDev tidak mengirim jawaban. Silakan coba lagi.')
         }
         setApiOnline(true)
+        // Segarkan angka kuota setelah percakapan berhasil.
+        segarkanUsage()
       } catch (err) {
         const isAbort = err?.name === 'AbortError'
 
@@ -198,6 +223,7 @@ export default function App() {
       setMessageContent,
       truncateMessages,
       activeSession,
+      segarkanUsage,
       toast,
     ],
   )
@@ -444,6 +470,12 @@ export default function App() {
           onCopy={handleCopyNotice}
           onShare={handleShare}
           onOpenSettings={() => setSettingsOpen(true)}
+          onOpenUsage={() => setUsageOpen(true)}
+          usageRingkas={
+            usage?.requests
+              ? { persen: usage.requests.persen, sisa: usage.requests.sisa }
+              : null
+          }
           onPickSuggestion={handlePickSuggestion}
           nickname={settings.nickname}
           apiOnline={apiOnline}
@@ -459,6 +491,21 @@ export default function App() {
         resetSettings={resetSettings}
         onClearAll={() => setClearAllOpen(true)}
         onExportAll={handleExportAll}
+        apiOnline={apiOnline}
+        onOpenUsage={() => {
+          setSettingsOpen(false)
+          setUsageOpen(true)
+        }}
+      />
+
+      {/* Panel pemakaian & kuota */}
+      <UsagePanel
+        open={usageOpen}
+        onClose={() => {
+          setUsageOpen(false)
+          segarkanUsage()
+        }}
+        apiUrl={apiUrl}
         apiOnline={apiOnline}
       />
 

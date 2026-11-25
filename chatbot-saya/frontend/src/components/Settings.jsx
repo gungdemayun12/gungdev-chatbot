@@ -11,6 +11,7 @@ import { DEFAULT_API_URL } from '../lib/api.js'
 import {
   AlignLeft,
   Download,
+  Gauge,
   Info,
   Keyboard,
   Monitor,
@@ -79,6 +80,7 @@ export default function Settings({
   onClearAll,
   onExportAll,
   apiOnline,
+  onOpenUsage,
 }) {
   const [tab, setTab] = useState('umum')
 
@@ -260,6 +262,15 @@ export default function Settings({
           {/* ---------------- LANJUTAN ---------------- */}
           {tab === 'lanjutan' && (
             <>
+              <Field
+                label="Pemakaian & kuota"
+                hint="Lihat berapa banyak kuota AI yang sudah terpakai hari ini dan kapan kuota pulih."
+              >
+                <button type="button" className="btn btn--ghost" onClick={onOpenUsage}>
+                  <Gauge size={15} /> Buka panel kuota
+                </button>
+              </Field>
+
               <Field
                 label="URL backend"
                 hint={

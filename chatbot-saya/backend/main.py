@@ -51,6 +51,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+import usage                # pencatat & penyedia data kuota (usage)
+
 # python-dotenv hanya dipakai saat pengembangan lokal.
 # Di Vercel/Render variabel masuk lewat environment, bukan file .env.
 try:
@@ -463,6 +465,11 @@ async def groq_complete(messages: List[dict], opsi: dict) -> str:
                 continue
 
             res.raise_for_status()
+
+            # Simpan header kuota dari Groq agar panel Usage bisa
+            # menampilkan SISA KUOTA SEBENARNYA (bukan perkiraan).
+            usage.simpan_header_kuota(res.headers, model)
+
             data = res.json()
             try:
                 isi = data["choices"][0]["message"]["content"] or ""
@@ -537,6 +544,10 @@ async def groq_stream(messages: List[dict], opsi: dict) -> AsyncIterator[str]:
                 )
 
             res = kandidat_res
+
+            # Header kuota juga tersedia pada respons streaming.
+            usage.simpan_header_kuota(kandidat_res.headers, model)
+
             break
 
         if res is None:
@@ -652,6 +663,26 @@ async def stream(messages: List[dict], opsi: dict) -> AsyncIterator[str]:
 
 
 # ---------------------------------------------------------------------
+# 11b. PERKIRAAN TOKEN (untuk pencatatan usage)
+# ---------------------------------------------------------------------
+def _perkiraan_token(messages: List[dict], jawaban: str) -> int:
+    """
+    Memperkirakan jumlah token yang dipakai satu percakapan.
+
+    Groq mengembalikan angka pasti di field usage, tetapi angka itu
+    tidak selalu tersedia (mis. saat streaming). Perkiraan kasar
+    ~4 karakter per token sudah cukup untuk indikator pemakaian —
+    dan angka PASTI tetap datang dari header kuota penyedia.
+    """
+    try:
+        panjang = sum(len(str(m.get("content", ""))) for m in messages)
+        panjang += len(jawaban or "")
+        return max(1, panjang // 4)
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+# ---------------------------------------------------------------------
 # 12. ENDPOINT GET /health
 # ---------------------------------------------------------------------
 @app.get("/health", response_model=HealthResponse)
@@ -663,6 +694,31 @@ async def health_check():
     provider benar-benar bisa dipanggil saat pesan pertama dikirim.
     """
     return {"status": "ok", "provider": PROVIDER, "model": MODEL_NAME}
+
+
+# ---------------------------------------------------------------------
+# 12b. ENDPOINT GET /usage — pemakaian & sisa kuota AI
+# ---------------------------------------------------------------------
+@app.get("/usage")
+async def usage_check():
+    """
+    Menampilkan pemakaian kuota AI hari ini.
+
+        {
+          "provider": "groq",
+          "model": "openai/gpt-oss-120b",
+          "requests": { "terpakai": 40, "batas": 1000, "sisa": 960, "persen": 4.0 },
+          "tokens":   { "terpakai": 17500, "batas": 200000, "sisa": 182500, "persen": 8.8 },
+          "per_menit": { "request_batas": 30, "token_batas": 8000, "reset_detik": 37 },
+          "reset": { "detik": 25200, "jam": 7.0, "waktu_utc": "...", "zona": "UTC" },
+          "sumber": "penyedia" | "perkiraan"
+        }
+
+    Endpoint ini TIDAK memanggil penyedia AI, jadi tidak menghabiskan
+    kuota sama sekali. Angkanya berasal dari header respons terakhir
+    atau dari pencatatan server sendiri.
+    """
+    return await usage.ringkasan(PROVIDER, MODEL_NAME)
 
 
 # ---------------------------------------------------------------------
@@ -689,6 +745,8 @@ async def chat(request: ChatRequest):
 
     try:
         isi = await complete(messages, opsi)
+        # Catat pemakaian (tidak pernah menggagalkan percakapan).
+        await usage.catat_request(tokens=_perkiraan_token(messages, isi), model=MODEL_NAME)
         return {"reply": isi}
     except HTTPException:
         raise
@@ -725,8 +783,10 @@ async def chat_stream(request: ChatRequest):
     async def event_stream() -> AsyncIterator[str]:
         try:
             ada_isi = False
+            jawaban = []
             async for delta in stream(messages, opsi):
                 ada_isi = True
+                jawaban.append(delta)
                 yield sse({"delta": delta})
 
             if not ada_isi:
@@ -734,6 +794,12 @@ async def chat_stream(request: ChatRequest):
                     {"error": "Layanan AI tidak mengirim jawaban. Silakan coba lagi."}
                 )
                 return
+
+            # Catat pemakaian setelah jawaban selesai terkumpul.
+            await usage.catat_request(
+                tokens=_perkiraan_token(messages, "".join(jawaban)),
+                model=MODEL_NAME,
+            )
 
             yield sse({"done": True})
 

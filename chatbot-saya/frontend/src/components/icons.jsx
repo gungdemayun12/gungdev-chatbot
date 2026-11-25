@@ -40,6 +40,11 @@ export {
   Pin,
   PinOff,
 
+  // Kuota & pemakaian
+  Activity,
+  Gauge,
+  Zap,
+
   // Tema
   Sun,
   Moon,

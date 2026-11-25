@@ -2343,3 +2343,271 @@ select.input {
     display: none;
   }
 }
+
+/* =====================================================================
+   PANEL PEMAKAIAN & KUOTA (UsagePanel)
+   Ditambahkan sebagai bagian terpisah agar tidak mengganggu gaya lama.
+   ===================================================================== */
+
+.usage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.usage__loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  padding: var(--sp-8) 0;
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+}
+
+.usage__notice {
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--radius-md);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  border: 1px solid transparent;
+}
+
+.usage__notice.is-danger {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.usage__notice.is-warning {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+/* --- Hero: judul + reset --- */
+.usage__hero {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.usage__hero-icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.usage__hero-text {
+  min-width: 0;
+}
+
+.usage__hero-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.usage__hero-sub {
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+.usage__hero-sub strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.usage__hero-time {
+  color: var(--text-tertiary);
+}
+
+/* --- Bar kuota --- */
+.usage-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.usage-bar__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+
+.usage-bar__label {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.usage-bar__value {
+  font-size: 0.8125rem;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-bar__value strong {
+  font-weight: 600;
+}
+
+.usage-bar__of {
+  color: var(--text-tertiary);
+}
+
+.usage-bar__track {
+  position: relative;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--bg-active);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.usage-bar__fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--success);
+  transition: width 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.usage-bar__track.is-warning .usage-bar__fill {
+  background: var(--warning);
+}
+
+.usage-bar__track.is-danger .usage-bar__fill {
+  background: var(--danger);
+}
+
+.usage-bar__foot {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Grid rincian --- */
+.usage__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-2);
+}
+
+.usage__cell {
+  padding: var(--sp-3);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.usage__cell-label {
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+  margin-bottom: 4px;
+}
+
+.usage__cell-value {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.usage__fineprint {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.6;
+  color: var(--text-tertiary);
+  padding-top: var(--sp-1);
+  border-top: 1px solid var(--border);
+}
+
+.usage__refresh {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* --- Tombol kuota di header chat --- */
+.chat__quota {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background 0.16s ease, color 0.16s ease, border-color 0.16s ease;
+}
+
+.chat__quota:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.chat__quota:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 2px;
+}
+
+.chat__quota-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
+  flex-shrink: 0;
+}
+
+.chat__quota.is-warning .chat__quota-dot {
+  background: var(--warning);
+}
+
+.chat__quota.is-danger .chat__quota-dot {
+  background: var(--danger);
+}
+
+@media (max-width: 720px) {
+  .chat__quota span:not(.chat__quota-dot) {
+    display: none;
+  }
+
+  .chat__quota {
+    padding: 0 8px;
+  }
+}
+
+/* Putaran ikon segarkan */
+.spin {
+  animation: spinOnce 0.9s linear infinite;
+}
+
+@keyframes spinOnce {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}

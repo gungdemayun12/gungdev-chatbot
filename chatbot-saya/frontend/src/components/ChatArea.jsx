@@ -27,6 +27,8 @@ export default function ChatArea({
   onCopy,
   onShare,
   onOpenSettings,
+  onOpenUsage,
+  usageRingkas,
   onPickSuggestion,
   nickname,
   apiOnline,
@@ -98,6 +100,27 @@ export default function ChatArea({
         </div>
 
         <div className="chat__header-actions">
+          {/* Indikator sisa kuota — hanya muncul bila data tersedia,
+              sehingga tidak mengganggu tampilan lama saat backend lama. */}
+          {usageRingkas && (
+            <button
+              type="button"
+              className={`chat__quota ${
+                usageRingkas.persen >= 90
+                  ? 'is-danger'
+                  : usageRingkas.persen >= 70
+                    ? 'is-warning'
+                    : ''
+              }`}
+              onClick={onOpenUsage}
+              title={`Kuota AI: ${usageRingkas.persen}% terpakai hari ini. Klik untuk rincian.`}
+              aria-label="Lihat pemakaian dan kuota AI"
+            >
+              <span className="chat__quota-dot" aria-hidden="true" />
+              <span>{usageRingkas.persen}% kuota</span>
+            </button>
+          )}
+
           <button
             type="button"
             className="icon-btn"

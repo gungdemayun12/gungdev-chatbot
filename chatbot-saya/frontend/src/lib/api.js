@@ -57,13 +57,14 @@ function friendlyError(status, detail) {
   if (detail) return detail
   const map = {
     400: 'Pesan tidak boleh kosong.',
-    401: 'Ollama menolak permintaan. Pastikan Ollama berjalan di komputer ini.',
-    402: 'Ollama meminta pembayaran. Backend seharusnya memakai model lokal.',
-    404: 'Model tidak ditemukan di Ollama. Jalankan: ollama pull deepseek-r1:7b',
+    401: 'Layanan AI menolak permintaan. Hubungi pemilik situs.',
+    402: 'Kuota layanan AI memerlukan pembayaran. Hubungi pemilik situs.',
+    404: 'Model AI tidak tersedia saat ini. Hubungi pemilik situs.',
+    413: 'Pesan terlalu panjang. Coba persingkat atau mulai percakapan baru.',
     429: 'Terlalu banyak permintaan. Tunggu sebentar lalu coba lagi.',
-    502: 'Ollama bermasalah atau mengembalikan balasan kosong.',
-    503: 'Ollama tidak berjalan. Buka aplikasi Ollama lalu coba lagi.',
-    504: 'Waktu tunggu habis. Model mungkin masih memuat — coba lagi.',
+    502: 'Layanan AI sedang bermasalah. Silakan coba lagi sebentar lagi.',
+    503: 'Server sedang tidak dapat dihubungi. Coba lagi beberapa saat.',
+    504: 'Waktu tunggu habis. Coba lagi dengan pertanyaan yang lebih singkat.',
   }
   return map[status] || `Terjadi kesalahan pada server (HTTP ${status}).`
 }
@@ -77,6 +78,23 @@ export async function checkHealth(baseUrl, { signal } = {}) {
     return data?.status === 'ok'
   } catch {
     return false
+  }
+}
+
+/**
+ * Mengambil pemakaian & sisa kuota AI.
+ *
+ * Endpoint ini tidak memanggil penyedia AI, jadi TIDAK menghabiskan
+ * kuota. Mengembalikan null bila backend lama belum punya /usage
+ * (agar UI bisa menyembunyikan panel tanpa error).
+ */
+export async function fetchUsage(baseUrl, { signal } = {}) {
+  try {
+    const res = await fetch(`${normalizeUrl(baseUrl)}/usage`, { signal })
+    if (!res.ok) return null
+    return await res.json()
+  } catch {
+    return null
   }
 }
 
