@@ -90,7 +90,45 @@ def _env_float(nama: str, default: float) -> float:
 # ---- Groq (cloud) ----
 GROQ_API_KEY = _env("GROQ_API_KEY")
 GROQ_BASE_URL = _env("GROQ_BASE_URL", "https://api.groq.com/openai/v1").rstrip("/")
-GROQ_MODEL = _env("GROQ_MODEL", "llama-3.3-70b-versatile")
+
+# Model default.
+#
+# CATATAN PENTING (diperbarui):
+#   Model "llama-3.3-70b-versatile" dan "llama-3.1-8b-instant" kini
+#   berstatus ENTERPRISE di Groq (harga ContactSales), sehingga TIDAK
+#   bisa dipakai dengan API key gratis -> Groq membalas HTTP 404.
+#
+#   Model yang tersedia untuk key gratis: keluarga OpenAI GPT-OSS.
+#   "openai/gpt-oss-120b" -> kualitas terbaik, ~500 token/detik.
+MODEL_GROQ_DEFAULT = "openai/gpt-oss-120b"
+
+# Model lama yang sudah tidak bisa dipakai key gratis. Bila nilainya
+# masih terpasang di environment (mis. dari deploy sebelumnya), otomatis
+# dialihkan ke default baru agar situs tidak mati.
+_MODEL_GROQ_USANG = {
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "llama3-70b-8192",
+    "llama3-8b-8192",
+}
+
+
+def _model_groq_terpilih() -> str:
+    """Menentukan model Groq yang dipakai, dengan pengaman model usang."""
+    diminta = _env("GROQ_MODEL")
+    if diminta and diminta not in _MODEL_GROQ_USANG:
+        return diminta
+    return MODEL_GROQ_DEFAULT
+
+
+GROQ_MODEL = _model_groq_terpilih()
+
+# Daftar model cadangan (semuanya tersedia untuk API key gratis).
+# Dipakai otomatis bila model utama dibalas HTTP 404 oleh Groq.
+_MODEL_GROQ_CADANGAN = [
+    MODEL_GROQ_DEFAULT,        # openai/gpt-oss-120b -> kualitas terbaik
+    "openai/gpt-oss-20b",      # lebih cepat, ringan
+]
 
 # ---- Ollama (lokal) ----
 OLLAMA_HOST = _env("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
@@ -385,61 +423,126 @@ def _groq_headers() -> dict:
 
 
 async def groq_complete(messages: List[dict], opsi: dict) -> str:
-    """Meminta jawaban lengkap (non-streaming) ke Groq."""
-    payload = {
-        "model": GROQ_MODEL,
-        "messages": messages,
-        "temperature": opsi["temperature"],
-        "max_completion_tokens": opsi["max_tokens"],
-        "stream": False,
-    }
+    """
+    Meminta jawaban lengkap (non-streaming) ke Groq.
+
+    Bila model yang dipasang ternyata sudah tidak tersedia (HTTP 404 —
+    umumnya karena model berubah jadi Enterprise), otomatis dicoba
+    model gratis lain sebelum menyerah. Dengan begitu situs tetap
+    hidup meski GROQ_MODEL di environment sudah usang.
+    """
+    kandidat = [GROQ_MODEL] + [
+        m for m in _MODEL_GROQ_CADANGAN if m != GROQ_MODEL
+    ]
+    error_terakhir: Optional[HTTPException] = None
+
     async with httpx.AsyncClient(timeout=TIMEOUT_GROQ) as http:
-        res = await http.post(
-            f"{GROQ_BASE_URL}/chat/completions",
-            headers=_groq_headers(),
-            json=payload,
-        )
-        res.raise_for_status()
-        data = res.json()
+        for model in kandidat:
+            payload = {
+                "model": model,
+                "messages": messages,
+                "temperature": opsi["temperature"],
+                "max_completion_tokens": opsi["max_tokens"],
+                "stream": False,
+            }
+            res = await http.post(
+                f"{GROQ_BASE_URL}/chat/completions",
+                headers=_groq_headers(),
+                json=payload,
+            )
 
-    try:
-        isi = data["choices"][0]["message"]["content"] or ""
-    except (KeyError, IndexError, TypeError):
-        isi = ""
+            # Hanya 404 (model tidak ada) yang layak dicoba ulang
+            # dengan model lain. 401/429/500 langsung dilaporkan.
+            if res.status_code == 404 and model != kandidat[-1]:
+                logger.warning(
+                    "Model Groq '%s' tidak tersedia, mencoba model cadangan.", model
+                )
+                error_terakhir = HTTPException(
+                    status_code=502, detail=pesan_error_http(404)
+                )
+                continue
 
-    if not isi.strip():
-        raise HTTPException(
-            status_code=502,
-            detail="Layanan AI mengembalikan jawaban kosong. Silakan coba lagi.",
-        )
-    return isi.strip()
+            res.raise_for_status()
+            data = res.json()
+            try:
+                isi = data["choices"][0]["message"]["content"] or ""
+            except (KeyError, IndexError, TypeError):
+                isi = ""
+
+            if not isi.strip():
+                raise HTTPException(
+                    status_code=502,
+                    detail="Layanan AI mengembalikan jawaban kosong. Silakan coba lagi.",
+                )
+            return isi.strip()
+
+    raise error_terakhir or HTTPException(
+        status_code=502, detail=pesan_error_http(404)
+    )
 
 
 async def groq_stream(messages: List[dict], opsi: dict) -> AsyncIterator[str]:
-    """Menghasilkan potongan teks (delta) dari Groq secara bertahap."""
-    payload = {
-        "model": GROQ_MODEL,
-        "messages": messages,
-        "temperature": opsi["temperature"],
-        "max_completion_tokens": opsi["max_tokens"],
-        "stream": True,
-    }
+    """
+    Menghasilkan potongan teks (delta) dari Groq secara bertahap.
+
+    Punya mekanisme cadangan model yang sama dengan groq_complete():
+    bila model utama 404, coba model gratis berikutnya. Penentuan model
+    dilakukan SEBELUM data dikirim ke pengguna, jadi aman untuk dialihkan.
+    """
+    kandidat = [GROQ_MODEL] + [
+        m for m in _MODEL_GROQ_CADANGAN if m != GROQ_MODEL
+    ]
+
     async with httpx.AsyncClient(timeout=TIMEOUT_GROQ) as http:
-        async with http.stream(
-            "POST",
-            f"{GROQ_BASE_URL}/chat/completions",
-            headers=_groq_headers(),
-            json=payload,
-        ) as res:
-            if res.status_code >= 400:
-                # Baca body error supaya pesannya informatif.
-                body = await res.aread()
-                logger.error("Groq menolak streaming: %s %s", res.status_code, body[:200])
+        res = None
+        for model in kandidat:
+            payload = {
+                "model": model,
+                "messages": messages,
+                "temperature": opsi["temperature"],
+                "max_completion_tokens": opsi["max_tokens"],
+                "stream": True,
+            }
+            permintaan = http.build_request(
+                "POST",
+                f"{GROQ_BASE_URL}/chat/completions",
+                headers=_groq_headers(),
+                json=payload,
+            )
+            kandidat_res = await http.send(permintaan, stream=True)
+
+            if kandidat_res.status_code == 404 and model != kandidat[-1]:
+                body = await kandidat_res.aread()
+                logger.warning(
+                    "Model Groq '%s' tidak tersedia saat streaming: %s. "
+                    "Mencoba model cadangan.",
+                    model,
+                    body[:120],
+                )
+                await kandidat_res.aclose()
+                continue
+
+            if kandidat_res.status_code >= 400:
+                body = await kandidat_res.aread()
+                logger.error(
+                    "Groq menolak streaming: %s %s",
+                    kandidat_res.status_code,
+                    body[:200],
+                )
+                kode = kandidat_res.status_code
+                await kandidat_res.aclose()
                 raise HTTPException(
                     status_code=502,
-                    detail=pesan_error_http(res.status_code),
+                    detail=pesan_error_http(kode),
                 )
 
+            res = kandidat_res
+            break
+
+        if res is None:
+            raise HTTPException(status_code=502, detail=pesan_error_http(404))
+
+        try:
             async for baris in res.aiter_lines():
                 if not baris or not baris.startswith("data:"):
                     continue
@@ -457,6 +560,10 @@ async def groq_stream(messages: List[dict], opsi: dict) -> AsyncIterator[str]:
                     delta = ""
                 if delta:
                     yield delta
+        finally:
+            # Tutup koneksi HTTP ke Groq, termasuk bila pengguna
+            # menekan tombol "Stop" di tengah jawaban.
+            await res.aclose()
 
 
 # ---------------------------------------------------------------------
