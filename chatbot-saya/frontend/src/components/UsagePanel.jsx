@@ -82,8 +82,8 @@ function BarKuota({ label, terpakai, batas, sisa, persen, satuan }) {
   )
 }
 
-/* ---------------- Panel utama ---------------- */
-export default function UsagePanel({ open, onClose, apiUrl, apiOnline }) {
+/* ---------------- Isi panel (dipakai modal & Pengaturan) ---------------- */
+export function UsageContent({ apiUrl, apiOnline, aktif = true }) {
   const [data, setData] = useState(null)
   const [memuat, setMemuat] = useState(false)
   const [galat, setGalat] = useState(false)
@@ -104,11 +104,11 @@ export default function UsagePanel({ open, onClose, apiUrl, apiOnline }) {
     }
   }, [apiUrl])
 
-  /* Muat saat dibuka + segarkan tiap 30 detik selama terbuka.
+  /* Muat saat aktif + segarkan tiap 30 detik.
      setState dipanggil di dalam promise (bukan langsung di body
      effect) agar tidak memicu render berantai. */
   useEffect(() => {
-    if (!open) return undefined
+    if (!aktif) return undefined
     let batal = false
     const jalan = () => {
       if (batal) return
@@ -120,131 +120,138 @@ export default function UsagePanel({ open, onClose, apiUrl, apiOnline }) {
       batal = true
       clearInterval(id)
     }
-  }, [open, ambil])
+  }, [aktif, ambil])
 
   const persenRequest = data?.requests?.persen ?? 0
   const hampirHabis = persenRequest >= 90
 
   return (
+    <div className="usage">
+      {!apiOnline && (
+        <div className="usage__notice is-danger">
+          Server tidak terhubung. Angka di bawah mungkin sudah usang.
+        </div>
+      )}
+
+      {memuat && !data && (
+        <div className="usage__loading">
+          <RefreshCw size={16} className="spin" />
+          <span>Memuat data pemakaian…</span>
+        </div>
+      )}
+
+      {galat && !memuat && (
+        <div className="usage__notice is-danger">
+          Data pemakaian belum bisa diambil. Coba lagi sebentar lagi.
+        </div>
+      )}
+
+      {data && (
+        <>
+          {/* --- Ringkasan model aktif --- */}
+          <div className="usage__hero">
+            <div className="usage__hero-icon">
+              <Activity size={18} />
+            </div>
+            <div className="usage__hero-text">
+              <div className="usage__hero-title">
+                Kuota hari ini
+              </div>
+              <div className="usage__hero-sub">
+                Reset dalam <strong>{durasi(data.reset?.detik)}</strong>
+                {data.reset?.waktu_utc && (
+                  <span className="usage__hero-time">
+                    <span className="usage__hero-sep">·</span>{' '}
+                    {new Date(data.reset.waktu_utc).toLocaleString('id-ID', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      day: 'numeric',
+                      month: 'short',
+                    })}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {hampirHabis && (
+            <div className="usage__notice is-warning">
+              Kuota harian hampir habis. Pemakaian akan pulih otomatis
+              dalam {durasi(data.reset?.detik)}.
+            </div>
+          )}
+
+          {/* --- Dua bar utama --- */}
+          <BarKuota
+            label="Permintaan (request)"
+            terpakai={data.requests?.terpakai}
+            batas={data.requests?.batas}
+            sisa={data.requests?.sisa}
+            persen={data.requests?.persen}
+            satuan="req"
+          />
+          <BarKuota
+            label="Token"
+            terpakai={data.tokens?.terpakai}
+            batas={data.tokens?.batas}
+            sisa={data.tokens?.sisa}
+            persen={data.tokens?.persen}
+            satuan="token"
+          />
+
+          {/* --- Rincian --- */}
+          <div className="usage__grid">
+            <div className="usage__cell">
+              <div className="usage__cell-label">Reset berikutnya</div>
+              <div className="usage__cell-value">{durasi(data.reset?.detik)}</div>
+            </div>
+            <div className="usage__cell">
+              <div className="usage__cell-label">Zona waktu</div>
+              <div className="usage__cell-value">{data.reset?.zona || 'UTC'}</div>
+            </div>
+            <div className="usage__cell">
+              <div className="usage__cell-label">Batas per menit</div>
+              <div className="usage__cell-value">
+                {data.per_menit?.request_batas} req ·{' '}
+                {angkaRingkas(data.per_menit?.token_batas)} token
+              </div>
+            </div>
+            <div className="usage__cell">
+              <div className="usage__cell-label">Akurasi permintaan</div>
+              <div className="usage__cell-value">
+                {data.requests?.akurat ? 'Langsung dari penyedia' : 'Perkiraan server'}
+              </div>
+            </div>
+          </div>
+
+          {/* --- Penjelasan jujur --- */}
+          <p className="usage__fineprint">
+            Jumlah permintaan dibaca langsung dari penyedia AI, jadi akurat.
+            Jumlah token dihitung server dari panjang percakapan dan bisa
+            sedikit berbeda dari dashboard penyedia. Panel ini tidak memakai
+            kuota saat dibuka.
+          </p>
+
+          <button
+            type="button"
+            className="btn btn--ghost btn--sm usage__refresh"
+            onClick={ambil}
+            disabled={memuat}
+          >
+            <RefreshCw size={14} className={memuat ? 'spin' : ''} />
+            {memuat ? 'Menyegarkan…' : 'Segarkan'}
+          </button>
+        </>
+      )}
+    </div>
+  )
+}
+
+/* ---------------- Panel modal ---------------- */
+export default function UsagePanel({ open, onClose, apiUrl, apiOnline }) {
+  return (
     <Modal open={open} onClose={onClose} title="Pemakaian & Kuota" size="md">
-      <div className="usage">
-        {!apiOnline && (
-          <div className="usage__notice is-danger">
-            Server tidak terhubung. Angka di bawah mungkin sudah usang.
-          </div>
-        )}
-
-        {memuat && !data && (
-          <div className="usage__loading">
-            <RefreshCw size={16} className="spin" />
-            <span>Memuat data pemakaian…</span>
-          </div>
-        )}
-
-        {galat && !memuat && (
-          <div className="usage__notice is-danger">
-            Data pemakaian belum bisa diambil. Coba lagi sebentar lagi.
-          </div>
-        )}
-
-        {data && (
-          <>
-            {/* --- Ringkasan model aktif --- */}
-            <div className="usage__hero">
-              <div className="usage__hero-icon">
-                <Activity size={18} />
-              </div>
-              <div className="usage__hero-text">
-                <div className="usage__hero-title">
-                  Kuota hari ini
-                </div>
-                <div className="usage__hero-sub">
-                  Reset dalam <strong>{durasi(data.reset?.detik)}</strong>
-                  {data.reset?.waktu_utc && (
-                    <span className="usage__hero-time">
-                      {' '}·{' '}
-                      {new Date(data.reset.waktu_utc).toLocaleString('id-ID', {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                        day: 'numeric',
-                        month: 'short',
-                      })}
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {hampirHabis && (
-              <div className="usage__notice is-warning">
-                Kuota harian hampir habis. Pemakaian akan pulih otomatis
-                dalam {durasi(data.reset?.detik)}.
-              </div>
-            )}
-
-            {/* --- Dua bar utama --- */}
-            <BarKuota
-              label="Permintaan (request)"
-              terpakai={data.requests?.terpakai}
-              batas={data.requests?.batas}
-              sisa={data.requests?.sisa}
-              persen={data.requests?.persen}
-              satuan="req"
-            />
-            <BarKuota
-              label="Token"
-              terpakai={data.tokens?.terpakai}
-              batas={data.tokens?.batas}
-              sisa={data.tokens?.sisa}
-              persen={data.tokens?.persen}
-              satuan="token"
-            />
-
-            {/* --- Rincian --- */}
-            <div className="usage__grid">
-              <div className="usage__cell">
-                <div className="usage__cell-label">Reset berikutnya</div>
-                <div className="usage__cell-value">{durasi(data.reset?.detik)}</div>
-              </div>
-              <div className="usage__cell">
-                <div className="usage__cell-label">Zona waktu</div>
-                <div className="usage__cell-value">{data.reset?.zona || 'UTC'}</div>
-              </div>
-              <div className="usage__cell">
-                <div className="usage__cell-label">Batas per menit</div>
-                <div className="usage__cell-value">
-                  {data.per_menit?.request_batas} req ·{' '}
-                  {angkaRingkas(data.per_menit?.token_batas)} token
-                </div>
-              </div>
-              <div className="usage__cell">
-                <div className="usage__cell-label">Akurasi permintaan</div>
-                <div className="usage__cell-value">
-                  {data.requests?.akurat ? 'Langsung dari penyedia' : 'Perkiraan server'}
-                </div>
-              </div>
-            </div>
-
-            {/* --- Penjelasan jujur --- */}
-            <p className="usage__fineprint">
-              Jumlah permintaan dibaca langsung dari penyedia AI, jadi akurat.
-              Jumlah token dihitung server dari panjang percakapan dan bisa
-              sedikit berbeda dari dashboard penyedia. Panel ini tidak memakai
-              kuota saat dibuka.
-            </p>
-
-            <button
-              type="button"
-              className="btn btn--ghost btn--sm usage__refresh"
-              onClick={ambil}
-              disabled={memuat}
-            >
-              <RefreshCw size={14} className={memuat ? 'spin' : ''} />
-              {memuat ? 'Menyegarkan…' : 'Segarkan'}
-            </button>
-          </>
-        )}
-      </div>
+      <UsageContent apiUrl={apiUrl} apiOnline={apiOnline} aktif={open} />
     </Modal>
   )
 }

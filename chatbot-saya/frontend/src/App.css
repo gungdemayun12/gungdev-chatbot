@@ -2611,3 +2611,166 @@ select.input {
     transform: rotate(360deg);
   }
 }
+
+/* =====================================================================
+   PANEL KUOTA DI DALAM PENGATURAN (inline)
+   Dibuat agar pengguna melihat kuota langsung di tab Lanjutan,
+   tanpa perlu membuka modal bertumpuk.
+   ===================================================================== */
+
+.settings-usage {
+  margin-top: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+}
+
+.settings-usage .usage {
+  gap: var(--sp-3);
+}
+
+.settings-usage .usage__hero {
+  padding: var(--sp-2) var(--sp-3);
+}
+
+.settings-usage .usage__fineprint {
+  font-size: 0.6875rem;
+  line-height: 1.55;
+}
+
+/* =====================================================================
+   PENYEMPURNAAN MOBILE — panel kuota & pengaturan
+   ===================================================================== */
+
+@media (max-width: 560px) {
+  /* Panel modal kuota memakai seluruh lebar seperti bottom sheet */
+  .modal--md .modal__body,
+  .modal--sm .modal__body {
+    padding-left: var(--sp-3);
+    padding-right: var(--sp-3);
+  }
+
+  .usage {
+    gap: var(--sp-3);
+  }
+
+  /* Hero: ikon lebih kecil, teks boleh membungkus */
+  .usage__hero {
+    gap: var(--sp-2);
+    padding: var(--sp-3);
+    align-items: flex-start;
+  }
+
+  .usage__hero-icon {
+    width: 28px;
+    height: 28px;
+    margin-top: 1px;
+  }
+
+  .usage__hero-title {
+    font-size: 0.8125rem;
+  }
+
+  .usage__hero-sub {
+    font-size: 0.75rem;
+    line-height: 1.45;
+  }
+
+  /* Jam reset turun ke baris sendiri agar tidak terpotong */
+  .usage__hero-time {
+    display: block;
+    margin-top: 2px;
+  }
+
+  /* Buang titik pemisah yang menggantung di awal baris */
+  .usage__hero-sep {
+    display: none;
+  }
+
+  /* Bar kuota: label & nilai tetap sebaris tapi lebih rapat */
+  .usage-bar {
+    gap: 5px;
+  }
+
+  .usage-bar__label {
+    font-size: 0.75rem;
+  }
+
+  .usage-bar__value {
+    font-size: 0.75rem;
+  }
+
+  .usage-bar__track {
+    height: 7px;
+  }
+
+  .usage-bar__foot {
+    font-size: 0.6875rem;
+  }
+
+  /* Rincian: satu kolom penuh agar angka tidak terpotong */
+  .usage__grid {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .usage__cell {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--sp-2);
+    padding: 8px var(--sp-3);
+  }
+
+  .usage__cell-label {
+    margin-bottom: 0;
+    flex-shrink: 0;
+  }
+
+  .usage__cell-value {
+    text-align: right;
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+
+  .usage__fineprint {
+    font-size: 0.6875rem;
+    line-height: 1.55;
+  }
+
+  .usage__refresh {
+    width: 100%;
+    min-height: 44px;
+    justify-content: center;
+  }
+
+  .usage__notice {
+    font-size: 0.75rem;
+    padding: var(--sp-2) var(--sp-3);
+  }
+
+  /* Panel inline di Pengaturan: hilangkan bingkai ganda di layar sempit */
+  .settings-usage {
+    padding: var(--sp-1) 0 0;
+    border: none;
+    background: transparent;
+  }
+
+  /* Tombol "Segarkan" di dalam Pengaturan tetap penuh, rapi */
+  .settings-usage .usage__refresh {
+    margin-top: 2px;
+  }
+}
+
+@media (max-width: 400px) {
+  .usage__cell {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+
+  .usage__cell-value {
+    text-align: left;
+  }
+}

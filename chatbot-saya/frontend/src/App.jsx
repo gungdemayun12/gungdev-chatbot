@@ -492,10 +492,7 @@ export default function App() {
         onClearAll={() => setClearAllOpen(true)}
         onExportAll={handleExportAll}
         apiOnline={apiOnline}
-        onOpenUsage={() => {
-          setSettingsOpen(false)
-          setUsageOpen(true)
-        }}
+        apiUrl={apiUrl}
       />
 
       {/* Panel pemakaian & kuota */}

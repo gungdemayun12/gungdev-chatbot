@@ -7,11 +7,11 @@
  */
 import { useState } from 'react'
 import Modal from './Modal.jsx'
+import { UsageContent } from './UsagePanel.jsx'
 import { DEFAULT_API_URL } from '../lib/api.js'
 import {
   AlignLeft,
   Download,
-  Gauge,
   Info,
   Keyboard,
   Monitor,
@@ -80,7 +80,7 @@ export default function Settings({
   onClearAll,
   onExportAll,
   apiOnline,
-  onOpenUsage,
+  apiUrl,
 }) {
   const [tab, setTab] = useState('umum')
 
@@ -264,11 +264,11 @@ export default function Settings({
             <>
               <Field
                 label="Pemakaian & kuota"
-                hint="Lihat berapa banyak kuota AI yang sudah terpakai hari ini dan kapan kuota pulih."
+                hint="Berapa banyak kuota AI yang sudah terpakai hari ini dan kapan kuota pulih. Panel ini tidak memakai kuota saat dibuka."
               >
-                <button type="button" className="btn btn--ghost" onClick={onOpenUsage}>
-                  <Gauge size={15} /> Buka panel kuota
-                </button>
+                <div className="settings-usage">
+                  <UsageContent apiUrl={apiUrl} apiOnline={apiOnline} aktif={open} />
+                </div>
               </Field>
 
               <Field
