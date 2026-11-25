@@ -32,6 +32,8 @@ export default function ChatArea({
   onPickSuggestion,
   nickname,
   apiOnline,
+  model,
+  onModelChange,
 }) {
   const scrollRef = useRef(null)
   const [showScrollBtn, setShowScrollBtn] = useState(false)
@@ -225,6 +227,8 @@ export default function ChatArea({
           autoFocus={!isEmpty}
           large={isEmpty}
           placeholder={isEmpty ? 'Tanya apa saja ke GungDev…' : 'Balas GungDev…'}
+          model={model}
+          onModelChange={onModelChange}
         />
       </div>
 

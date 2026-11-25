@@ -132,6 +132,74 @@ _MODEL_GROQ_CADANGAN = [
     "openai/gpt-oss-20b",      # lebih cepat, ringan
 ]
 
+# ---------------------------------------------------------------------
+# KATALOG MODEL PUBLIK  (peta: ID publik -> nama model sebenarnya)
+# ---------------------------------------------------------------------
+# PENTING — alasan keamanan:
+#   Frontend hanya pernah mengirim ID publik ("pintar", "cepat").
+#   Pemetaan ke nama model asli HANYA ada di server ini. Dengan begitu
+#   pengunjung tidak bisa melihat/menyalahgunakan nama model teknis,
+#   dan tidak bisa memaksa server memakai model lain di luar daftar.
+#
+# Menambah/mengganti model: cukup ubah dict di bawah. Tidak perlu
+# menyentuh frontend sama sekali.
+KATALOG_MODEL = {
+    "pintar": MODEL_GROQ_DEFAULT,   # -> "openai/gpt-oss-120b" (lebih teliti)
+    "cepat": "openai/gpt-oss-20b",  # -> lebih ringan & cepat
+}
+
+# Model yang dipakai bila klien tidak mengirim pilihan / mengirim nilai
+# yang tidak dikenal. Dipilih "pintar" agar kualitas jawaban terjaga.
+MODEL_PUBLIK_DEFAULT = "pintar"
+
+
+def model_dari_pilihan(pilihan: Optional[str]) -> str:
+    """
+    Menerjemahkan ID publik dari UI menjadi nama model sebenarnya.
+
+    Nilai apa pun yang tidak ada di KATALOG_MODEL (termasuk None, string
+    kosong, atau percobaan menyisipkan nama model lain) akan DIABAIKAN
+    dan diganti model default. Ini mencegah klien memilih model di luar
+    daftar gratis yang diizinkan.
+    """
+    kunci = (pilihan or "").strip().lower()
+    if kunci in KATALOG_MODEL:
+        return KATALOG_MODEL[kunci]
+    if pilihan:
+        logger.warning(
+            "Pilihan model tidak dikenal (%r) — memakai model default.", pilihan
+        )
+    return KATALOG_MODEL[MODEL_PUBLIK_DEFAULT]
+
+
+def label_publik_model(nama_model: str) -> str:
+    """
+    Kebalikannya: nama model asli -> ID publik, untuk keperluan log /
+    panel usage agar nama teknis tidak ikut terekspos.
+    """
+    for kunci, nilai in KATALOG_MODEL.items():
+        if nilai == nama_model:
+            return kunci
+    return MODEL_PUBLIK_DEFAULT
+
+
+def opsi_model_aktif() -> str:
+    """
+    Nama model yang dianggap aktif untuk menghitung batas kuota di
+    panel Usage.
+
+    Panel Usage bersifat global (bukan per pengguna), jadi dipakai model
+    yang terakhir tercatat — atau model default bila belum ada. Batas
+    kuota kedua model gratis saat ini identik, sehingga angkanya tetap
+    benar walau dua pengguna memilih model berbeda.
+    """
+    terakhir = usage.model_terakhir()
+    if terakhir:
+        return terakhir
+    if PROVIDER == "groq":
+        return KATALOG_MODEL[MODEL_PUBLIK_DEFAULT]
+    return OLLAMA_MODEL
+
 # ---- Ollama (lokal) ----
 OLLAMA_HOST = _env("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
 OLLAMA_MODEL = _env("OLLAMA_MODEL", "deepseek-r1:7b")
@@ -213,6 +281,9 @@ class ChatRequest(BaseModel):
     system_prompt: Optional[str] = Field(None, description="Instruksi kustom pengguna")
     temperature: Optional[float] = Field(None, ge=0.0, le=2.0, description="Kreativitas jawaban")
     max_tokens: Optional[int] = Field(None, ge=16, le=8192, description="Panjang maksimum jawaban")
+    # Pilihan model dari UI. Nilainya adalah ID publik (mis. "pintar"),
+    # BUKAN nama model asli — supaya detail penyedia tidak terekspos.
+    model: Optional[str] = Field(None, max_length=32, description="Pilihan model dari UI")
 
 
 class ChatResponse(BaseModel):
@@ -265,8 +336,15 @@ def build_messages(
 
 
 def resolve_options(request: ChatRequest) -> dict:
-    """Menentukan temperature & batas token final."""
+    """
+    Menentukan model, temperature, & batas token final.
+
+    `model` di sini adalah NAMA MODEL ASLI hasil terjemahan dari ID
+    publik yang dikirim UI — bukan nilai mentah dari klien.
+    """
+    model = model_dari_pilihan(request.model)
     return {
+        "model": model,
         "temperature": (
             request.temperature
             if request.temperature is not None
@@ -285,7 +363,7 @@ def resolve_options(request: ChatRequest) -> dict:
 # ---------------------------------------------------------------------
 app = FastAPI(
     title="GungDev Backend",
-    description=f"Backend GungDev (provider: {PROVIDER}, model: {MODEL_NAME}).",
+    description="Backend GungDev.",
     version="2.1.0",
 )
 
@@ -433,8 +511,8 @@ async def groq_complete(messages: List[dict], opsi: dict) -> str:
     model gratis lain sebelum menyerah. Dengan begitu situs tetap
     hidup meski GROQ_MODEL di environment sudah usang.
     """
-    kandidat = [GROQ_MODEL] + [
-        m for m in _MODEL_GROQ_CADANGAN if m != GROQ_MODEL
+    kandidat = [opsi.get("model") or GROQ_MODEL] + [
+        m for m in _MODEL_GROQ_CADANGAN if m != (opsi.get("model") or GROQ_MODEL)
     ]
     error_terakhir: Optional[HTTPException] = None
 
@@ -496,8 +574,8 @@ async def groq_stream(messages: List[dict], opsi: dict) -> AsyncIterator[str]:
     bila model utama 404, coba model gratis berikutnya. Penentuan model
     dilakukan SEBELUM data dikirim ke pengguna, jadi aman untuk dialihkan.
     """
-    kandidat = [GROQ_MODEL] + [
-        m for m in _MODEL_GROQ_CADANGAN if m != GROQ_MODEL
+    kandidat = [opsi.get("model") or GROQ_MODEL] + [
+        m for m in _MODEL_GROQ_CADANGAN if m != (opsi.get("model") or GROQ_MODEL)
     ]
 
     async with httpx.AsyncClient(timeout=TIMEOUT_GROQ) as http:
@@ -692,8 +770,13 @@ async def health_check():
 
     Selalu membalas 'ok' bila server hidup; frontend lalu memastikan
     provider benar-benar bisa dipanggil saat pesan pertama dikirim.
+
+    PENTING — hanya label publik yang dikirim. Nama penyedia, nama model,
+    dan base URL sengaja TIDAK disertakan: itu informasi internal yang
+    tidak perlu diketahui pengunjung. Untuk kebutuhan operasional,
+    detail sebenarnya tetap tercatat di log server.
     """
-    return {"status": "ok", "provider": PROVIDER, "model": MODEL_NAME}
+    return {"status": "ok", "provider": "gungdev", "model": "gungdev"}
 
 
 # ---------------------------------------------------------------------
@@ -718,7 +801,7 @@ async def usage_check():
     kuota sama sekali. Angkanya berasal dari header respons terakhir
     atau dari pencatatan server sendiri.
     """
-    return await usage.ringkasan(PROVIDER, MODEL_NAME)
+    return await usage.ringkasan(PROVIDER, opsi_model_aktif())
 
 
 # ---------------------------------------------------------------------
@@ -746,7 +829,7 @@ async def chat(request: ChatRequest):
     try:
         isi = await complete(messages, opsi)
         # Catat pemakaian (tidak pernah menggagalkan percakapan).
-        await usage.catat_request(tokens=_perkiraan_token(messages, isi), model=MODEL_NAME)
+        await usage.catat_request(tokens=_perkiraan_token(messages, isi), model=opsi["model"])
         return {"reply": isi}
     except HTTPException:
         raise
@@ -798,7 +881,7 @@ async def chat_stream(request: ChatRequest):
             # Catat pemakaian setelah jawaban selesai terkumpul.
             await usage.catat_request(
                 tokens=_perkiraan_token(messages, "".join(jawaban)),
-                model=MODEL_NAME,
+                model=opsi["model"],
             )
 
             yield sse({"done": True})

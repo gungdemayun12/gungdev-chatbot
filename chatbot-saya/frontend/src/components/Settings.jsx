@@ -8,7 +8,7 @@
 import { useState } from 'react'
 import Modal from './Modal.jsx'
 import { UsageContent } from './UsagePanel.jsx'
-import { DEFAULT_API_URL } from '../lib/api.js'
+import { MODEL_PILIHAN } from '../lib/models.js'
 import {
   AlignLeft,
   Download,
@@ -272,57 +272,25 @@ export default function Settings({
               </Field>
 
               <Field
-                label="URL backend"
-                hint={
-                  settings.apiUrl
-                    ? `Status: ${apiOnline ? 'terhubung' : 'tidak terhubung'} — memakai isian manual.`
-                    : `Status: ${apiOnline ? 'terhubung' : 'tidak terhubung'} — memakai bawaan aplikasi (${DEFAULT_API_URL}).`
-                }
-                htmlFor="set-api"
+                label="Model AI"
+                hint="Pilih yang paling pas dengan kebutuhan Anda. Bisa juga diganti kapan saja dari kotak pesan."
               >
-                <input
-                  id="set-api"
-                  className="input"
-                  type="url"
-                  value={settings.apiUrl}
-                  onChange={(e) => updateSettings({ apiUrl: e.target.value })}
-                  placeholder={DEFAULT_API_URL}
-                />
-                {settings.apiUrl && (
-                  <div className="btn-row" style={{ marginTop: 8 }}>
-                    <button
-                      type="button"
-                      className="btn btn--ghost btn--sm"
-                      onClick={() => updateSettings({ apiUrl: '' })}
-                    >
-                      Kembalikan ke bawaan
-                    </button>
-                  </div>
-                )}
-              </Field>
-
-              <Field
-                label="Model"
-                hint="Pilihan ini hanya sebagai catatan — model yang benar-benar dipakai ditentukan oleh variabel GROQ_MODEL / OLLAMA_MODEL di server."
-                htmlFor="set-model"
-              >
-                <select
-                  id="set-model"
-                  className="input"
-                  value={settings.model}
-                  onChange={(e) => updateSettings({ model: e.target.value })}
-                >
-                  <optgroup label="Groq (cloud)">
-                    <option value="openai/gpt-oss-120b">openai/gpt-oss-120b</option>
-                    <option value="openai/gpt-oss-20b">openai/gpt-oss-20b</option>
-                  </optgroup>
-                  <optgroup label="Ollama (lokal)">
-                    <option value="deepseek-r1:7b">deepseek-r1:7b</option>
-                    <option value="deepseek-r1:1.5b">deepseek-r1:1.5b</option>
-                    <option value="llama3.2">llama3.2</option>
-                    <option value="qwen2.5:7b">qwen2.5:7b</option>
-                  </optgroup>
-                </select>
+                <div className="segmented segmented--wrap" role="group" aria-label="Pilih model AI">
+                  {MODEL_PILIHAN.map((m) => {
+                    const aktifModel = settings.model === m.id
+                    return (
+                      <button
+                        key={m.id}
+                        type="button"
+                        className={`segmented__btn ${aktifModel ? 'is-active' : ''}`}
+                        aria-pressed={aktifModel}
+                        onClick={() => updateSettings({ model: m.id })}
+                      >
+                        {m.label}
+                      </button>
+                    )
+                  })}
+                </div>
               </Field>
 
               <Field
@@ -355,18 +323,6 @@ export default function Settings({
                   step="128"
                   value={settings.maxTokens}
                   onChange={(e) => updateSettings({ maxTokens: Number(e.target.value) })}
-                />
-              </Field>
-
-              <Field
-                label="System prompt"
-                hint="Instruksi dasar yang menentukan kepribadian GungDev."
-              >
-                <textarea
-                  className="input input--area"
-                  rows={6}
-                  value={settings.systemPrompt}
-                  onChange={(e) => updateSettings({ systemPrompt: e.target.value })}
                 />
               </Field>
 
@@ -415,18 +371,16 @@ export default function Settings({
                 </div>
               </div>
               <p className="about__desc">
-                GungDev adalah asisten AI berbahasa Indonesia yang ramah, akurat, dan jelas.
-                Berjalan sepenuhnya di komputer Anda melalui Ollama — tidak ada data
-                percakapan yang dikirim ke layanan pihak ketiga.
+                GungDev adalah asisten AI berbahasa Indonesia yang ramah, akurat, dan
+                jelas. Dirancang untuk membantu Anda menjawab pertanyaan, menulis,
+                belajar, dan menyelesaikan pekerjaan sehari-hari.
               </p>
               <ul className="about__list">
-                <li>Riwayat disimpan lokal di peramban Anda (localStorage).</li>
-                <li>Jawaban dihasilkan model lokal melalui backend FastAPI.</li>
+                <li>Riwayat percakapan disimpan lokal di peramban Anda.</li>
+                <li>Anda bisa memilih model yang paling pas dari kotak pesan.</li>
                 <li>GungDev bisa membuat kesalahan — periksa kembali informasi penting.</li>
               </ul>
-              <p className="about__meta">
-                Antarmuka: React + Vite · Backend: FastAPI + Ollama · Markdown: react-markdown
-              </p>
+              <p className="about__meta">Dibuat dan dikembangkan oleh GungDev.</p>
             </div>
           )}
         </div>

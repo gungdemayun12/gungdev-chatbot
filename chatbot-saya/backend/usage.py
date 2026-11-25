@@ -205,6 +205,26 @@ def ambil_header_kuota() -> Optional[Dict[str, Any]]:
     )
 
 
+def model_terakhir() -> Optional[str]:
+    """
+    Nama model yang terakhir menjawab, dipakai untuk menentukan batas
+    kuota mana yang ditampilkan di panel Usage.
+
+    Hanya untuk perhitungan internal — nilai ini TIDAK pernah dikirim
+    ke frontend (respons /usage memakai label publik).
+    """
+    try:
+        kuota = ambil_header_kuota() or {}
+        model = kuota.get("model")
+        if model:
+            return str(model)
+        terakhir = _memori.get("__terakhir__") or {}
+        model = terakhir.get("model")
+        return str(model) if model else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
 async def baca_harian() -> Dict[str, int]:
     """Membaca total request & token hari ini (UTC)."""
     kunci = _kunci_harian()
@@ -262,6 +282,10 @@ async def ringkasan(
     `sisa_header` berisi nilai x-ratelimit-* dari respons Groq terakhir
     (bila ada). Nilai dari penyedia SELALU diprioritaskan di atas
     hitungan lokal, karena penyedia yang menentukan kebenaran.
+
+    CATATAN KEAMANAN: parameter `provider` & `model` tetap dipakai untuk
+    menghitung batas kuota, tetapi NILAINYA TIDAK dikembalikan ke klien.
+    Respons hanya berisi label publik "gungdev".
     """
     batas = batas_model(model)
     harian = await baca_harian()
@@ -297,8 +321,10 @@ async def ringkasan(
     reset_harian = _detik_sampai_reset_harian()
 
     return {
-        "provider": provider,
-        "model": model,
+        # Nama penyedia & model SENGAJA diganti label publik: panel ini
+        # dapat dibaca siapa saja, jadi detail teknis tidak boleh bocor.
+        "provider": "gungdev",
+        "model": "gungdev",
         # Request (RPD) — angka penyedia bila tersedia
         "requests": {
             "terpakai": max(0, terpakai_request),

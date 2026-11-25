@@ -108,6 +108,8 @@ export async function fetchUsage(baseUrl, { signal } = {}) {
  * @param {string} params.systemPrompt Instruksi kustom (opsional)
  * @param {number} params.temperature
  * @param {number} params.maxTokens
+ * @param {string} params.model        ID publik model ("pintar" / "cepat").
+ *                                     Server yang menerjemahkan ke model asli.
  * @param {AbortSignal} params.signal  Untuk tombol "Stop"
  * @param {(delta: string) => void} params.onDelta
  * @param {() => void} params.onDone
@@ -119,6 +121,7 @@ export async function streamChat({
   systemPrompt,
   temperature,
   maxTokens,
+  model,
   signal,
   onDelta,
   onDone,
@@ -132,6 +135,7 @@ export async function streamChat({
       system_prompt: systemPrompt || undefined,
       temperature: typeof temperature === 'number' ? temperature : undefined,
       max_tokens: typeof maxTokens === 'number' ? maxTokens : undefined,
+      model: model || undefined,
     }),
     signal,
   })

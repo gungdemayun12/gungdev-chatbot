@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { KEYS, readJSON, writeJSON } from '../lib/storage.js'
 import { DEFAULT_API_URL } from '../lib/api.js'
+import { SYSTEM_PROMPT_DASAR } from '../lib/prompt.js'
 import { getThemePref, applyTheme } from '../lib/theme.js'
 
 export const DEFAULT_SETTINGS = {
@@ -34,14 +35,11 @@ export const DEFAULT_SETTINGS = {
   // http://localhost:8000 lalu menyimpannya, nilai itu akan terus
   // menang atas URL backend produksi dan chat selalu gagal.
   apiUrl: '',
-  model: 'openai/gpt-oss-120b',
+  // Pilihan model dari UI. Nilainya ID PUBLIK ("pintar" / "cepat"),
+  // bukan nama model teknis. Server yang menerjemahkannya.
+  model: 'pintar',
   temperature: 0.4,
   maxTokens: 2048,
-  systemPrompt:
-    'Kamu adalah GungDev, asisten AI berbahasa Indonesia yang ramah, akurat, dan ' +
-    'jelas. Jawab dalam bahasa yang digunakan pengguna. Jika tidak yakin dengan ' +
-    'sebuah fakta, katakan terus terang, jangan mengarang. Gunakan format Markdown ' +
-    'seperlunya. Jawab langsung ke inti tanpa basa-basi berlebihan.',
 }
 
 /** Alamat lokal yang TIDAK mungkin dijangkau pengunjung situs publik. */
@@ -87,13 +85,16 @@ function mergeSettings(raw) {
     merged.apiUrl = ''
   }
 
-  // Model lama DeepSeek/Llama yang kini hanya jalan di Ollama lokal.
-  // Di situs publik model ditentukan server (GROQ_MODEL), jadi nilai
-  // ini hanya catatan — tetapi dibuat masuk akal agar tidak membingungkan.
-  const modelLokal = ['deepseek-r1:7b', 'deepseek-r1:1.5b', 'llama3.2', 'qwen2.5:7b']
-  if (modelLokal.includes(merged.model) && sedangDiPublik()) {
-    merged.model = DEFAULT_SETTINGS.model
-  }
+  // --- model ---
+  // Hanya ID publik yang diizinkan. Nilai lain (termasuk nama model
+  // teknis dari versi lama) diganti default supaya UI tetap konsisten.
+  if (!['pintar', 'cepat'].includes(merged.model)) merged.model = 'pintar'
+
+  // --- bersihkan sisa data sensitif versi lama ---
+  // Versi sebelumnya menyimpan system prompt di localStorage. Kunci itu
+  // tidak dipakai lagi dan TIDAK boleh ikut tersimpan, karena siapa pun
+  // yang membuka peramban bisa membacanya. Dibuang permanen di sini.
+  if ('systemPrompt' in merged) delete merged.systemPrompt
 
   return merged
 }
@@ -108,11 +109,14 @@ export function resolveApiUrl(settings) {
 }
 
 /**
- * Menyusun system prompt final dari pengaturan:
- * base prompt + gaya jawaban + nada + instruksi kustom pengguna.
+ * Menyusun system prompt final dari pengaturan.
+ *
+ * PENTING — system prompt TIDAK lagi bisa diubah dari UI. Teks dasarnya
+ * kini tinggal di lib/prompt.js (khusus pengembang) supaya pengunjung
+ * tidak bisa melihat maupun mengubahnya.
  */
 export function composeSystemPrompt(settings) {
-  const parts = [settings.systemPrompt?.trim()].filter(Boolean)
+  const parts = [SYSTEM_PROMPT_DASAR]
 
   const styleMap = {
     concise: 'Jawab sesingkat mungkin, langsung ke inti, maksimal beberapa kalimat.',

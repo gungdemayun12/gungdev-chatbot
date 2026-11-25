@@ -11,6 +11,7 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import { ArrowUp, Paperclip, Square } from './icons.jsx'
+import ModelPicker from './ModelPicker.jsx'
 
 const MAX_ROWS = 8
 const LINE_HEIGHT = 24 // px, harus sama dengan CSS
@@ -26,6 +27,8 @@ export default function Composer({
   autoFocus,
   placeholder = 'Tanya apa saja ke GungDev…',
   large = false,
+  model,
+  onModelChange,
 }) {
   const textareaRef = useRef(null)
   const fileRef = useRef(null)
@@ -145,16 +148,25 @@ export default function Composer({
             <Square size={16} fill="currentColor" />
           </button>
         ) : (
-          <button
-            type="button"
-            className="composer__send"
-            onClick={submit}
-            disabled={!canSend}
-            aria-label="Kirim pesan"
-            title="Kirim (Enter)"
-          >
-            <ArrowUp size={18} />
-          </button>
+          <>
+            {onModelChange && (
+              <ModelPicker
+                value={model}
+                onChange={onModelChange}
+                disabled={disabled}
+              />
+            )}
+            <button
+              type="button"
+              className="composer__send"
+              onClick={submit}
+              disabled={!canSend}
+              aria-label="Kirim pesan"
+              title="Kirim (Enter)"
+            >
+              <ArrowUp size={18} />
+            </button>
+          </>
         )}
       </div>
 

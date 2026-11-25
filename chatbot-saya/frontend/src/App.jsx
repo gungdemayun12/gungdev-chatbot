@@ -154,6 +154,7 @@ export default function App() {
           systemPrompt: systemPromptFinal,
           temperature: settings.temperature,
           maxTokens: settings.maxTokens,
+          model: settings.model,
           signal: controller.signal,
           onDelta: (delta) => {
             buffer += delta
@@ -188,12 +189,13 @@ export default function App() {
           const isNetwork =
             err instanceof TypeError || /failed to fetch|network|load failed/i.test(err?.message || '')
 
-          // Pesan disesuaikan konteks: di situs publik pengguna tidak
-          // mungkin menjalankan uvicorn/Ollama di komputernya.
+          // Pesan disesuaikan konteks: saat dijalankan lokal (pengembangan)
+          // pesan menyebut alamat server & perintah menjalankannya; di
+          // situs publik pesan dibuat umum tanpa detail infrastruktur.
           const lokal = /^(https?:\/\/)?(localhost|127\.0\.0\.1|\[::1\])/i.test(apiUrl)
           const text = isNetwork
             ? lokal
-              ? `Gagal terhubung ke ${apiUrl}. Backend lokal belum berjalan. Jalankan "uvicorn main:app --reload" di folder backend.`
+              ? `Gagal terhubung ke ${apiUrl}. Server lokal belum berjalan. Jalankan "uvicorn main:app --reload" di folder backend.`
               : 'Tidak dapat menghubungi server GungDev. Periksa koneksi internet Anda, lalu coba lagi.'
             : err?.message || 'Terjadi kesalahan tak terduga.'
 
@@ -218,6 +220,7 @@ export default function App() {
       apiUrl,
       settings.temperature,
       settings.maxTokens,
+      settings.model,
       systemPromptFinal,
       addMessage,
       setMessageContent,
@@ -479,6 +482,8 @@ export default function App() {
           onPickSuggestion={handlePickSuggestion}
           nickname={settings.nickname}
           apiOnline={apiOnline}
+          model={settings.model}
+          onModelChange={(id) => updateSettings({ model: id })}
         />
       </main>
 
