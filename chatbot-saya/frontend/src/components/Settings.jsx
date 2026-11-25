@@ -274,17 +274,29 @@ export default function Settings({
                 />
               </Field>
 
-              <Field label="Model" hint="Nama model Ollama yang dipakai backend." htmlFor="set-model">
+              <Field
+                label="Model"
+                hint="Pilihan ini hanya sebagai catatan — model yang benar-benar dipakai ditentukan oleh variabel GROQ_MODEL / OLLAMA_MODEL di server."
+                htmlFor="set-model"
+              >
                 <select
                   id="set-model"
                   className="input"
                   value={settings.model}
                   onChange={(e) => updateSettings({ model: e.target.value })}
                 >
-                  <option value="deepseek-r1:7b">deepseek-r1:7b</option>
-                  <option value="deepseek-r1:1.5b">deepseek-r1:1.5b</option>
-                  <option value="llama3.2">llama3.2</option>
-                  <option value="qwen2.5:7b">qwen2.5:7b</option>
+                  <optgroup label="Groq (cloud)">
+                    <option value="llama-3.3-70b-versatile">llama-3.3-70b-versatile</option>
+                    <option value="llama-3.1-8b-instant">llama-3.1-8b-instant</option>
+                    <option value="openai/gpt-oss-120b">openai/gpt-oss-120b</option>
+                    <option value="openai/gpt-oss-20b">openai/gpt-oss-20b</option>
+                  </optgroup>
+                  <optgroup label="Ollama (lokal)">
+                    <option value="deepseek-r1:7b">deepseek-r1:7b</option>
+                    <option value="deepseek-r1:1.5b">deepseek-r1:1.5b</option>
+                    <option value="llama3.2">llama3.2</option>
+                    <option value="qwen2.5:7b">qwen2.5:7b</option>
+                  </optgroup>
                 </select>
               </Field>
 

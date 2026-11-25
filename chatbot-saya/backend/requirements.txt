@@ -1,4 +1,15 @@
-fastapi
-uvicorn
-ollama
-python-dotenv
+# ==========================================================
+# Dependensi backend GungDev
+# ==========================================================
+# Semua ringan (< 100 MB total) sehingga aman untuk
+# Render/Railway free tier (RAM 512 MB).
+#
+# Tidak ada dependensi model AI di sini karena model berjalan
+# di Groq (cloud) atau Ollama (lokal) melalui HTTP.
+# ==========================================================
+
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.30,<1.0
+httpx>=0.27,<1.0
+python-dotenv>=1.0,<2.0
+pydantic>=2.7,<3.0

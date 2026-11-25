@@ -1,76 +1,79 @@
 # GungDev — Asisten AI 💬
 
-Aplikasi chatbot AI premium bergaya **Claude.ai / ChatGPT**, berjalan sepenuhnya di
-komputer sendiri. Terdiri dari dua bagian:
+Aplikasi chatbot AI premium bergaya **Claude.ai / ChatGPT**, siap dipakai banyak orang.
 
-| Bagian | Teknologi | Fungsi |
+| Bagian | Teknologi | Hosting |
 |---|---|---|
-| **Frontend** | React 19 + Vite 8 | Antarmuka chat premium (tema krem hangat + terracotta) |
-| **Backend** | Python FastAPI | Meneruskan pertanyaan ke **Ollama lokal** (`http://localhost:11434`) |
+| **Frontend** | React 19 + Vite 8 | **Vercel** (gratis) |
+| **Backend** | FastAPI (Python) | **Render** / Railway (gratis) |
+| **Model AI** | Groq Cloud (produksi) atau Ollama (lokal) | API / komputer sendiri |
 
-> **Tanpa API Key, tanpa internet.** Semua proses berjalan lokal dengan model
-> `deepseek-r1:7b` melalui Ollama.
+---
+
+## 🏗 Arsitektur
+
+```
+Pengguna ──► Vercel (React) ──HTTPS──► Render (FastAPI) ──► Groq Cloud (LLM)
+               frontend/                 backend/            gratis, ~280 tps
+
+Saat development lokal:
+Pengguna ──► localhost:5173 ──► localhost:8000 ──► Ollama lokal (deepseek-r1:7b)
+```
+
+Backend memilih provider otomatis:
+
+| Kondisi | Provider |
+|---|---|
+| `GROQ_API_KEY` terisi | **Groq** (cloud, cepat) |
+| `GROQ_API_KEY` kosong | **Ollama** (lokal, gratis offline) |
+| `AI_PROVIDER=groq` / `ollama` | Dipaksa manual |
+
+> **Mengapa bukan Ollama di server?** Model 7B butuh ~6–8 GB RAM dan GPU.
+> Hosting gratis hanya memberi 512 MB–1 GB tanpa GPU, jadi Ollama tidak mungkin
+> jalan di sana. Karena itu produksi memakai Groq, sementara Ollama tetap
+> tersedia untuk development lokal.
 
 ---
 
 ## ✨ Fitur
 
 ### Tampilan & Desain
-- **Design system** berbasis CSS variables: palet hangat ala Claude (terracotta
-  `#D97757` di atas krem `#FAF9F5`), heading serif (Newsreader), body Inter.
-- **Tema Terang / Gelap / Ikuti Sistem** — tersimpan di `localStorage`, tanpa
-  kedipan warna saat load (skrip anti-flash di `index.html`).
-- **Responsif mobile-first**: sidebar menjadi drawer dengan overlay gelap di
-  bawah 1024px, tutup via tap overlay atau swipe ke kiri.
-- Radius besar, shadow berlapis, transisi 150–250ms, scrollbar tipis,
-  fokus keyboard jelas, `prefers-reduced-motion` dihormati, target sentuh ≥44px.
+- **Design system** CSS variables: palet hangat terracotta `#D97757` di atas krem
+  `#FAF9F5`, heading serif (Newsreader), body Inter.
+- **Tema Terang / Gelap / Ikuti Sistem**, tersimpan di `localStorage`, tanpa
+  kedipan warna saat load.
+- **Responsif mobile-first**: sidebar jadi drawer + overlay di bawah 1024px.
+- Radius besar, shadow berlapis, transisi 150–250ms, scrollbar tipis, fokus
+  keyboard jelas, `prefers-reduced-motion` dihormati, target sentuh ≥44px.
 - Ikon konsisten dari **lucide-react** (tanpa emoji sebagai ikon UI).
 
 ### Percakapan
 - **Streaming token per token** (SSE) + animasi typing tiga titik.
-- **Markdown penuh** dirender rapi (**bold**, *italic*, heading, list, tabel,
-  blockquote, link) — tidak ada lagi tanda `**` mentah.
-- **Code block** dengan syntax highlighting, nama bahasa, dan tombol
-  **Salin → "Tersalin ✓"**.
-- Blok penalaran `<think>...</think>` (DeepSeek-R1) disembunyikan dalam panel
-  lipat **"Proses berpikir"** (tertutup secara default).
-- Aksi pesan: **Salin, Regenerasi, Suka/Tidak suka** (AI) dan **Edit, Salin**
-  (pengguna). Tombol **Stop generating** saat AI menjawab.
-- Timestamp halus saat hover, tombol **gulir ke bawah** mengambang.
+- **Markdown penuh** (**bold**, *italic*, heading, list, tabel, blockquote, link).
+- **Code block** dengan syntax highlighting, nama bahasa, tombol **Salin**.
+- Blok `<think>...</think>` disembunyikan dalam panel **"Proses berpikir"**.
+- Aksi pesan: **Salin, Regenerasi, Suka/Tidak suka** (AI); **Edit, Salin** (user).
+- Tombol **Stop generating**, timestamp saat hover, tombol gulir ke bawah.
 
 ### Riwayat & Sesi
-- **Satu sesi = satu item riwayat**, judul otomatis dari pesan pertama
-  (dipotong rapi dengan ellipsis).
-- Dikelompokkan otomatis: **Disematkan, Hari ini, Kemarin, 7 Hari Terakhir,
-  Lebih Lama**.
-- Menu `...` per item: Ganti nama, Sematkan, Ekspor (.md / .txt), Hapus
-  (dengan dialog konfirmasi).
-- Pencarian riwayat, skeleton loading, penyimpanan persisten di `localStorage`.
-- Ekspor seluruh riwayat ke **JSON** atau **Markdown**.
+- **Satu sesi = satu item riwayat**, judul otomatis dari pesan pertama.
+- Dikelompokkan: **Disematkan, Hari ini, Kemarin, 7 Hari Terakhir, Lebih Lama**.
+- Menu `...`: Ganti nama, Sematkan, Ekspor (.md/.txt), Hapus (dengan konfirmasi).
+- Pencarian, skeleton loading, persistensi `localStorage`.
+- Ekspor semua riwayat ke **JSON** atau **Markdown**.
 
 ### Pengaturan (6 tab)
-- **Umum** — tema, bahasa, ukuran font, nama panggilan
-- **Personalisasi** — instruksi kustom, gaya jawaban (singkat/seimbang/detail),
-  nada (santai/formal)
-- **Percakapan** — simpan riwayat on/off, ekspor semua, hapus semua
-- **Lanjutan** — URL backend, model, temperature, maksimum token, system prompt
-- **Pintasan** — daftar keyboard shortcut
-- **Tentang** — versi & info aplikasi
-
-### Kualitas Jawaban
-- **System prompt default** yang membuat GungDev ramah, akurat, jujur (tidak
-  mengarang), dan langsung ke inti.
-- **Temperature default 0.4** untuk jawaban faktual yang stabil.
+Umum · Personalisasi · Percakapan · **Lanjutan** (URL backend, model, temperature,
+max token, system prompt) · Pintasan · Tentang.
 
 ### Pintasan Keyboard
 | Pintasan | Fungsi |
 |---|---|
 | `Ctrl/⌘ + K` | Cari percakapan |
 | `Ctrl/⌘ + Shift + O` | Percakapan baru |
-| `Ctrl/⌘ + B` | Tampilkan / sembunyikan sidebar |
+| `Ctrl/⌘ + B` | Toggle sidebar |
 | `Esc` | Tutup dialog |
-| `Enter` | Kirim pesan |
-| `Shift + Enter` | Baris baru |
+| `Enter` / `Shift+Enter` | Kirim / baris baru |
 
 ---
 
@@ -78,126 +81,133 @@ komputer sendiri. Terdiri dari dua bagian:
 
 ```
 chatbot-saya/
-├── frontend/                      # React + Vite
-│   ├── index.html                 # skrip anti-flash tema, meta viewport, favicon
-│   ├── public/
-│   │   └── favicon.svg
-│   ├── e2e.mjs                    # uji end-to-end (Playwright, opsional)
-│   ├── package.json
+├── frontend/                        # React + Vite  ->  Vercel
+│   ├── vercel.json                  # konfigurasi deploy Vercel
+│   ├── index.html                   # anti-flash tema, viewport, favicon
+│   ├── .env.example                 # VITE_API_URL
+│   ├── e2e.mjs                      # uji end-to-end (Playwright)
 │   └── src/
-│       ├── main.jsx
-│       ├── App.jsx                # orkestrasi state, streaming, pintasan, ekspor
-│       ├── App.css                # seluruh styling komponen + breakpoint
-│       ├── index.css              # design tokens (terang/gelap), tipografi, reset
-│       ├── components/
-│       │   ├── ChatArea.jsx       # header, daftar pesan, error banner, composer
-│       │   ├── Composer.jsx       # textarea auto-grow, kirim/stop, lampiran
-│       │   ├── EmptyState.jsx     # sapaan serif + 4 kartu saran
-│       │   ├── Markdown.jsx       # react-markdown + highlight.js + DOMPurify
-│       │   ├── Message.jsx        # pesan user/AI, panel "Proses berpikir", aksi
-│       │   ├── Sidebar.jsx        # riwayat terkelompok, pencarian, menu konteks
-│       │   ├── Settings.jsx       # 6 tab pengaturan
-│       │   ├── Modal.jsx          # dialog dasar (fokus terkunci, Esc)
-│       │   ├── Toast.jsx          # notifikasi
-│       │   └── icons.jsx          # re-export ikon lucide-react
-│       ├── hooks/
-│       │   ├── useSessions.js     # state sesi + persistensi localStorage
-│       │   ├── useSettings.js     # preferensi + system prompt gabungan
-│       │   └── useToasts.js
-│       └── lib/
-│           ├── api.js             # streamChat (SSE), sendChat, checkHealth
-│           ├── storage.js         # pembungkus localStorage yang aman
-│           ├── text.js            # splitThinking, makeTitle, groupSessions, ekspor
-│           └── theme.js           # tema terang/gelap/sistem
-└── backend/                       # Python FastAPI
-    ├── main.py                    # seluruh logika server
+│       ├── App.jsx / App.css / index.css / main.jsx
+│       ├── components/              # ChatArea, Composer, EmptyState, Markdown,
+│       │                            # Message, Sidebar, Settings, Modal, Toast, icons
+│       ├── hooks/                   # useSessions, useSettings, useToasts
+│       └── lib/                     # api, storage, text, theme
+│
+└── backend/                         # FastAPI  ->  Render / Railway
+    ├── main.py                      # seluruh logika server (multi-provider)
     ├── requirements.txt
-    ├── run.bat                    # peluncur cepat (Windows)
+    ├── Dockerfile                   # untuk Render/Railway/Fly.io
+    ├── render.yaml                  # blueprint deploy Render
+    ├── run.bat                      # peluncur cepat Windows
     └── .env.example
 ```
 
 ---
 
-## 1. Prasyarat
+## 🚀 Deploy (Ringkas)
 
-1. **Ollama** terpasang dan berjalan — unduh di <https://ollama.com/download>.
-2. **Model sudah diunduh**:
-   ```bash
-   ollama pull deepseek-r1:7b
-   ```
-3. Cek keduanya siap:
-   ```bash
-   ollama list                    # harus muncul deepseek-r1:7b
-   curl http://localhost:11434/api/tags
-   ```
+### Langkah 1 — Ambil API key Groq (gratis)
+1. Buka <https://console.groq.com/keys>
+2. Login → **Create API Key** → salin (diawali `gsk_...`)
+3. Simpan, akan dipakai di langkah 2
+
+### Langkah 2 — Deploy Backend ke Render
+1. Buka <https://dashboard.render.com> → **New** → **Web Service**
+2. Hubungkan repo `gungdev-chatbot`
+3. Isi:
+   - **Root Directory**: `chatbot-saya/backend`
+   - **Runtime**: **Docker** (otomatis terbaca dari `Dockerfile`)
+   - **Instance Type**: **Free**
+   - **Health Check Path**: `/health`
+4. **Environment Variables**:
+   | Key | Value |
+   |---|---|
+   | `AI_PROVIDER` | `groq` |
+   | `GROQ_API_KEY` | `gsk_...` (dari langkah 1) |
+   | `GROQ_MODEL` | `llama-3.3-70b-versatile` |
+5. **Create Web Service** → tunggu build (~3 menit)
+6. Salin URL backend, mis. `https://gungdev-api.onrender.com`
+7. Tes: buka `https://gungdev-api.onrender.com/health` → harus muncul
+   `{"status":"ok","provider":"groq","model":"..."}`
+
+> Render free **tidur setelah 15 menit idle**. Permintaan pertama setelah tidur
+> butuh ~30–60 detik untuk bangun. Ini normal.
+
+### Langkah 3 — Deploy Frontend ke Vercel
+1. Buka <https://vercel.com/new> → import repo `gungdev-chatbot`
+2. Isi:
+   - **Root Directory**: `chatbot-saya/frontend`
+   - **Framework Preset**: `Vite` (terdeteksi otomatis)
+   - **Build Command**: `npm run build`
+   - **Output Directory**: `dist`
+3. **Environment Variables**:
+   | Key | Value |
+   |---|---|
+   | `VITE_API_URL` | `https://gungdev-api.onrender.com` (URL langkah 2) |
+4. **Deploy** → selesai, dapat URL `https://gungdev-chatbot.vercel.app`
+
+> `VITE_API_URL` dibaca saat **build**. Kalau diubah, wajib **Redeploy**.
+
+### Langkah 4 — Verifikasi
+Buka URL Vercel, ketik pesan. Bila muncul error:
+- **"Backend tidak terhubung"** → cek `VITE_API_URL` sudah benar & backend hidup
+- **"API key Groq tidak valid"** → cek `GROQ_API_KEY` di Render
+- **CORS error** → domain `*.vercel.app` sudah diizinkan otomatis; untuk domain
+  sendiri tambahkan ke `ALLOWED_ORIGINS` di Render
 
 ---
 
-## 2. Menjalankan Backend
+## 💻 Menjalankan Lokal
 
+### Backend
 ```bash
 cd chatbot-saya/backend
-
-# Windows (paling mudah)
-run.bat
-
-# Atau manual
-python -m venv .venv
-.venv\Scripts\activate          # Windows
-# source .venv/bin/activate     # macOS / Linux
-
+run.bat                    # Windows (auto-install dependensi)
+# atau:
 pip install -r requirements.txt
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+uvicorn main:app --reload --port 8000
 ```
 
-Backend siap di **http://localhost:8000** — dokumentasi interaktif di
-<http://localhost:8000/docs>.
+Tanpa `GROQ_API_KEY`, backend otomatis memakai **Ollama lokal**:
+```bash
+ollama pull deepseek-r1:7b
+ollama serve
+```
 
----
+Ingin mencoba Groq di lokal? Isi `.env`:
+```env
+AI_PROVIDER=groq
+GROQ_API_KEY=gsk_...
+```
 
-## 3. Menjalankan Frontend
-
+### Frontend
 ```bash
 cd chatbot-saya/frontend
 npm install
-npm run dev
+npm run dev          # http://localhost:5173
 ```
 
-Buka **http://localhost:5173**.
-
-### Library yang di-install
-
-```bash
-npm install react-markdown remark-gfm rehype-highlight highlight.js dompurify lucide-react
-```
-
-| Library | Kegunaan |
-|---|---|
-| `react-markdown` | Render Markdown pada jawaban AI |
-| `remark-gfm` | Dukungan tabel, strikethrough, task list |
-| `rehype-highlight` + `highlight.js` | Syntax highlighting code block |
-| `dompurify` | Sanitasi HTML (anti-XSS) |
-| `lucide-react` | Ikon UI yang konsisten |
-
-### Build produksi
-
-```bash
-npm run build      # hasil di dist/
-npm run preview    # pratinjau hasil build
+Buka **http://localhost:5173**. URL backend diatur di `.env`:
+```env
+VITE_API_URL=http://localhost:8000
 ```
 
 ---
 
-## 4. API Backend
+## 🔌 API Backend
 
-Kontrak lama **tetap utuh**, ditambah satu endpoint streaming.
+Kontrak lama tetap utuh.
 
-### `POST /chat` — cara lama (non-streaming)
-
+### `GET /health`
 ```json
-// Request (field bertanda * wajib)
+{ "status": "ok", "provider": "groq", "model": "llama-3.3-70b-versatile" }
+```
+
+### `POST /chat` — non-streaming
+```json
+// Request (field * wajib)
 {
-  "message": "Halo GungDev",          // *
+  "message": "Halo GungDev",           // *
   "history": [{ "role": "user", "content": "..." }],
   "system_prompt": "instruksi kustom", // opsional
   "temperature": 0.4,                  // opsional, 0.0–2.0
@@ -208,56 +218,86 @@ Kontrak lama **tetap utuh**, ditambah satu endpoint streaming.
 { "reply": "Halo! Ada yang bisa saya bantu?" }
 ```
 
-### `POST /chat/stream` — streaming (SSE)
-
-Request sama persis dengan `/chat`. Response `text/event-stream`, satu objek
-JSON per baris `data:`:
-
+### `POST /chat/stream` — streaming SSE
+Request sama. Response `text/event-stream`:
 ```
 data: {"delta": "Halo"}
 data: {"delta": "! Ada"}
 data: {"done": true}
 ```
-
-Jika terjadi masalah:
-
+Bila gagal:
 ```
-data: {"error": "Ollama tidak berjalan. Buka aplikasi Ollama lalu coba lagi."}
+data: {"error": "Kuota gratis Groq tercapai. Tunggu sebentar lalu coba lagi."}
 ```
-
-### `GET /health`
-
-```json
-{ "status": "ok" }
-```
-
-Dipakai frontend untuk indikator **Online/Offline** di header.
 
 ---
 
-## 5. Catatan
+## ⚙️ Variabel Environment
 
-- **Indikator status**: header hanya menampilkan titik hijau + "Online". Nama
-  model dan teknologi tidak ditampilkan di UI utama, melainkan di
-  **Pengaturan → Lanjutan**.
-- **Riwayat** disimpan di `localStorage` browser (`gungdev:sessions`). Matikan
-  lewat **Pengaturan → Percakapan → Simpan riwayat** bila tidak ingin menyimpan.
-- **Error ramah**: bila backend mati, muncul banner jelas + tombol
-  **"Coba lagi"** (bukan crash).
-- **Port bentrok?** Hentikan proses yang menahan port 8000:
-  ```powershell
-  Get-NetTCPConnection -State Listen -LocalPort 8000 |
-    ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
-  ```
-- **Uji E2E (opsional)** — butuh Playwright:
-  ```bash
-  npm install --no-save playwright
-  npx playwright install chromium
-  node e2e.mjs
-  ```
+### Backend
+| Variabel | Default | Keterangan |
+|---|---|---|
+| `AI_PROVIDER` | otomatis | `groq` atau `ollama` |
+| `GROQ_API_KEY` | — | API key dari console.groq.com |
+| `GROQ_MODEL` | `llama-3.3-70b-versatile` | Model Groq |
+| `GROQ_BASE_URL` | `https://api.groq.com/openai/v1` | Endpoint Groq |
+| `OLLAMA_HOST` | `http://localhost:11434` | Alamat Ollama lokal |
+| `OLLAMA_MODEL` | `deepseek-r1:7b` | Model Ollama |
+| `ALLOWED_ORIGINS` | — | Domain tambahan, pisah koma |
+| `TIMEOUT_GROQ` | `120` | Timeout detik |
+| `TIMEOUT_OLLAMA` | `300` | Timeout detik |
+| `PORT` | `8000` | Port (diisi otomatis oleh Render) |
+
+### Frontend
+| Variabel | Default | Keterangan |
+|---|---|---|
+| `VITE_API_URL` | `http://localhost:8000` | URL backend |
 
 ---
 
-## 6. Lisensi
+## 📌 Batas Kuota Gratis
 
-Proyek pribadi untuk pembelajaran. Bebas dimodifikasi sesuai kebutuhan.
+| Layanan | Batas |
+|---|---|
+| **Groq** | Rate limit per menit/hari; cek di console.groq.com |
+| **Render free** | 512 MB RAM, tidur setelah 15 menit idle |
+| **Vercel Hobby** | 100 GB bandwidth/bulan |
+
+Bila pengguna bertambah banyak, pertimbangkan:
+- Upgrade Render ke Starter (~$7/bln) agar selalu bangun
+- Upgrade Groq ke Developer plan
+- Tambahkan rate-limit per IP di backend (`slowapi`)
+
+---
+
+## 🧪 Uji E2E (opsional)
+
+```bash
+cd chatbot-saya/frontend
+npm install --no-save playwright
+npx playwright install chromium
+node e2e.mjs
+```
+
+---
+
+## 🔧 Troubleshooting
+
+**Port 8000 dipakai proses lain**
+```powershell
+Get-NetTCPConnection -State Listen -LocalPort 8000 |
+  ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
+```
+
+**Tidak ada nama model di UI?**
+Disengaja — nama model hanya tampil di **Pengaturan → Lanjutan**.
+
+**Riwayat hilang setelah ganti browser?**
+Riwayat disimpan di `localStorage` per-browser, bukan di server. Gunakan
+**Pengaturan → Percakapan → Ekspor** untuk mencadangkan.
+
+---
+
+## Lisensi
+
+Proyek pribadi untuk pembelajaran. Bebas dimodifikasi.

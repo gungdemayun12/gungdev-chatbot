@@ -1,253 +1,176 @@
 """
 =====================================================================
- BACKEND CHATBOT AI  (FastAPI + Ollama lokal)
+ BACKEND GUNGDEV — FastAPI, multi-provider
 =====================================================================
-File ini adalah satu-satunya file Python yang dibutuhkan untuk server.
+Satu server, dua mode penyedia AI:
 
-Cara menjalankan:
-    1. pip install -r requirements.txt
-    2. pastikan Ollama sudah jalan dan modelnya sudah diunduh
-       (ollama pull deepseek-r1:7b)
-    3. uvicorn main:app --reload --port 8000
+  1. GROQ (dipakai saat deploy / publik)
+       - API cloud OpenAI-compatible, sangat cepat (~280-500 token/detik)
+       - Butuh GROQ_API_KEY (gratis di console.groq.com)
+       - Cocok untuk Render / Railway / Fly.io (RAM kecil, tanpa GPU)
 
-Dokumentasi API otomatis tersedia di:
-    http://localhost:8000/docs
+  2. OLLAMA (dipakai saat pengembangan lokal)
+       - Model berjalan di komputer sendiri, tanpa API key
+       - Butuh aplikasi Ollama + model sudah diunduh
+
+Mode dipilih otomatis:
+   - Jika GROQ_API_KEY di-set  -> Groq
+   - Jika tidak                -> Ollama lokal
+  Bisa dipaksa lewat AI_PROVIDER=groq atau AI_PROVIDER=ollama.
+
+Kontrak API TIDAK berubah:
+   POST /chat         { message, history?, ... } -> { reply }
+   POST /chat/stream  { message, history?, ... } -> text/event-stream
+   GET  /health       -> { status, provider, model }
+
+Cara menjalankan lokal:
+     pip install -r requirements.txt
+     uvicorn main:app --reload --port 8000
+
+Dokumentasi otomatis:
+     http://localhost:8000/docs
 =====================================================================
 """
 
 # ---------------------------------------------------------------------
 # 1. IMPORT LIBRARY
 # ---------------------------------------------------------------------
-import os                 # untuk membaca environment variable (.env)
-import json               # untuk menyusun payload SSE (streaming)
-import logging            # untuk menulis log ke terminal
-from typing import List, Optional, Sequence   # tipe data untuk daftar riwayat pesan
+import json                 # payload SSE (streaming)
+import logging              # log rapi di terminal
+import os                   # membaca environment variable
+from typing import AsyncIterator, List, Optional, Sequence
 
-# load_dotenv() bertugas membaca file .env dan memasukkannya ke os.environ.
-# Dipakai untuk memuat file .env (opsional).
+import httpx                # HTTP client async (dipakai Groq & cek kesehatan)
 from dotenv import load_dotenv
-
-# FastAPI = kerangka kerja web, HTTPException = untuk mengembalikan error HTTP.
-# CORSMiddleware = izin agar frontend (port 5173) boleh memanggil backend ini.
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-# Client (bukan modul ollama global) supaya kita bisa menentukan host + headers
-# sendiri, yaitu Ollama LOKAL di http://localhost:11434.
-from ollama import Client, ResponseError
-
 # ---------------------------------------------------------------------
 # 2. KONFIGURASI DASAR
 # ---------------------------------------------------------------------
-# (Opsional) Baca file .env bila ada. Host & model kini ditulis langsung
-# di kode (Ollama lokal tanpa API Key), jadi file .env TIDAK wajib ada.
-# override=True: nilai di .env selalu menang atas sisa variabel lama
-# di terminal, supaya tidak "nyangkut" ke pengaturan sebelumnya.
 _ENV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
-load_dotenv(dotenv_path=_ENV_PATH, override=True)
+load_dotenv(dotenv_path=_ENV_PATH, override=False)
 
-# Nama model lokal yang dipakai: deepseek-r1:7b
-# (unduh sekali dengan: ollama pull deepseek-r1:7b)
-MODEL_NAME = "deepseek-r1:7b"
 
-# Alamat server Ollama lokal. Tidak ada API Key karena hanya bisa
-# diakses dari komputer ini. Jalankan aplikasi Ollama / "ollama serve".
-OLLAMA_HOST = "http://localhost:11434"
+def _env(nama: str, default: str = "") -> str:
+    """Membaca env var dan membuang spasi di ujung."""
+    return (os.environ.get(nama) or default).strip()
 
-# Batas waktu (detik) untuk satu permintaan ke Ollama.
-# Model lokal di CPU bisa butuh waktu lama, jadi beri ruang lebih.
-REQUEST_TIMEOUT = 300
 
-# Setup logging supaya pesan error terlihat rapi di terminal.
+def _env_int(nama: str, default: int) -> int:
+    """Membaca env var bertipe int dengan fallback aman."""
+    try:
+        return int(_env(nama) or default)
+    except ValueError:
+        return default
+
+
+def _env_float(nama: str, default: float) -> float:
+    """Membaca env var bertipe float dengan fallback aman."""
+    try:
+        return float(_env(nama) or default)
+    except ValueError:
+        return default
+
+
+# ---- Groq (cloud) ----
+GROQ_API_KEY = _env("GROQ_API_KEY")
+GROQ_BASE_URL = _env("GROQ_BASE_URL", "https://api.groq.com/openai/v1").rstrip("/")
+GROQ_MODEL = _env("GROQ_MODEL", "llama-3.3-70b-versatile")
+
+# ---- Ollama (lokal) ----
+OLLAMA_HOST = _env("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
+OLLAMA_MODEL = _env("OLLAMA_MODEL", "deepseek-r1:7b")
+
+# ---- Timeout ----
+# Groq cepat; Ollama lokal di CPU bisa sangat lambat.
+TIMEOUT_GROQ = _env_float("TIMEOUT_GROQ", 120)
+TIMEOUT_OLLAMA = _env_float("TIMEOUT_OLLAMA", 300)
+
+# ---- CORS ----
+# Daftar origin tambahan dipisah koma, mis:
+#   ALLOWED_ORIGINS=https://gungdev.vercel.app,https://gungdev.com
+_extra_origins = [
+    o.strip() for o in _env("ALLOWED_ORIGINS").split(",") if o.strip()
+]
+
+# Setup logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s",
 )
-logger = logging.getLogger("chatbot-backend")
+logger = logging.getLogger("gungdev-backend")
 
 
 # ---------------------------------------------------------------------
-# 3. INISIALISASI KLIEN OLLAMA LOKAL
+# 3. PEMILIHAN PROVIDER
 # ---------------------------------------------------------------------
-# Karena memakai Ollama lokal, TIDAK ada API Key dan TIDAK ada header
-# Authorization. Server Ollama hanya mendengarkan di komputer ini
-# (http://localhost:11434) sehingga tidak perlu autentikasi.
-client = Client(host="http://localhost:11434", timeout=REQUEST_TIMEOUT)
+def pilih_provider() -> str:
+    """
+    Menentukan provider aktif.
 
-logger.info("Terhubung ke Ollama lokal http://localhost:11434 memakai model %s", MODEL_NAME)
+    Urutan prioritas:
+      1. AI_PROVIDER=groq / ollama  (dipaksa manual)
+      2. GROQ_API_KEY ada           -> groq
+      3. selain itu                 -> ollama
+    """
+    dipaksa = _env("AI_PROVIDER").lower()
+    if dipaksa in ("groq", "ollama"):
+        return dipaksa
+    return "groq" if GROQ_API_KEY else "ollama"
+
+
+PROVIDER = pilih_provider()
+MODEL_NAME = GROQ_MODEL if PROVIDER == "groq" else OLLAMA_MODEL
+
+if PROVIDER == "groq":
+    logger.info("Provider aktif: GROQ (%s) model %s", GROQ_BASE_URL, MODEL_NAME)
+    if not GROQ_API_KEY:
+        logger.warning(
+            "AI_PROVIDER=groq tetapi GROQ_API_KEY kosong. "
+            "Permintaan akan gagal dengan HTTP 401."
+        )
+else:
+    logger.info("Provider aktif: OLLAMA lokal (%s) model %s", OLLAMA_HOST, MODEL_NAME)
 
 
 # ---------------------------------------------------------------------
-# 4. SKEMA DATA (validasi request & response)
+# 4. SKEMA DATA
 # ---------------------------------------------------------------------
 class ChatRequest(BaseModel):
     """
-    Bentuk body JSON yang diterima endpoint POST /chat:
-        {"message": "Halo!"}
+    Body JSON untuk /chat dan /chat/stream.
 
-    Field(...) artinya wajib diisi. min_length=1 memastikan tidak kosong.
-    history (opsional) = riwayat percakapan sebelumnya agar AI ingat konteks.
+    Field lama tetap sama persis (kompatibel):
+        {"message": "Halo!"}
     """
     message: str = Field(..., min_length=1, max_length=8000, description="Pesan dari user")
     history: List[dict] = Field(
         default_factory=list,
         description="Riwayat percakapan lama, format: [{role, content}, ...]",
     )
-    # Semua field opsional di bawah ini agar kontrak lama tetap kompatibel:
-    # {"message": "..."} saja tetap valid dan memakai nilai default.
     system_prompt: Optional[str] = Field(None, description="Instruksi kustom pengguna")
     temperature: Optional[float] = Field(None, ge=0.0, le=2.0, description="Kreativitas jawaban")
     max_tokens: Optional[int] = Field(None, ge=16, le=8192, description="Panjang maksimum jawaban")
 
 
 class ChatResponse(BaseModel):
-    """Bentuk JSON yang dikembalikan: {"reply": "..."}"""
+    """Response /chat (kontrak lama, tidak berubah): {"reply": "..."}"""
     reply: str
 
 
-# ---------------------------------------------------------------------
-# 5. INSTANCE APLIKASI FASTAPI
-# ---------------------------------------------------------------------
-app = FastAPI(
-    title="Chatbot AI Backend",
-    description=f"Backend chatbot berbasis FastAPI + Ollama lokal ({MODEL_NAME}).",
-    version="1.0.0",
-)
-
-# ---------------------------------------------------------------------
-# 6. CORS MIDDLEWARE
-# ---------------------------------------------------------------------
-# Browser memblokir request dari domain berbeda (frontend 5173 -> backend 8000)
-# kecuali backend mengizinkannya lewat header CORS.
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",   # frontend Vite saat development
-        "http://127.0.0.1:5173",   # alternatif alamat lokal
-    ],
-    # allow_origin_regex dipakai untuk domain Vercel (preview & production),
-    # karena wildcard seperti "https://*.vercel.app" tidak didukung
-    # langsung oleh spesifikasi CORS di browser.
-    allow_origin_regex=r"https://([a-zA-Z0-9-]+\.)*vercel\.app",
-    allow_methods=["*"],   # izinkan GET, POST, OPTIONS, dll.
-    allow_headers=["*"],   # izinkan semua header (Content-Type, Authorization, ...)
-    allow_credentials=False,
-)
+class HealthResponse(BaseModel):
+    """Response /health — menambah info provider tanpa merusak field 'status'."""
+    status: str
+    provider: str
+    model: str
 
 
 # ---------------------------------------------------------------------
-# 7. FUNGSI PEMBANTU: MENERJEMAHKAN ERROR OLLAMA -> HTTPException
+# 5. SYSTEM PROMPT & DEFAULT MODEL PARAMETER
 # ---------------------------------------------------------------------
-def raise_informative_error(exc: Exception) -> None:
-    """
-    Mengubah error mentah dari library ollama menjadi pesan HTTP yang
-    ramah dibaca oleh pengguna maupun developer frontend.
-    """
-
-    # --- Error dari server Ollama (status code 4xx/5xx) ---
-    if isinstance(exc, ResponseError):
-        status = getattr(exc, "status_code", None)
-        # beberapa versi library menyimpan kode di error.error / error dict
-        detail_asli = getattr(exc, "error", None) or str(exc)
-
-        if status == 401:
-            raise HTTPException(
-                status_code=401,
-                detail=(
-                    "Ollama menolak permintaan (401). Backend ini memakai Ollama lokal "
-                    "di http://localhost:11434 tanpa API Key."
-                ),
-            )
-        if status == 402:
-            raise HTTPException(
-                status_code=402,
-                detail=(
-                    "Ollama meminta pembayaran (HTTP 402). Backend ini seharusnya memakai "
-                    "Ollama lokal di http://localhost:11434 yang tidak butuh kredit."
-                ),
-            )
-        if status == 403:
-            raise HTTPException(
-                status_code=403,
-                detail="Akses ditolak oleh server Ollama (HTTP 403).",
-            )
-        if status == 404:
-            raise HTTPException(
-                status_code=404,
-                detail=(
-                    f"Model '{MODEL_NAME}' tidak ditemukan di Ollama lokal. "
-                    f"Unduh dulu dengan: ollama pull {MODEL_NAME}"
-                ),
-            )
-        if status == 410:
-            raise HTTPException(
-                status_code=410,
-                detail=(
-                    f"Model '{MODEL_NAME}' sudah tidak tersedia (HTTP 410). "
-                    "Ganti MODEL_NAME di file .env dengan model yang sudah diunduh."
-                ),
-            )
-        if status == 429:
-            raise HTTPException(
-                status_code=429,
-                detail="Kuota habis atau terlalu banyak permintaan. Coba lagi beberapa saat lagi.",
-            )
-        if status and 500 <= status < 600:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Server Ollama sedang bermasalah (HTTP {status}). Coba lagi nanti.",
-            )
-        # Status lain yang tidak disebutkan di atas
-        raise HTTPException(
-            status_code=502,
-            detail=f"Ollama mengembalikan error (HTTP {status}): {detail_asli}",
-        )
-
-    # --- Timeout (server terlalu lama menjawab) ---
-    if isinstance(exc, TimeoutError) or "timeout" in str(exc).lower():
-        raise HTTPException(
-            status_code=504,
-            detail="Permintaan ke Ollama timeout. Model lokal mungkin masih memproses — silakan coba lagi.",
-        )
-
-    # --- Gagal konek (internet mati / host salah) ---
-    pesan = str(exc).lower()
-    if "connection" in pesan or "connect" in pesan or "getaddrinfo" in pesan:
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "Tidak dapat terhubung ke Ollama lokal di "
-                f"{OLLAMA_HOST}. Pastikan aplikasi Ollama sudah berjalan "
-                "(buka aplikasi Ollama atau jalankan 'ollama serve')."
-            ),
-        )
-
-    # --- Fallback: error tak terduga ---
-    logger.exception("Error tidak terduga saat memanggil Ollama")
-    raise HTTPException(
-        status_code=500,
-        detail=f"Terjadi kesalahan internal: {exc}",
-    )
-
-
-# ---------------------------------------------------------------------
-# 8. ENDPOINT GET /health
-# ---------------------------------------------------------------------
-@app.get("/health")
-def health_check():
-    """
-    Endpoint sederhana untuk memastikan server hidup.
-    Berguna untuk monitoring / cek cepat di browser.
-    """
-    return {"status": "ok"}
-
-
-# ---------------------------------------------------------------------
-# 9. SYSTEM PROMPT & OPSI MODEL (dipakai /chat dan /chat/stream)
-# ---------------------------------------------------------------------
-# Instruksi bawaan agar jawaban GungDev rapi, jujur, dan tidak bertele-tele.
 DEFAULT_SYSTEM_PROMPT = (
     "Kamu adalah GungDev, asisten AI berbahasa Indonesia yang ramah, akurat, dan "
     "jelas. Jawab dalam bahasa yang digunakan pengguna. Jika tidak yakin dengan "
@@ -255,10 +178,7 @@ DEFAULT_SYSTEM_PROMPT = (
     "seperlunya. Jawab langsung ke inti tanpa basa-basi berlebihan."
 )
 
-# Temperature rendah agar jawaban faktual lebih stabil/tidak mengarang.
 DEFAULT_TEMPERATURE = 0.4
-
-# Batas panjang jawaban (token).
 DEFAULT_MAX_TOKENS = 2048
 
 
@@ -267,15 +187,11 @@ def build_messages(
     history: Optional[Sequence[dict]] = None,
     system_prompt: Optional[str] = None,
 ) -> List[dict]:
-    """
-    Menyusun daftar pesan untuk Ollama:
-    [pesan sistem] + [riwayat percakapan] + [pesan user terbaru].
-    """
+    """Menyusun [system] + [riwayat 20 terakhir] + [pesan baru]."""
     messages: List[dict] = [
         {"role": "system", "content": (system_prompt or DEFAULT_SYSTEM_PROMPT).strip()}
     ]
 
-    # Ambil maksimal 20 pesan terakhir agar konteks tidak membengkak.
     for item in list(history or [])[-20:]:
         try:
             role = item.get("role")
@@ -289,82 +205,375 @@ def build_messages(
     return messages
 
 
+def resolve_options(request: ChatRequest) -> dict:
+    """Menentukan temperature & batas token final."""
+    return {
+        "temperature": (
+            request.temperature
+            if request.temperature is not None
+            else DEFAULT_TEMPERATURE
+        ),
+        "max_tokens": (
+            request.max_tokens
+            if request.max_tokens is not None
+            else DEFAULT_MAX_TOKENS
+        ),
+    }
+
+
 # ---------------------------------------------------------------------
-# 9. ENDPOINT GET /health
+# 6. INSTANCE APLIKASI FASTAPI
+# ---------------------------------------------------------------------
+app = FastAPI(
+    title="GungDev Backend",
+    description=f"Backend GungDev (provider: {PROVIDER}, model: {MODEL_NAME}).",
+    version="2.0.0",
+)
+
+
+# ---------------------------------------------------------------------
+# 7. CORS MIDDLEWARE
+# ---------------------------------------------------------------------
+# allow_origins_exact  = untuk development & domain yang didaftarkan manual
+# allow_origin_regex   = menangani SEMUA subdomain Vercel (preview & production),
+#                        karena browser tidak mendukung wildcard "https://*.vercel.app".
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:4173",   # vite preview
+        "http://127.0.0.1:4173",
+        *_extra_origins,
+    ],
+    allow_origin_regex=r"https://([a-zA-Z0-9-]+\.)*vercel\.app",
+    allow_methods=["*"],
+    allow_headers=["*"],
+    allow_credentials=False,
+    max_age=86400,   # cache preflight 24 jam -> lebih cepat
+)
+
+
+# ---------------------------------------------------------------------
+# 8. FUNGSI PEMBANTU: ERROR -> HTTPException YANG RAMAH
+# ---------------------------------------------------------------------
+def pesan_error_http(status: int, detail_asli: str = "") -> str:
+    """Menerjemahkan status HTTP provider menjadi pesan Bahasa Indonesia."""
+    if status == 400:
+        return "Permintaan tidak valid. Coba ubah atau pendekkan pesan Anda."
+    if status in (401, 403):
+        if PROVIDER == "groq":
+            return (
+                "API key Groq tidak valid atau sudah dicabut. Periksa variabel "
+                "GROQ_API_KEY di server."
+            )
+        return (
+            "Ollama menolak permintaan. Pastikan backend memakai Ollama lokal "
+            f"di {OLLAMA_HOST} (tanpa API key)."
+        )
+    if status == 404:
+        if PROVIDER == "groq":
+            return f"Model '{MODEL_NAME}' tidak tersedia di Groq. Ganti GROQ_MODEL."
+        return (
+            f"Model '{MODEL_NAME}' tidak ditemukan di Ollama. "
+            f"Unduh dulu dengan: ollama pull {MODEL_NAME}"
+        )
+    if status == 413:
+        return "Pesan terlalu panjang. Coba persingkat."
+    if status == 422:
+        return "Format permintaan tidak sesuai."
+    if status == 429:
+        if PROVIDER == "groq":
+            return (
+                "Kuota gratis Groq tercapai atau terlalu banyak permintaan. "
+                "Tunggu sebentar lalu coba lagi."
+            )
+        return "Terlalu banyak permintaan. Coba lagi beberapa saat lagi."
+    if status == 503:
+        if PROVIDER == "groq":
+            return "Layanan Groq sedang sibuk. Coba lagi sebentar lagi."
+        return (
+            f"Tidak dapat terhubung ke Ollama di {OLLAMA_HOST}. "
+            "Pastikan aplikasi Ollama berjalan ('ollama serve')."
+        )
+    if status == 504:
+        return "Waktu tunggu habis. Model mungkin masih memproses — coba lagi."
+    if 500 <= status < 600:
+        return f"Layanan AI sedang bermasalah (HTTP {status}). Coba lagi nanti."
+    return detail_asli or f"Terjadi kesalahan pada layanan AI (HTTP {status})."
+
+
+def ke_http_exception(exc: Exception) -> HTTPException:
+    """Mengubah exception apa pun menjadi HTTPException yang informatif."""
+    # Error HTTP dari httpx (Groq membalas 4xx/5xx)
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        detail_asli = ""
+        try:
+            body = exc.response.json()
+            detail_asli = (
+                body.get("error", {}).get("message")
+                if isinstance(body.get("error"), dict)
+                else str(body.get("error") or "")
+            )
+        except Exception:  # noqa: BLE001
+            detail_asli = exc.response.text[:200]
+        logger.error("Provider membalas HTTP %s: %s", status, detail_asli)
+        return HTTPException(status_code=502, detail=pesan_error_http(status, detail_asli))
+
+    if isinstance(exc, httpx.TimeoutException) or isinstance(exc, TimeoutError):
+        return HTTPException(
+            status_code=504,
+            detail="Waktu tunggu habis saat menghubungi layanan AI. Coba lagi.",
+        )
+
+    if isinstance(exc, httpx.RequestError):
+        pesan = str(exc).lower()
+        if PROVIDER == "groq":
+            return HTTPException(
+                status_code=503,
+                detail="Tidak dapat menghubungi Groq. Periksa koneksi internet server.",
+            )
+        if "connection" in pesan or "connect" in pesan or "getaddrinfo" in pesan:
+            return HTTPException(
+                status_code=503,
+                detail=(
+                    f"Tidak dapat terhubung ke Ollama di {OLLAMA_HOST}. "
+                    "Pastikan aplikasi Ollama sudah berjalan ('ollama serve')."
+                ),
+            )
+        return HTTPException(status_code=503, detail=f"Gagal menghubungi layanan AI: {exc}")
+
+    logger.error("Kesalahan tak terduga: %s", exc)
+    return HTTPException(
+        status_code=502,
+        detail="Terjadi kesalahan saat memproses jawaban. Silakan coba lagi.",
+    )
+
+
+# ---------------------------------------------------------------------
+# 9. PEMANGGILAN KE GROQ (OpenAI-compatible)
+# ---------------------------------------------------------------------
+def _groq_headers() -> dict:
+    return {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+
+async def groq_complete(messages: List[dict], opsi: dict) -> str:
+    """Meminta jawaban lengkap (non-streaming) ke Groq."""
+    payload = {
+        "model": GROQ_MODEL,
+        "messages": messages,
+        "temperature": opsi["temperature"],
+        "max_completion_tokens": opsi["max_tokens"],
+        "stream": False,
+    }
+    async with httpx.AsyncClient(timeout=TIMEOUT_GROQ) as http:
+        res = await http.post(
+            f"{GROQ_BASE_URL}/chat/completions",
+            headers=_groq_headers(),
+            json=payload,
+        )
+        res.raise_for_status()
+        data = res.json()
+
+    try:
+        isi = data["choices"][0]["message"]["content"] or ""
+    except (KeyError, IndexError, TypeError):
+        isi = ""
+
+    if not isi.strip():
+        raise HTTPException(
+            status_code=502,
+            detail="Layanan AI mengembalikan jawaban kosong. Silakan coba lagi.",
+        )
+    return isi.strip()
+
+
+async def groq_stream(messages: List[dict], opsi: dict) -> AsyncIterator[str]:
+    """Menghasilkan potongan teks (delta) dari Groq secara bertahap."""
+    payload = {
+        "model": GROQ_MODEL,
+        "messages": messages,
+        "temperature": opsi["temperature"],
+        "max_completion_tokens": opsi["max_tokens"],
+        "stream": True,
+    }
+    async with httpx.AsyncClient(timeout=TIMEOUT_GROQ) as http:
+        async with http.stream(
+            "POST",
+            f"{GROQ_BASE_URL}/chat/completions",
+            headers=_groq_headers(),
+            json=payload,
+        ) as res:
+            if res.status_code >= 400:
+                # Baca body error supaya pesannya informatif.
+                body = await res.aread()
+                logger.error("Groq menolak streaming: %s %s", res.status_code, body[:200])
+                raise HTTPException(
+                    status_code=502,
+                    detail=pesan_error_http(res.status_code),
+                )
+
+            async for baris in res.aiter_lines():
+                if not baris or not baris.startswith("data:"):
+                    continue
+                data = baris[5:].strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    obj = json.loads(data)
+                except json.JSONDecodeError:
+                    continue
+
+                try:
+                    delta = obj["choices"][0]["delta"].get("content") or ""
+                except (KeyError, IndexError, TypeError):
+                    delta = ""
+                if delta:
+                    yield delta
+
+
+# ---------------------------------------------------------------------
+# 10. PEMANGGILAN KE OLLAMA (lokal)
+# ---------------------------------------------------------------------
+async def ollama_complete(messages: List[dict], opsi: dict) -> str:
+    """Meminta jawaban lengkap ke Ollama lokal via HTTP API."""
+    payload = {
+        "model": OLLAMA_MODEL,
+        "messages": messages,
+        "stream": False,
+        "options": {
+            "temperature": opsi["temperature"],
+            "num_predict": opsi["max_tokens"],
+        },
+    }
+    async with httpx.AsyncClient(timeout=TIMEOUT_OLLAMA) as http:
+        res = await http.post(f"{OLLAMA_HOST}/api/chat", json=payload)
+        res.raise_for_status()
+        data = res.json()
+
+    isi = (data.get("message") or {}).get("content") or ""
+    if not isi.strip():
+        raise HTTPException(
+            status_code=502,
+            detail="Ollama mengembalikan balasan kosong. Silakan coba lagi.",
+        )
+    return isi.strip()
+
+
+async def ollama_stream(messages: List[dict], opsi: dict) -> AsyncIterator[str]:
+    """Menghasilkan potongan teks dari Ollama secara bertahap."""
+    payload = {
+        "model": OLLAMA_MODEL,
+        "messages": messages,
+        "stream": True,
+        "options": {
+            "temperature": opsi["temperature"],
+            "num_predict": opsi["max_tokens"],
+        },
+    }
+    async with httpx.AsyncClient(timeout=TIMEOUT_OLLAMA) as http:
+        async with http.stream("POST", f"{OLLAMA_HOST}/api/chat", json=payload) as res:
+            if res.status_code >= 400:
+                body = await res.aread()
+                logger.error("Ollama menolak: %s %s", res.status_code, body[:200])
+                raise HTTPException(
+                    status_code=502,
+                    detail=pesan_error_http(res.status_code),
+                )
+
+            async for baris in res.aiter_lines():
+                if not baris.strip():
+                    continue
+                try:
+                    obj = json.loads(baris)
+                except json.JSONDecodeError:
+                    continue
+                if obj.get("error"):
+                    raise HTTPException(status_code=502, detail=str(obj["error"]))
+                delta = (obj.get("message") or {}).get("content") or ""
+                if delta:
+                    yield delta
+                if obj.get("done"):
+                    break
+
+
+# ---------------------------------------------------------------------
+# 11. DISPATCHER: satu pintu untuk kedua provider
+# ---------------------------------------------------------------------
+async def complete(messages: List[dict], opsi: dict) -> str:
+    """Menghasilkan jawaban lengkap dari provider aktif."""
+    if PROVIDER == "groq":
+        return await groq_complete(messages, opsi)
+    return await ollama_complete(messages, opsi)
+
+
+async def stream(messages: List[dict], opsi: dict) -> AsyncIterator[str]:
+    """Menghasilkan jawaban bertahap dari provider aktif."""
+    if PROVIDER == "groq":
+        async for delta in groq_stream(messages, opsi):
+            yield delta
+        return
+    async for delta in ollama_stream(messages, opsi):
+        yield delta
+
+
+# ---------------------------------------------------------------------
+# 12. ENDPOINT GET /health
+# ---------------------------------------------------------------------
+@app.get("/health", response_model=HealthResponse)
+async def health_check():
+    """
+    Untuk indikator Online/Offline di frontend.
+
+    Selalu membalas 'ok' bila server hidup; frontend lalu memastikan
+    provider benar-benar bisa dipanggil saat pesan pertama dikirim.
+    """
+    return {"status": "ok", "provider": PROVIDER, "model": MODEL_NAME}
+
+
+# ---------------------------------------------------------------------
+# 13. ENDPOINT POST /chat  (non-streaming, kontrak lama)
 # ---------------------------------------------------------------------
 @app.post("/chat", response_model=ChatResponse)
-def chat(request: ChatRequest):
+async def chat(request: ChatRequest):
     """
     Menerima {"message": "..."} lalu mengembalikan {"reply": "..."}.
 
-    Kontrak lama TETAP SAMA (dipakai klien lama). Field tambahan
-    (history, system_prompt, temperature, max_tokens) bersifat opsional.
+    Kontrak lama TETAP SAMA. Field tambahan (history, system_prompt,
+    temperature, max_tokens) bersifat opsional.
     """
-
-    # 9a. Ambil dan bersihkan pesan user.
     user_message = request.message.strip()
     if not user_message:
         raise HTTPException(status_code=400, detail="Pesan tidak boleh kosong.")
 
-    # 9b. Susun percakapan (system + history + pesan baru).
     messages = build_messages(
         user_message,
         history=request.history,
         system_prompt=request.system_prompt,
     )
+    opsi = resolve_options(request)
 
-    # Opsi model: temperature rendah & batas token.
-    options = {
-        "temperature": (
-            request.temperature if request.temperature is not None else DEFAULT_TEMPERATURE
-        ),
-        "num_predict": (
-            request.max_tokens if request.max_tokens is not None else DEFAULT_MAX_TOKENS
-        ),
-    }
-
-    # 9c. Kirim ke Ollama lokal dengan try/except.
     try:
-        response = client.chat(
-            model="deepseek-r1:7b",  # <--- model lokal yang sudah diunduh
-            messages=messages,
-            options=options,
-        )
-
-        # Respons library ollama berbentuk objek; teks jawaban ada di
-        # response["message"]["content"] (atau response.message.content).
-        content = ""
-        try:
-            content = response["message"]["content"]
-        except (KeyError, TypeError):
-            content = getattr(getattr(response, "message", None), "content", "") or ""
-
-        if not content or not str(content).strip():
-            raise HTTPException(
-                status_code=502,
-                detail="Ollama mengembalikan balasan kosong. Silakan coba lagi.",
-            )
-
-        return {"reply": str(content).strip()}
-
+        isi = await complete(messages, opsi)
+        return {"reply": isi}
     except HTTPException:
-        # Jangan dibungkus ulang - teruskan apa adanya.
         raise
-    except Exception as exc:  # noqa: BLE001 - semua error diterjemahkan di helper
-        logger.error("Gagal memanggil Ollama: %s", exc)
-        raise_informative_error(exc)
+    except Exception as exc:  # noqa: BLE001
+        raise ke_http_exception(exc) from exc
 
 
 # ---------------------------------------------------------------------
-# 10. ENDPOINT POST /chat/stream  (Server-Sent Events)
+# 14. ENDPOINT POST /chat/stream  (Server-Sent Events)
 # ---------------------------------------------------------------------
 @app.post("/chat/stream")
-def chat_stream(request: ChatRequest):
+async def chat_stream(request: ChatRequest):
     """
-    Versi STREAMING dari /chat. Jawaban dikirim potongan demi potongan
-    (token per token) memakai protokol SSE agar UI bisa mengetik bertahap.
+    Versi streaming dari /chat. Format SSE (satu JSON per baris data:):
 
-    Format yang dikirim ke browser (satu objek JSON per baris "data:"):
         data: {"delta": "Halo"}          <- potongan teks baru
         data: {"done": true}             <- selesai
         data: {"error": "pesan error"}   <- terjadi masalah
@@ -378,68 +587,49 @@ def chat_stream(request: ChatRequest):
         history=request.history,
         system_prompt=request.system_prompt,
     )
+    opsi = resolve_options(request)
 
-    options = {
-        "temperature": (
-            request.temperature if request.temperature is not None else DEFAULT_TEMPERATURE
-        ),
-        "num_predict": (
-            request.max_tokens if request.max_tokens is not None else DEFAULT_MAX_TOKENS
-        ),
-    }
+    def sse(obj: dict) -> str:
+        return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
 
-    def event_stream():
-        """Generator: menghasilkan event SSE sampai jawaban selesai."""
+    async def event_stream() -> AsyncIterator[str]:
         try:
-            for chunk in client.chat(
-                model="deepseek-r1:7b",
-                messages=messages,
-                options=options,
-                stream=True,
-            ):
-                # Ambil potongan teks dari tiap chunk.
-                try:
-                    token = chunk["message"]["content"]
-                except (KeyError, TypeError):
-                    token = getattr(getattr(chunk, "message", None), "content", "") or ""
+            ada_isi = False
+            async for delta in stream(messages, opsi):
+                ada_isi = True
+                yield sse({"delta": delta})
 
-                if token:
-                    yield f"data: {json.dumps({'delta': token}, ensure_ascii=False)}\n\n"
+            if not ada_isi:
+                yield sse(
+                    {"error": "Layanan AI tidak mengirim jawaban. Silakan coba lagi."}
+                )
+                return
 
-            yield f"data: {json.dumps({'done': True})}\n\n"
+            yield sse({"done": True})
 
-        except GeneratorExit:
-            # Klien menutup koneksi (tombol Stop) — hentikan dengan tenang.
-            logger.info("Klien menghentikan streaming.")
+        except HTTPException as exc:
+            yield sse({"error": exc.detail})
         except Exception as exc:  # noqa: BLE001
-            logger.error("Gagal streaming dari Ollama: %s", exc)
-            # Terjemahkan error menjadi pesan ramah, kirim sebagai event error.
-            try:
-                raise_informative_error(exc)
-            except HTTPException as http_exc:
-                pesan = http_exc.detail
-            except Exception:  # noqa: BLE001
-                pesan = "Terjadi kesalahan saat menghubungi Ollama."
-            yield f"data: {json.dumps({'error': pesan}, ensure_ascii=False)}\n\n"
+            logger.error("Streaming gagal: %s", exc)
+            hasil = ke_http_exception(exc)
+            yield sse({"error": hasil.detail})
 
-    # Header SSE: no-cache + X-Accel-Buffering agar tidak di-buffer proxy.
     return StreamingResponse(
         event_stream(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
+            "X-Accel-Buffering": "no",   # cegah buffering di proxy (Render/Nginx)
         },
     )
 
 
 # ---------------------------------------------------------------------
-# 10. MENJALANKAN SERVER (opsional)
+# 15. ENTRY POINT (python main.py)
 # ---------------------------------------------------------------------
-# Cara utama tetap: uvicorn main:app --reload --port 8000
-# Blok di bawah bisa dipakai dengan: python main.py
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    port = _env_int("PORT", 8000)
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
