@@ -1,5 +1,5 @@
 /**
- * api.js — semua komunikasi ke backend FastAPI (localhost:8000).
+ * api.js — semua komunikasi ke backend AI.
  *
  * Ada dua cara memanggil:
  *   1. streamChat()  -> jawaban dikirim token per token (SSE) => dipakai UI
@@ -11,19 +11,41 @@
  *                     -> { reply: "..." }
  *   POST /chat/stream sama, tetapi membalas text/event-stream:
  *                     data: {"delta":"..."} ... data: {"done":true}
- *   GET  /health      -> { status: "ok" }
+ *   GET  /health      -> { status: "ok", provider, model }
  */
 
 /**
  * URL backend default.
  *
  * Prioritas:
- *   1. VITE_API_URL dari file .env (dipakai saat deploy, mis. Vercel)
- *   2. http://localhost:8000 (pengembangan lokal)
+ *   1. VITE_API_URL dari Environment Variables (dipakai saat deploy)
+ *   2. Otomatis:
+ *        - di localhost -> http://localhost:8000 (backend terpisah saat dev)
+ *        - di domain publik -> "/api" (backend satu domain, mis. Vercel)
+ *
+ * Karena backend kini bisa ikut di-deploy ke Vercel (folder /api),
+ * frontend yang di-hosting di domain yang sama TIDAK WAJIB mengisi
+ * VITE_API_URL sama sekali.
  */
-export const DEFAULT_API_URL =
-  (import.meta.env?.VITE_API_URL || '').trim().replace(/\/+$/, '') ||
-  'http://localhost:8000'
+function tebakDefault() {
+  const dariEnv = (import.meta.env?.VITE_API_URL || '').trim().replace(/\/+$/, '')
+  if (dariEnv) return dariEnv
+
+  if (typeof window !== 'undefined' && window.location) {
+    const { hostname, origin } = window.location
+    const lokal =
+      hostname === 'localhost' ||
+      hostname === '127.0.0.1' ||
+      hostname === '[::1]' ||
+      hostname === ''
+    if (lokal) return 'http://localhost:8000'
+    return `${origin}/api`
+  }
+
+  return 'http://localhost:8000'
+}
+
+export const DEFAULT_API_URL = tebakDefault()
 
 /** Membersihkan base URL (buang garis miring di akhir). */
 export function normalizeUrl(url) {

@@ -4,17 +4,21 @@ Aplikasi chatbot AI premium bergaya **Claude.ai / ChatGPT**, siap dipakai banyak
 
 | Bagian | Teknologi | Hosting |
 |---|---|---|
-| **Frontend** | React 19 + Vite 8 | **Vercel** (gratis) |
-| **Backend** | FastAPI (Python) | **Render** / Railway (gratis) |
+| **Frontend** | React 19 + Vite 8 | **Vercel** (gratis, tanpa kartu) |
+| **Backend** | FastAPI (Python) | **Vercel Serverless** (gratis, tanpa kartu) |
 | **Model AI** | Groq Cloud (produksi) atau Ollama (lokal) | API / komputer sendiri |
+
+> **Satu platform, satu repo, tanpa kartu kredit.**
+> Frontend dan backend sama-sama di Vercel, jadi tidak ada masalah CORS
+> dan tidak ada cold-sleep 15 menit seperti Render.
 
 ---
 
 ## 🏗 Arsitektur
 
 ```
-Pengguna ──► Vercel (React) ──HTTPS──► Render (FastAPI) ──► Groq Cloud (LLM)
-               frontend/                 backend/            gratis, ~280 tps
+Pengguna ──► Vercel (React) ──► Vercel Serverless (/api) ──► Groq Cloud (LLM)
+          frontend/          api/index.py                     gratis, ~280 tps
 
 Saat development lokal:
 Pengguna ──► localhost:5173 ──► localhost:8000 ──► Ollama lokal (deepseek-r1:7b)
@@ -80,80 +84,96 @@ max token, system prompt) · Pintasan · Tentang.
 ## 📁 Struktur Folder
 
 ```
-chatbot-saya/
-├── frontend/                        # React + Vite  ->  Vercel
-│   ├── vercel.json                  # konfigurasi deploy Vercel
-│   ├── index.html                   # anti-flash tema, viewport, favicon
-│   ├── .env.example                 # VITE_API_URL
-│   ├── e2e.mjs                      # uji end-to-end (Playwright)
-│   └── src/
-│       ├── App.jsx / App.css / index.css / main.jsx
-│       ├── components/              # ChatArea, Composer, EmptyState, Markdown,
-│       │                            # Message, Sidebar, Settings, Modal, Toast, icons
-│       ├── hooks/                   # useSessions, useSettings, useToasts
-│       └── lib/                     # api, storage, text, theme
+gungdev-chatbot/                       # root repo
+├── api/
+│   └── index.py                       # entry point Vercel (impor app dari backend)
+├── requirements.txt                   # dependensi untuk Vercel
+├── vercel.json                        # fungsi + rewrite /health /chat /chat/stream
+├── Dockerfile                         # alternatif: Render/Railway/Fly.io
 │
-└── backend/                         # FastAPI  ->  Render / Railway
-    ├── main.py                      # seluruh logika server (multi-provider)
-    ├── requirements.txt
-    ├── Dockerfile                   # untuk Render/Railway/Fly.io
-    ├── render.yaml                  # blueprint deploy Render
-    ├── run.bat                      # peluncur cepat Windows
-    └── .env.example
+└── chatbot-saya/
+    ├── frontend/                      # React + Vite  ->  Vercel
+    │   ├── vercel.json                # SPA rewrite + cache aset
+    │   ├── index.html                 # anti-flash tema, viewport, favicon
+    │   ├── .env.example               # VITE_API_URL
+    │   ├── e2e.mjs                    # uji end-to-end (Playwright)
+    │   └── src/
+    │       ├── App.jsx / App.css / index.css / main.jsx
+    │       ├── components/            # ChatArea, Composer, EmptyState, Markdown,
+    │       │                          # Message, Sidebar, Settings, Modal, Toast, icons
+    │       ├── hooks/                 # useSessions, useSettings, useToasts
+    │       └── lib/                   # api, storage, text, theme
+    │
+    └── backend/                       # FastAPI (sumber logika tunggal)
+        ├── main.py                    # seluruh logika server (multi-provider)
+        ├── requirements.txt
+        ├── Dockerfile                 # untuk Render/Railway/Fly.io
+        ├── render.yaml                # blueprint deploy Render
+        ├── run.bat                    # peluncur cepat Windows
+        └── .env.example
 ```
 
 ---
 
-## 🚀 Deploy (Ringkas)
+## 🚀 Deploy (Ringkas) — semuanya di Vercel, tanpa kartu
 
 ### Langkah 1 — Ambil API key Groq (gratis)
 1. Buka <https://console.groq.com/keys>
 2. Login → **Create API Key** → salin (diawali `gsk_...`)
-3. Simpan, akan dipakai di langkah 2
+3. Simpan, akan dipakai di langkah 3
 
-### Langkah 2 — Deploy Backend ke Render
-1. Buka <https://dashboard.render.com> → **New** → **Web Service**
-2. Hubungkan repo `gungdev-chatbot`
-3. Isi:
-   - **Root Directory**: `chatbot-saya/backend`
-   - **Runtime**: **Docker** (otomatis terbaca dari `Dockerfile`)
-   - **Instance Type**: **Free**
-   - **Health Check Path**: `/health`
-4. **Environment Variables**:
+### Langkah 2 — Deploy Backend (Vercel Serverless)
+1. Buka <https://vercel.com/new> → import repo `gungdev-chatbot`
+2. Beri nama project, mis. `gungdev-api`
+3. **Root Directory**: biarkan **kosong** (root repo)
+4. **Framework Preset**: **Other** (jangan Vite)
+5. **Environment Variables**:
    | Key | Value |
    |---|---|
    | `AI_PROVIDER` | `groq` |
    | `GROQ_API_KEY` | `gsk_...` (dari langkah 1) |
    | `GROQ_MODEL` | `llama-3.3-70b-versatile` |
-5. **Create Web Service** → tunggu build (~3 menit)
-6. Salin URL backend, mis. `https://gungdev-api.onrender.com`
-7. Tes: buka `https://gungdev-api.onrender.com/health` → harus muncul
+   | `ALLOWED_ORIGINS` | `*` |
+6. **Deploy** → dapat URL `https://gungdev-api.vercel.app`
+7. Tes: buka `https://gungdev-api.vercel.app/health` → harus muncul
    `{"status":"ok","provider":"groq","model":"..."}`
 
-> Render free **tidur setelah 15 menit idle**. Permintaan pertama setelah tidur
-> butuh ~30–60 detik untuk bangun. Ini normal.
+> `vercel.json` di root repo sudah mengatur fungsi `api/index.py`
+> (maxDuration 60 detik) dan rewrite `/health`, `/chat`, `/chat/stream`.
+>
+> **Tidak ada cold-sleep** seperti Render. Tapi ada batas eksekusi
+> 60 detik per request — jawaban sangat panjang bisa terputus.
 
-### Langkah 3 — Deploy Frontend ke Vercel
-1. Buka <https://vercel.com/new> → import repo `gungdev-chatbot`
-2. Isi:
-   - **Root Directory**: `chatbot-saya/frontend`
-   - **Framework Preset**: `Vite` (terdeteksi otomatis)
-   - **Build Command**: `npm run build`
-   - **Output Directory**: `dist`
-3. **Environment Variables**:
+### Langkah 3 — Deploy Frontend
+Bisa di **project Vercel yang sama** atau project terpisah.
+
+**Opsi A — project terpisah (disarankan, paling aman):**
+1. <https://vercel.com/new> → import repo yang sama lagi
+2. **Root Directory**: `chatbot-saya/frontend`
+3. **Framework Preset**: `Vite` (otomatis)
+4. **Environment Variables**:
    | Key | Value |
    |---|---|
-   | `VITE_API_URL` | `https://gungdev-api.onrender.com` (URL langkah 2) |
-4. **Deploy** → selesai, dapat URL `https://gungdev-chatbot.vercel.app`
+   | `VITE_API_URL` | `https://gungdev-api.vercel.app` (URL langkah 2) |
+5. **Deploy**
+
+**Opsi B — tanpa environment variable sama sekali:**
+Frontend otomatis memakai `${origin}/api` di domain publik. Jadi bila backend
+dan frontend berada di domain yang sama, `VITE_API_URL` boleh dikosongkan.
 
 > `VITE_API_URL` dibaca saat **build**. Kalau diubah, wajib **Redeploy**.
 
 ### Langkah 4 — Verifikasi
-Buka URL Vercel, ketik pesan. Bila muncul error:
+Buka URL frontend, ketik pesan. Bila muncul error:
 - **"Backend tidak terhubung"** → cek `VITE_API_URL` sudah benar & backend hidup
-- **"API key Groq tidak valid"** → cek `GROQ_API_KEY` di Render
-- **CORS error** → domain `*.vercel.app` sudah diizinkan otomatis; untuk domain
-  sendiri tambahkan ke `ALLOWED_ORIGINS` di Render
+- **"API key Groq tidak valid"** → cek `GROQ_API_KEY` di Vercel
+- **CORS error** → pastikan `ALLOWED_ORIGINS=*` di project backend
+
+### (Opsional) Deploy backend ke Render sebagai alternatif
+Repo juga menyiapkan `Dockerfile` + `render.yaml`. Render Free meminta
+verifikasi kartu pada sebagian akun, jadi Vercel lebih dulu direkomendasikan.
+Panduannya: Root Directory `chatbot-saya/backend`, Runtime **Docker**,
+Health Check Path `/health`, Environment Variables sama seperti langkah 2.
 
 ---
 
@@ -234,7 +254,7 @@ data: {"error": "Kuota gratis Groq tercapai. Tunggu sebentar lalu coba lagi."}
 
 ## ⚙️ Variabel Environment
 
-### Backend
+### Backend (diisi di Vercel → Settings → Environment Variables)
 | Variabel | Default | Keterangan |
 |---|---|---|
 | `AI_PROVIDER` | otomatis | `groq` atau `ollama` |
@@ -243,15 +263,15 @@ data: {"error": "Kuota gratis Groq tercapai. Tunggu sebentar lalu coba lagi."}
 | `GROQ_BASE_URL` | `https://api.groq.com/openai/v1` | Endpoint Groq |
 | `OLLAMA_HOST` | `http://localhost:11434` | Alamat Ollama lokal |
 | `OLLAMA_MODEL` | `deepseek-r1:7b` | Model Ollama |
-| `ALLOWED_ORIGINS` | — | Domain tambahan, pisah koma |
-| `TIMEOUT_GROQ` | `120` | Timeout detik |
+| `ALLOWED_ORIGINS` | — | Domain tambahan, pisah koma. `*` = izinkan semua |
+| `TIMEOUT_GROQ` | `60` | Timeout detik (disesuaikan batas Vercel) |
 | `TIMEOUT_OLLAMA` | `300` | Timeout detik |
-| `PORT` | `8000` | Port (diisi otomatis oleh Render) |
+| `PORT` | `8000` | Port saat dijalankan lokal / Render |
 
 ### Frontend
 | Variabel | Default | Keterangan |
 |---|---|---|
-| `VITE_API_URL` | `http://localhost:8000` | URL backend |
+| `VITE_API_URL` | otomatis | Kosong = `localhost:8000` saat dev, `<origin>/api` saat produksi |
 
 ---
 
@@ -260,13 +280,13 @@ data: {"error": "Kuota gratis Groq tercapai. Tunggu sebentar lalu coba lagi."}
 | Layanan | Batas |
 |---|---|
 | **Groq** | Rate limit per menit/hari; cek di console.groq.com |
-| **Render free** | 512 MB RAM, tidur setelah 15 menit idle |
-| **Vercel Hobby** | 100 GB bandwidth/bulan |
+| **Vercel Hobby** | 100 GB bandwidth/bulan, 60 detik per request, tanpa kartu |
+| **Render free** | 512 MB RAM, tidur setelah 15 menit idle (verifikasi kartu pada sebagian akun) |
 
 Bila pengguna bertambah banyak, pertimbangkan:
-- Upgrade Render ke Starter (~$7/bln) agar selalu bangun
 - Upgrade Groq ke Developer plan
 - Tambahkan rate-limit per IP di backend (`slowapi`)
+- Pindah backend ke VPS bila butuh eksekusi > 60 detik
 
 ---
 

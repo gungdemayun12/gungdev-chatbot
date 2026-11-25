@@ -1,13 +1,13 @@
-"""
+﻿"""
 =====================================================================
- BACKEND GUNGDEV — FastAPI, multi-provider
+ BACKEND GUNGDEV â€” FastAPI, multi-provider
 =====================================================================
 Satu server, dua mode penyedia AI:
 
   1. GROQ (dipakai saat deploy / publik)
        - API cloud OpenAI-compatible, sangat cepat (~280-500 token/detik)
        - Butuh GROQ_API_KEY (gratis di console.groq.com)
-       - Cocok untuk Render / Railway / Fly.io (RAM kecil, tanpa GPU)
+       - Cocok untuk Vercel Serverless, Render, Railway, Fly.io
 
   2. OLLAMA (dipakai saat pengembangan lokal)
        - Model berjalan di komputer sendiri, tanpa API key
@@ -29,6 +29,11 @@ Cara menjalankan lokal:
 
 Dokumentasi otomatis:
      http://localhost:8000/docs
+
+CATATAN DEPLOY VERCEL:
+     File api/index.py HANYA mengimpor `app` dari modul ini.
+     Jadi semua logika tetap di sini (satu sumber kebenaran) dan
+     berjalan baik di server biasa maupun di Vercel Serverless.
 =====================================================================
 """
 
@@ -41,17 +46,24 @@ import os                   # membaca environment variable
 from typing import AsyncIterator, List, Optional, Sequence
 
 import httpx                # HTTP client async (dipakai Groq & cek kesehatan)
-from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+# python-dotenv hanya dipakai saat pengembangan lokal.
+# Di Vercel/Render variabel masuk lewat environment, bukan file .env.
+try:
+    from dotenv import load_dotenv
+except ImportError:          # pragma: no cover - dependensi opsional
+    load_dotenv = None
+
 # ---------------------------------------------------------------------
 # 2. KONFIGURASI DASAR
 # ---------------------------------------------------------------------
-_ENV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
-load_dotenv(dotenv_path=_ENV_PATH, override=False)
+if load_dotenv is not None:
+    _ENV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    load_dotenv(dotenv_path=_ENV_PATH, override=False)
 
 
 def _env(nama: str, default: str = "") -> str:
@@ -86,15 +98,22 @@ OLLAMA_MODEL = _env("OLLAMA_MODEL", "deepseek-r1:7b")
 
 # ---- Timeout ----
 # Groq cepat; Ollama lokal di CPU bisa sangat lambat.
-TIMEOUT_GROQ = _env_float("TIMEOUT_GROQ", 120)
+# Vercel Hobby membatasi total eksekusi ~10-60 detik, jadi default
+# Groq diturunkan agar tidak menggantung melewati batas fungsi.
+TIMEOUT_GROQ = _env_float("TIMEOUT_GROQ", 60)
 TIMEOUT_OLLAMA = _env_float("TIMEOUT_OLLAMA", 300)
 
 # ---- CORS ----
 # Daftar origin tambahan dipisah koma, mis:
 #   ALLOWED_ORIGINS=https://gungdev.vercel.app,https://gungdev.com
+# Nilai "*" berarti izinkan semua origin (dipakai bila API dan UI
+# berada di domain berbeda dan Anda tidak mau mengurus daftar).
 _extra_origins = [
     o.strip() for o in _env("ALLOWED_ORIGINS").split(",") if o.strip()
 ]
+_allow_all = "*" in _extra_origins
+if _allow_all:
+    _extra_origins = [o for o in _extra_origins if o != "*"]
 
 # Setup logging
 logging.basicConfig(
@@ -162,7 +181,7 @@ class ChatResponse(BaseModel):
 
 
 class HealthResponse(BaseModel):
-    """Response /health — menambah info provider tanpa merusak field 'status'."""
+    """Response /health â€” menambah info provider tanpa merusak field 'status'."""
     status: str
     provider: str
     model: str
@@ -227,25 +246,29 @@ def resolve_options(request: ChatRequest) -> dict:
 app = FastAPI(
     title="GungDev Backend",
     description=f"Backend GungDev (provider: {PROVIDER}, model: {MODEL_NAME}).",
-    version="2.0.0",
+    version="2.1.0",
 )
 
 
 # ---------------------------------------------------------------------
 # 7. CORS MIDDLEWARE
 # ---------------------------------------------------------------------
-# allow_origins_exact  = untuk development & domain yang didaftarkan manual
-# allow_origin_regex   = menangani SEMUA subdomain Vercel (preview & production),
-#                        karena browser tidak mendukung wildcard "https://*.vercel.app".
+# allow_origins       = development & domain yang didaftarkan manual
+# allow_origin_regex  = SEMUA subdomain Vercel (preview & production),
+#                       karena browser tidak mendukung wildcard "https://*.vercel.app".
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:4173",   # vite preview
-        "http://127.0.0.1:4173",
-        *_extra_origins,
-    ],
+    allow_origins=(
+        ["*"]
+        if _allow_all
+        else [
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://localhost:4173",   # vite preview
+            "http://127.0.0.1:4173",
+            *_extra_origins,
+        ]
+    ),
     allow_origin_regex=r"https://([a-zA-Z0-9-]+\.)*vercel\.app",
     allow_methods=["*"],
     allow_headers=["*"],
@@ -297,7 +320,7 @@ def pesan_error_http(status: int, detail_asli: str = "") -> str:
             "Pastikan aplikasi Ollama berjalan ('ollama serve')."
         )
     if status == 504:
-        return "Waktu tunggu habis. Model mungkin masih memproses — coba lagi."
+        return "Waktu tunggu habis. Model mungkin masih memproses ΓÇö coba lagi."
     if 500 <= status < 600:
         return f"Layanan AI sedang bermasalah (HTTP {status}). Coba lagi nanti."
     return detail_asli or f"Terjadi kesalahan pada layanan AI (HTTP {status})."
@@ -618,9 +641,12 @@ async def chat_stream(request: ChatRequest):
         event_stream(),
         media_type="text/event-stream",
         headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",   # cegah buffering di proxy (Render/Nginx)
+            "Cache-Control": "no-cache, no-transform",
+            # "Connection: keep-alive" sengaja TIDAK dipakai: Vercel
+            # (HTTP/2) mengabaikannya, dan di sebagian proxy justru
+            # memicu buffering. Header di bawah ini yang penting.
+            "X-Accel-Buffering": "no",   # cegah buffering di proxy (Nginx dsb.)
+            "Content-Encoding": "identity",  # jangan kompres -> SSE tetap instan
         },
     )
 

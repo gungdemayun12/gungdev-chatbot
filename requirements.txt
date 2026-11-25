@@ -1,0 +1,17 @@
+# ==========================================================
+# Dependensi untuk Vercel Serverless Function
+# ==========================================================
+# Vercel membaca requirements.txt di ROOT repo ini.
+# Isinya sengaja dibuat sesingkat mungkin agar build cepat
+# dan muat di batas ukuran serverless function (250 MB).
+#
+# Versi file ini harus selaras dengan
+# chatbot-saya/backend/requirements.txt
+# ==========================================================
+
+fastapi>=0.115,<1.0
+httpx>=0.27,<1.0
+pydantic>=2.7,<3.0
+
+# uvicorn TIDAK diperlukan di Vercel (Vercel yang menjalankan ASGI),
+# tetapi tetap dipakai untuk pengembangan lokal lewat backend/.
