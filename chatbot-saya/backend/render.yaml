@@ -6,13 +6,18 @@
 #   2. Render Dashboard -> New -> Blueprint
 #   3. Pilih repo ini, Render membaca file ini otomatis
 #   4. Isi GROQ_API_KEY saat diminta
+#
+# Catatan: Dockerfile dipakai dari ROOT repo (./Dockerfile)
+# dengan build context root. File itu menyalin hanya
+# chatbot-saya/backend/{main.py,requirements.txt}, sehingga
+# image tetap kecil dan .env tidak ikut masuk.
 # ==========================================================
 services:
   - type: web
     name: gungdev-api
     runtime: docker
-    dockerfilePath: ./chatbot-saya/backend/Dockerfile
-    dockerContext: ./chatbot-saya/backend
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
     plan: free
     region: singapore
     healthCheckPath: /health
