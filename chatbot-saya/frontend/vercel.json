@@ -4,7 +4,17 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "installCommand": "npm install",
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }],
+  "rewrites": [
+    {
+      "source": "/health",
+      "destination": "https://gungdev-chatbot-rq5l.vercel.app/health"
+    },
+    {
+      "source": "/usage",
+      "destination": "https://gungdev-chatbot-rq5l.vercel.app/usage"
+    },
+    { "source": "/((?!health|usage|api/).*)", "destination": "/index.html" }
+  ],
   "headers": [
     {
       "source": "/assets/(.*)",
