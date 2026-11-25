@@ -9,7 +9,8 @@
   "rewrites": [
     { "source": "/health", "destination": "/api/index" },
     { "source": "/chat", "destination": "/api/index" },
-    { "source": "/chat/stream", "destination": "/api/index" }
+    { "source": "/chat/stream", "destination": "/api/index" },
+    { "source": "/usage", "destination": "/api/index" }
   ],
   "headers": [
     {
