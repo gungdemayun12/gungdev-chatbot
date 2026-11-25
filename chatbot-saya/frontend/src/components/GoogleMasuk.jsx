@@ -6,7 +6,7 @@
  * environment, tombol tetap tampil tapi memberi penjelasan — supaya
  * situs tidak terlihat rusak saat pemilik belum memasang konfigurasi.
  */
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { LogIn } from './icons.jsx'
 import { LOGIN_TERSEDIA, mulaiLoginGoogle } from '../lib/auth.js'
 
@@ -44,6 +44,16 @@ export default function GoogleMasuk({
 }) {
   const wadahRef = useRef(null)
   const [sibuk, setSibuk] = useState(false)
+  const batalRef = useRef(null)
+
+  /* Bersihkan pendengar Google saat komponen dibongkar (mis. modal
+     ditutup) supaya callback lama tidak menumpuk. */
+  useEffect(
+    () => () => {
+      if (typeof batalRef.current === 'function') batalRef.current()
+    },
+    [],
+  )
 
   const mulai = async () => {
     if (sibuk || disabled) return
@@ -60,19 +70,11 @@ export default function GoogleMasuk({
         onError?.(pesan)
       },
     })
+    batalRef.current = batal
 
-    /* GIS merender tombol ke wadah, lalu kita klik. Delay kecil
-       memberi waktu render selesai sebelum diklik. */
-    const klik = () => {
-      const tombol = wadahRef.current?.querySelector('div[role="button"], button')
-      if (tombol) tombol.click()
-      else {
-        setSibuk(false)
-        onError?.('Jendela login Google tidak bisa dibuka. Coba lagi.')
-      }
-      if (typeof batal === 'function') batal()
-    }
-    setTimeout(klik, 60)
+    /* Popup Google butuh waktu: pengguna memilih akun. Jangan biarkan
+       tombol berputar selamanya bila popup ditutup tanpa memilih. */
+    setTimeout(() => setSibuk(false), 90000)
   }
 
   if (!LOGIN_TERSEDIA) {

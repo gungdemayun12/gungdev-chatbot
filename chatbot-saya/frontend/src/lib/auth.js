@@ -147,18 +147,38 @@ export function hapusSesi() {
 let siapGIS = false
 
 /** Menyiapkan GIS sekali (initialize cukup dipanggil sekali). */
+/**
+ * Callback aktif. HANYA SATU yang boleh terpasang di Google.
+ *
+ * Google hanya memakai `initialize()` terakhir, jadi kalau tiap tombol
+ * memanggil initialize() dengan callback sendiri-sendiri, hasil login
+ * bisa nyasar ke callback yang salah (dan login tampak "tidak terjadi").
+ * Solusinya: initialize() dipanggil SEKALI, lalu semua pemanggil
+ * didaftarkan di sini dan dijawab bersamaan.
+ */
+let pendengar = new Set()
+
+/**
+ * Menyiapkan GIS. Hanya benar-benar memanggil initialize() satu kali
+ * sepanjang umur halaman.
+ */
 async function siapkanGIS() {
   await muatSkripGoogle()
   if (siapGIS) return
   window.google.accounts.id.initialize({
     client_id: GOOGLE_CLIENT_ID,
-    // Tombol resmi Google langsung dipakai; tidak perlu One Tap popup.
     auto_select: false,
     cancel_on_tap_outside: true,
-    use_fedcm_for_prompt: true,
-    // Tidak mengirim kredensial ke server mana pun — kita hanya butuh
-    // identitas di browser.
-    callback: () => {},
+    callback: (res) => {
+      // Teruskan hasil ke semua pemanggil yang sedang menunggu.
+      const akun = akunDariToken(res?.credential)
+      const daftar = Array.from(pendengar)
+      pendengar.clear()
+      daftar.forEach(({ onAkun, onError }) => {
+        if (akun) onAkun(akun)
+        else onError('Login Google gagal dibaca. Silakan coba lagi.')
+      })
+    },
   })
   siapGIS = true
 }
@@ -168,7 +188,7 @@ async function siapkanGIS() {
  *
  * Memakai renderButton resmi Google di dalam elemen tersembunyi lalu
  * mengkliknya secara terprogram. Ini cara yang didukung Google dan
- * lebih andal daripada prompt() yang sering diblokir peramban.
+ * jauh lebih andal daripada prompt()/One Tap yang sering diblokir.
  *
  * @param {{ onAkun: (akun:object)=>void, onError: (pesan:string)=>void, wadah: HTMLElement }} params
  * @returns {Promise<() => void>} fungsi pembatalan
@@ -178,6 +198,13 @@ export async function mulaiLoginGoogle({ onAkun, onError, wadah }) {
     onError(
       'Login Google belum diaktifkan di situs ini. Pemilik situs perlu mengisi Client ID Google.',
     )
+    return () => {}
+  }
+
+  /* Wadah WAJIB masih ada di halaman. Tanpa ini, Google tidak bisa
+     merender tombol dan popup tidak akan pernah terbuka. */
+  if (!wadah || !wadah.isConnected) {
+    onError('Komponen login belum siap. Tutup lalu buka lagi dialog login.')
     return () => {}
   }
 
@@ -194,54 +221,44 @@ export async function mulaiLoginGoogle({ onAkun, onError, wadah }) {
     return () => {}
   }
 
-  let sudahJalan = false
-  const bereskan = () => {
+  const pendaftar = { onAkun, onError }
+  pendengar.add(pendaftar)
+
+  /* Google menaruh tombol aslinya di wadah tersembunyi. Kita klik
+     tombol itu secara terprogram agar tampilan GungDev tetap dipakai. */
+  wadah.innerHTML = ''
+  g.renderButton(wadah, {
+    type: 'standard',
+    theme: 'outline',
+    size: 'large',
+    text: 'signin_with',
+    shape: 'pill',
+    logo_alignment: 'left',
+    width: 260,
+  })
+
+  /* renderButton bekerja sinkron, jadi tombol sudah ada di sini.
+     Kalau belum (mis. peramban lambat), tunggu satu putaran frame. */
+  const cariTombol = () => wadah.querySelector('div[role="button"], button')
+  let tombol = cariTombol()
+  if (!tombol) {
+    await new Promise((r) => requestAnimationFrame(() => r()))
+    tombol = cariTombol()
+  }
+
+  if (!tombol) {
+    pendengar.delete(pendaftar)
+    onError('Tombol Google gagal disiapkan. Coba muat ulang halaman ini.')
+    return () => {}
+  }
+
+  tombol.click()
+
+  // Fungsi pembatalan: lepaskan pendengar agar tidak menumpuk.
+  return () => {
+    pendengar.delete(pendaftar)
     if (wadah) wadah.innerHTML = ''
   }
-
-  g.initialize({
-    client_id: GOOGLE_CLIENT_ID,
-    auto_select: false,
-    cancel_on_tap_outside: true,
-    use_fedcm_for_prompt: true,
-    callback: (res) => {
-      sudahJalan = true
-      bereskan()
-      const akun = akunDariToken(res?.credential)
-      if (!akun) {
-        onError('Login Google gagal dibaca. Silakan coba lagi.')
-        return
-      }
-      onAkun(akun)
-    },
-  })
-
-  if (wadah) {
-    wadah.innerHTML = ''
-    g.renderButton(wadah, {
-      type: 'standard',
-      theme: 'outline',
-      size: 'large',
-      text: 'signin_with',
-      shape: 'pill',
-      logo_alignment: 'left',
-      width: 260,
-    })
-  }
-
-  g.disableAutoSelect()
-  g.prompt((notifikasi) => {
-    // "not_displayed" = jendela tidak muncul (mis. diblokir). Beri tahu
-    // pengguna untuk mencoba lagi, jangan diam saja.
-    if (!sudahJalan && notifikasi?.isNotDisplayed?.()) {
-      bereskan()
-      onError(
-        'Jendela login Google tidak bisa dibuka. Coba lagi, atau izinkan pop-up untuk situs ini.',
-      )
-    }
-  })
-
-  return bereskan
 }
 
 /* ------------------------------------------------------------------ */
