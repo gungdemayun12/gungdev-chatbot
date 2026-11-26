@@ -48,9 +48,17 @@ class RedisPalsu:
         if not self.tersedia:
             return None
         op = str(args[0]).upper()
+        if op == "SET":
+            kunci = str(args[1])
+            nilai = args[2]
+            DB[kunci] = str(nilai)
+            return "OK"
         if op == "HINCRBY":
             kunci, field, n = str(args[1]), str(args[2]), int(args[3])
             isi = DB.setdefault(kunci, {})
+            if not isinstance(isi, dict):
+                isi = {}
+                DB[kunci] = isi
             isi[field] = int(isi.get(field, 0)) + n
             return isi[field]
         if op == "EXPIRE":
@@ -58,6 +66,8 @@ class RedisPalsu:
         if op == "HMGET":
             kunci = str(args[1])
             isi = DB.get(kunci, {})
+            if not isinstance(isi, dict):
+                isi = {}
             return [isi.get(str(f)) for f in args[2:]]
         if op == "GET":
             nilai = DB.get(str(args[1]))
@@ -87,10 +97,41 @@ def hari(delta: int = 0) -> str:
     return (datetime.now(timezone.utc) + timedelta(days=delta)).strftime("%Y-%m-%d")
 
 
-def isi_catatan(sub: str, req: int, tok: int = 0, delta: int = 0) -> None:
-    """Menaruh angka pemakaian langsung di 'Redis' untuk akun tertentu."""
-    kunci = f"gungdev:usage:u:{sub}:{hari(delta)}"
+def isi_catatan(
+    sub: str, req: int, tok: int = 0, delta: int = 0, mulai: float | None = None
+) -> str:
+    """
+    Menaruh angka pemakaian langsung di 'Redis' untuk akun tertentu.
+
+    Sejak jatah memakai JENDELA 24 JAM BERGULIR, kuncinya bukan tanggal
+    lagi melainkan penanda jendela. Nilai jendela dibaca dari DB (Redis
+    tiruan) — BUKAN dari usage._memori — supaya uji mengikuti sumber
+    kebenaran yang sama dengan produksi.
+    """
+    if mulai is None:
+        nilai = DB.get(f"gungdev:usage:jendela:{sub}")
+        if nilai is not None:
+            mulai = float(nilai)
+        else:
+            mulai = datetime.now(timezone.utc).timestamp()
+            DB[f"gungdev:usage:jendela:{sub}"] = str(int(mulai))
+    kunci = f"gungdev:usage:u:{sub}:w{int(mulai)}"
     DB[kunci] = {"requests": req, "tokens": tok}
+    return kunci
+
+
+def mulai_jendela(sub: str, mundur_detik: int = 0) -> float:
+    """
+    Menetapkan (dan memundurkan) awal jendela jatah sebuah akun.
+
+    Salinan di `usage._memori` juga dibersihkan/diperbarui, karena modul
+    menyimpan cadangan di sana. Bila tidak disamakan, uji bisa membaca
+    jendela lama dan menyimpulkan hal yang salah.
+    """
+    mulai = datetime.now(timezone.utc).timestamp() - mundur_detik
+    DB[f"gungdev:usage:jendela:{sub}"] = str(int(mulai))
+    usage._memori[f"gungdev:usage:jendela:{sub}"] = mulai
+    return mulai
 
 
 def bersihkan() -> None:
@@ -156,23 +197,57 @@ async def jalankan() -> None:
         jA["token_terpakai"] == 999_999, str(jA["token_terpakai"]))
     cek("Sisa pesan tetap 99", jA["sisa"] == 99, str(jA["sisa"]))
 
-    # ================= 5. RESET HARIAN =================
-    print("\n=== 5. RESET HARIAN: BESOK JATAH KEMBALI PENUH ===")
+    # ================= 5. RESET: JENDELA 24 JAM BERGULIR =================
+    print("\n=== 5. RESET = JENDELA 24 JAM BERGULIR MILIK AKUN ITU ===")
     bersihkan()
-    isi_catatan(A, req=100, tok=20_000)          # hari ini: habis
-    isi_catatan(A, req=0, tok=0, delta=1)        # besok: kosong
-    hari_ini = await usage.periksa_jatah(A)
-    cek("Hari ini A ditolak", hari_ini["boleh"] is False)
+    mulai_jendela(A, mundur_detik=0)
+    isi_catatan(A, req=100, tok=20_000)          # A sudah habis di jendela ini
+    sekarang = await usage.periksa_jatah(A)
+    cek("A ditolak dalam jendela berjalan", sekarang["boleh"] is False)
+    cek("Hitung mundur mendekati 24 jam",
+        86000 < sekarang["reset_detik"] <= 86400,
+        f"{sekarang['reset_detik']} dtk")
 
-    # Majukan "hari ini" ke tanggal besok -> harusnya penuh lagi.
-    asli = usage._hari_ini
-    usage._hari_ini = lambda: hari(1)            # type: ignore[assignment]
-    try:
-        besok = await usage.periksa_jatah(A)
-    finally:
-        usage._hari_ini = asli                   # type: ignore[assignment]
-    cek("Besok A boleh lagi (reset)", besok["boleh"] is True)
-    cek("Besok terpakai 0", besok["terpakai"] == 0, str(besok["terpakai"]))
+    # BUKTI BERGULIR: akun B baru mulai -> jendelanya sendiri, penuh,
+    # dan reset-nya ~24 jam lagi (berbeda dari A yang sudah berjalan).
+    jB = await usage.periksa_jatah(B)
+    cek("Akun B tetap penuh walau A habis", jB["boleh"] is True and jB["sisa"] == 100)
+
+    # Jendela A dipundurkan 25 jam -> sudah lewat -> jatah harus pulih.
+    # Catatan: pemakaian lama tercatat pada kunci jendela LAMA. Setelah
+    # jendela lewat, akun memakai kunci jendela BARU yang masih kosong.
+    mulai_jendela(A, mundur_detik=25 * 3600)
+    pulih = await usage.periksa_jatah(A)
+    cek("Setelah jendela lewat, A boleh lagi (reset)", pulih["boleh"] is True)
+    cek("Setelah reset terpakai kembali 0", pulih["terpakai"] == 0,
+        str(pulih["terpakai"]))
+    cek("Setelah reset sisa penuh 100", pulih["sisa"] == 100, str(pulih["sisa"]))
+    cek("Hitung mundur kembali ~24 jam",
+        86000 < pulih["reset_detik"] <= 86400, f"{pulih['reset_detik']} dtk")
+
+    # BUKTI BUKAN JAM DINDING: jendela yang dimulai 20 jam lalu punya
+    # sisa ~4 jam, bukan menunggu 07:00 WIB.
+    bersihkan()
+    mulai_jendela(A, mundur_detik=20 * 3600)
+    isi_catatan(A, req=5)
+    j20 = await usage.periksa_jatah(A)
+    cek("Jendela mulai 20 jam lalu -> sisa ~4 jam",
+        3.5 * 3600 < j20["reset_detik"] < 4.5 * 3600,
+        f"{round(j20['reset_detik'] / 3600, 1)} jam")
+    cek("Pemakaian 5 tetap terbaca", j20["terpakai"] == 5, str(j20["terpakai"]))
+
+    # Akun yang TIDAK menghabiskan jatah tidak pernah ditolak.
+    cek("Akun hemat (5/100) tetap boleh chat", j20["boleh"] is True)
+
+    # Dua akun dengan jendela berbeda punya waktu reset berbeda.
+    bersihkan()
+    mulai_jendela(A, mundur_detik=20 * 3600)
+    mulai_jendela(B, mundur_detik=2 * 3600)
+    rA = await usage.periksa_jatah(A)
+    rB = await usage.periksa_jatah(B)
+    cek("Reset akun A dan B BERBEDA (bukan jam dinding)",
+        abs(rA["reset_detik"] - rB["reset_detik"]) > 3600,
+        f"A={round(rA['reset_detik']/3600,1)}j B={round(rB['reset_detik']/3600,1)}j")
 
     # ================= 6. TOKEN ASLI PENYEDIA =================
     print("\n=== 6. TOKEN DIPAKAI DARI ANGKA ASLI PENYEDIA ===")

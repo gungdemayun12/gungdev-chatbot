@@ -48,6 +48,22 @@ def atur_pemakaian(sub: str, requests: int, tokens: int = 0) -> None:
     )
 
 
+def mundurkan_jendela(sub: str, jam: int) -> None:
+    """Memundurkan awal jendela jatah akun (untuk menguji reset)."""
+    httpx.post(
+        f"{BASE}/__uji/jendela",
+        json={"sub": sub, "mundur_detik": jam * 3600},
+        timeout=10,
+    )
+
+
+def info_jendela(sub: str) -> dict:
+    try:
+        return httpx.get(f"{BASE}/__uji/jendela/{sub}", timeout=10).json()
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 def chat(pesan: str, token: str | None, stream: bool = False):
     url = f"{BASE}/chat/stream" if stream else f"{BASE}/chat"
     headers = {"Authorization": f"Bearer {token}"} if token else {}
@@ -145,14 +161,67 @@ def jalankan() -> None:
         str(akunA.get("reset", {}).get("waktu_utc")))
     cek("Nama penyedia tetap disamarkan", uA.get("provider") == "gungdev")
 
-    # ================= 6. TAMU =================
-    print("\n=== 6. TAMU TIDAK KENA JATAH AKUN ===")
+    # ================= 6. RESET: JENDELA 24 JAM BERGULIR =================
+    print("\n=== 6. RESET = JENDELA 24 JAM BERGULIR PER AKUN ===")
+    atur_pemakaian(AKUN_A, 100)          # A habis
+    atur_pemakaian(AKUN_B, 100)          # B juga habis
+    r = chat("A saat habis", TOKEN_A)
+    cek("A ditolak saat habis", r.status_code == 429, str(r.status_code))
+
+    detail = ""
+    try:
+        detail = (r.json() or {}).get("detail", "")
+    except Exception:  # noqa: BLE001
+        detail = r.text
+    cek("Pesan menyebut jendela 24 jam",
+        "24 jam" in detail.lower(), detail[:110])
+    cek("Pesan TIDAK lagi menyebut '07:00 WIB'",
+        "07:00" not in detail, detail[:80])
+
+    # Jendela A dilewatkan -> A boleh lagi. Jendela B TETAP berjalan.
+    mundurkan_jendela(AKUN_A, 25)
+    rA = chat("A setelah jendela lewat", TOKEN_A)
+    cek("Setelah jendelanya lewat, A boleh lagi", rA.status_code == 200,
+        str(rA.status_code))
+
+    rB = chat("B masih di jendelanya", TOKEN_B)
+    cek("Akun B TETAP ditolak (jendelanya belum lewat)", rB.status_code == 429,
+        str(rB.status_code))
+
+    # /usage akun A sudah pulih.
+    uA2 = httpx.get(f"{BASE}/usage", headers={"Authorization": f"Bearer {TOKEN_A}"},
+                    timeout=15).json()
+    akunA2 = uA2.get("akun") or {}
+    cek("Setelah reset, A terpakai 1 (bukan 100)",
+        akunA2.get("requests", {}).get("terpakai") == 1,
+        str(akunA2.get("requests")))
+    cek("Setelah reset, A sisa 99",
+        akunA2.get("requests", {}).get("sisa") == 99,
+        str(akunA2.get("requests")))
+    cek("Reset akun ditandai bergulir",
+        akunA2.get("reset", {}).get("bergulir") is True,
+        str(akunA2.get("reset")))
+
+    # Dua akun dengan jendela berbeda -> waktu reset berbeda (bukan jam dinding).
+    # Jendela B sengaja dimundurkan 5 jam agar perbedaannya nyata; tanpa
+    # itu A dan B baru dibuat pada detik yang hampir sama sehingga
+    # selisihnya hanya beberapa detik dan uji jadi menyesatkan.
+    mundurkan_jendela(AKUN_B, 5)
+    wA = info_jendela(AKUN_A)
+    wB = info_jendela(AKUN_B)
+    cek("Waktu reset A dan B berbeda (bukan jam dinding)",
+        abs(wA.get("sisa_detik", 0) - wB.get("sisa_detik", 0)) > 3 * 3600,
+        f"A={round(wA.get('sisa_detik', 0) / 3600, 1)}j "
+        f"B={round(wB.get('sisa_detik', 0) / 3600, 1)}j")
+
+    # ================= 7. TAMU =================
+    print("\n=== 7. TAMU TIDAK KENA JATAH AKUN ===")
     uTamu = httpx.get(f"{BASE}/usage", timeout=15).json()
     cek("Tamu tanpa bagian akun", not uTamu.get("akun"))
     cek("Tamu diberi keterangan jatah login", bool(uTamu.get("tamu")))
 
-    # ================= 7. KONTRAK LAMA UTUH =================
-    print("\n=== 7. KONTRAK LAMA TETAP UTUH ===")
+    # ================= 8. KONTRAK LAMA UTUH =================
+    print("\n=== 8. KONTRAK LAMA TETAP UTUH ===")
     h = httpx.get(f"{BASE}/health", timeout=10).json()
     cek("/health tetap {status:ok}", h.get("status") == "ok", str(h))
     cek("/health tanpa detail infrastruktur",

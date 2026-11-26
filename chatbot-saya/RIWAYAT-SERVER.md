@@ -27,11 +27,27 @@ Kontrak API lama **tidak berubah**: `/chat`, `/chat/stream`, `/health`,
 
 | Hal | Nilai |
 |---|---|
-| Jatah pesan per akun | **100 pesan/hari** |
+| Jatah pesan per akun | **100 pesan per jendela 24 jam** |
 | Jatah tamu | 3 pesan/hari (per IP, tidak berubah) |
-| Reset | **00:00 UTC = 07:00 WIB** setiap hari |
+| Kapan jendela dimulai | **Saat pesan pertama akun itu** |
+| Kapan reset | Saat jendela 24 jamnya berakhir — **berbeda tiap akun** |
 | Token | **Dicatat & ditampilkan**, tetapi **tidak membatasi** |
 | Kuota bersama situs | 1.000 permintaan/hari (dari penyedia, dipakai bersama) |
+
+### Jendela bergulir, bukan jam dinding
+
+Jatah **tidak** direset serentak untuk semua akun. Tiap akun punya
+jendela 24 jam miliknya sendiri:
+
+| Akun mulai chat | Jendelanya | Saat habis, pulih |
+|---|---|---|
+| GungDe jam 20:00 | 20:00 → 20:00 besok | 20:00 besok (bukan 07:00 pagi) |
+| Indah jam 09:00 | 09:00 → 09:00 besok | 09:00 besok |
+
+Akun yang **tidak** menghabiskan jatah tidak pernah dibatasi sama
+sekali; hitung mundur hanya ditampilkan sebagai informasi.
+
+Jendela yang dipakai bersama: `JENDELA_JATAH_JAM` (bawaan 24).
 
 ### Mengapa hanya jumlah pesan yang membatasi?
 
@@ -163,7 +179,7 @@ Bila belum muncul, buka panel Usage dan lihat pesan di sidebar:
 |---|---|
 | `backend/penyimpanan.py` | Penyimpanan riwayat di Upstash (per akun, per sesi) |
 | `backend/identitas.py` | Verifikasi ID token Google ke `oauth2.googleapis.com` |
-| `backend/usage.py` | Pencatatan usage + **jatah harian per akun** |
+| `backend/usage.py` | Pencatatan usage + **jatah bergulir per akun** |
 | `backend/main.py` | Endpoint `/api/sessions`, penegakan jatah di `/chat` |
 | `frontend/src/lib/riwayat.js` | Semua permintaan riwayat + token |
 | `frontend/src/hooks/useSessions.js` | Server sebagai sumber kebenaran, perangkat sebagai cadangan |
@@ -175,15 +191,15 @@ Bila belum muncul, buka panel Usage dan lihat pesan di sidebar:
 # Backend (tanpa perlu Upstash asli — Redis & Google dipalsukan)
 cd chatbot-saya/backend
 python uji_server_riwayat.py      # 54 pemeriksaan penyimpanan riwayat
-python uji_jatah.py               # 43 pemeriksaan jatah per akun
+python uji_jatah.py               # 51 pemeriksaan jatah & reset bergulir
 python server_uji.py              # jalankan server uji di port 8000
 python uji_api.py                 # 24 pemeriksaan endpoint lama
-python uji_jatah_api.py           # 28 pemeriksaan penegakan jatah via HTTP
+python uji_jatah_api.py           # 37 pemeriksaan jatah/reset via HTTP
 
 # Frontend (butuh server_uji.py + npm run dev berjalan)
 cd chatbot-saya/frontend
 node uji_browser.mjs              # 16 pemeriksaan riwayat lintas "perangkat"
-node uji_jatah_browser.mjs        # 11 pemeriksaan jatah di UI
+node uji_jatah_browser.mjs        # 13 pemeriksaan jatah/reset di UI
 ```
 
 > **Penting:** `server_uji.py` menyimpan state di memori proses. Restart

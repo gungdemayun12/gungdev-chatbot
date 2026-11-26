@@ -182,7 +182,7 @@ export function UsageContent({ apiUrl, apiOnline, aktif = true }) {
           </div>
 
           {/* --- Pemakaian akun ini sendiri ---
-               Ini JATAH SUNGGUHAN milik akun ini (100 pesan/hari),
+               Ini JATAH SUNGGUHAN milik akun ini (100 pesan per jendela 24 jam),
                terpisah dari kuota bersama di bawah. Bila habis, chat
                ditolak sampai reset — jadi angkanya harus terlihat
                jelas, bukan tersembunyi di rincian. */}
@@ -220,7 +220,7 @@ export function UsageContent({ apiUrl, apiOnline, aktif = true }) {
 
               <div className="usage__akun-note">
                 Sisa <strong>{angkaRingkas(akun.requests?.sisa || 0)}</strong> pesan
-                hari ini
+                pada jendela ini
                 {akun.reset?.detik > 0 && (
                   <> · pulih dalam {durasi(akun.reset.detik)}</>
                 )}
@@ -232,10 +232,22 @@ export function UsageContent({ apiUrl, apiOnline, aktif = true }) {
                 )}
               </div>
 
+              {akun.reset?.bergulir && (
+                <div className="usage__akun-jendela">
+                  Jendela {Math.round(akun.reset.jendela_jam || 24)} jam milik akun
+                  Anda dimulai saat pesan pertama, lalu jatah kembali penuh.
+                  {akun.requests?.terpakai === 0 && (
+                    <> Jendela baru dimulai saat Anda mengirim pesan.</>
+                  )}
+                </div>
+              )}
+
               {akun.habis && (
                 <div className="usage__akun-habis">
-                  Jatah Anda hari ini habis. Chat bisa dipakai lagi setelah
-                  reset — riwayat lama tetap bisa dibaca.
+                  Jatah Anda habis. Chat bisa dipakai lagi saat jendela ini
+                  berakhir
+                  {akun.reset?.detik > 0 && <> (dalam {durasi(akun.reset.detik)})</>} —
+                  riwayat lama tetap bisa dibaca.
                 </div>
               )}
             </div>
@@ -251,7 +263,7 @@ export function UsageContent({ apiUrl, apiOnline, aktif = true }) {
               </div>
               <div className="usage__akun-note">
                 Masuk dengan Google untuk mendapat jatah{' '}
-                <strong>100 pesan/hari</strong> milik akun Anda sendiri.
+                <strong>100 pesan per jendela 24 jam</strong> milik akun Anda sendiri.
               </div>
             </div>
           )}
@@ -309,11 +321,14 @@ export function UsageContent({ apiUrl, apiOnline, aktif = true }) {
           {/* --- Penjelasan jujur --- */}
           <p className="usage__fineprint">
             Jatah <strong>Pemakaian saya</strong> adalah milik akun Anda sendiri
-            ({angkaRingkas(akun?.requests?.batas || 100)} pesan/hari) dan terpisah
-            dari akun lain. Bila habis, chat berhenti sampai reset — riwayat tetap
-            bisa dibaca. Bar <strong>Permintaan</strong> dan <strong>Token</strong>{' '}
-            di atas adalah kuota bersama seluruh pengunjung situs, ditampilkan agar
-            Anda tahu kondisi layanan. Panel ini tidak memakai kuota saat dibuka.
+            ({angkaRingkas(akun?.requests?.batas || 100)} pesan per jendela{' '}
+            {Math.round(akun?.reset?.jendela_jam || 24)} jam) dan terpisah dari akun
+            lain. Jendelanya dimulai saat pesan pertama Anda, dan jatah kembali
+            penuh saat jendela itu berakhir — jadi waktu reset tiap akun berbeda.
+            Bila tidak habis, Anda tidak pernah dibatasi. Bar{' '}
+            <strong>Permintaan</strong> dan <strong>Token</strong> di atas adalah
+            kuota bersama seluruh pengunjung situs, ditampilkan agar Anda tahu
+            kondisi layanan. Panel ini tidak memakai kuota saat dibuka.
           </p>
 
           <button

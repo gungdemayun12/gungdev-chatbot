@@ -107,20 +107,29 @@ async function jalankan() {
   /* Bersihkan JATAH kedua akun. Uji sebelumnya (mis. uji jatah) bisa
      meninggalkan akun di 100/100 sehingga chat ditolak — itu perilaku
      yang benar, tetapi membuat uji riwayat ini gagal karena sebab yang
-     salah. Uji riwayat tidak sedang menguji jatah. */
+     salah. Uji riwayat tidak sedang menguji jatah.
+
+     Reset TOTAL (jatah + jendela + riwayat), bukan hanya angka
+     pemakaian: bila hanya angkanya dinolkan, jendela lama bisa saja
+     sudah berakhir sehingga akun memakai jendela baru — hasil uji
+     menjadi bergantung urutan. Reset total membuat uji ini selalu
+     mulai dari keadaan yang sama. */
   {
-    const ctxJatah = await browser.newContext()
-    const pJatah = await ctxJatah.newPage()
+    const ctxBersih = await browser.newContext()
+    const pBersih = await ctxBersih.newPage()
     try {
       for (const sub of ['100000000000000001', '200000000000000002']) {
-        await pJatah.request.post(`${API}/__uji/pakai`, {
-          data: { sub, requests: 0, tokens: 0 },
+        const res = await pBersih.request.post(`${API}/__uji/reset`, {
+          data: { sub },
         })
+        if (!res.ok()) {
+          throw new Error(`reset ${sub} gagal: HTTP ${res.status()}`)
+        }
       }
-    } catch {
-      /* Endpoint uji tidak ada (server bukan server_uji) — abaikan. */
+    } catch (e) {
+      console.warn(`  (pembersihan uji: ${e.message})`)
     }
-    await ctxJatah.close()
+    await ctxBersih.close()
   }
 
   /* ================= PERANGKAT 1 — AKUN A ================= */

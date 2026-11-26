@@ -2838,6 +2838,14 @@ select.input {
   border: 1px solid color-mix(in srgb, var(--danger, #e5484d) 30%, transparent);
 }
 
+/* Penjelasan jendela bergulir: informasi tenang, bukan peringatan. */
+.usage__akun-jendela {
+  margin-top: 6px;
+  font-size: 0.6875rem;
+  line-height: 1.45;
+  color: var(--text-tertiary);
+}
+
 /* --- Bar kuota --- */
 .usage-bar {
   display: flex;

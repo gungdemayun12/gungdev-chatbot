@@ -34,6 +34,26 @@ async function aturPemakaian(sub, requests, tokens = 0) {
   return res.ok
 }
 
+/**
+ * Menghapus TOTAL jejak akun (jatah + jendela + riwayat).
+ *
+ * Wajib dipanggil di awal DAN akhir: tanpa ini uji jatah meninggalkan
+ * akun dalam keadaan "jatah habis", lalu uji riwayat yang dijalankan
+ * sesudahnya gagal karena sebab yang salah (dan sebaliknya).
+ */
+async function resetAkun(sub) {
+  try {
+    const res = await fetch(`${API}/__uji/reset`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sub }),
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
 async function bukaSebagai(browser, { sub, name, token }) {
   const ctx = await browser.newContext()
   await ctx.addInitScript(
@@ -58,6 +78,12 @@ async function bukaSebagai(browser, { sub, name, token }) {
 async function jalankan() {
   const browser = await chromium.launch()
 
+  /* Mulai dari keadaan yang sama setiap kali: hapus total jejak kedua
+     akun (jatah, jendela, dan riwayat). Tanpa ini, hasil uji bergantung
+     pada uji apa yang dijalankan sebelumnya. */
+  await resetAkun(SUB_A)
+  await resetAkun(SUB_B)
+
   /* ================= 1. PANEL MENAMPILKAN JATAH AKUN ================= */
   console.log('\n=== 1. PANEL USAGE MENAMPILKAN JATAH AKUN ===')
   await aturPemakaian(SUB_A, 37, 9999)
@@ -79,6 +105,16 @@ async function jalankan() {
     'TIDAK menyebut batas global 1.000 di blok akun',
     !teksAkun.includes('1.000'),
     teksAkun.slice(0, 100),
+  )
+  cek(
+    'Menjelaskan jendela bergulir (bukan jam dinding)',
+    /jendela\s*24\s*jam/i.test(teksAkun),
+    teksAkun.slice(0, 200),
+  )
+  cek(
+    'TIDAK lagi menyebut reset pukul 07:00 WIB',
+    !/07:00/.test(teksAkun),
+    teksAkun.slice(0, 160),
   )
 
   const tutup = await p1.$('[aria-label="Tutup dialog"]')
@@ -142,6 +178,12 @@ async function jalankan() {
   )
 
   await browser.close()
+
+  /* Bersihkan lagi di akhir: uji ini sengaja menyisakan akun A dalam
+     keadaan "jatah habis", jadi tanpa pembersihan uji riwayat yang
+     dijalankan sesudahnya akan gagal karena sebab yang salah. */
+  await resetAkun(SUB_A)
+  await resetAkun(SUB_B)
 
   console.log('\n' + '='.repeat(62))
   const lulus = HASIL.filter((h) => h.lulus).length

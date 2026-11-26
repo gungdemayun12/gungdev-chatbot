@@ -20,6 +20,7 @@ os.environ["AI_PROVIDER"] = "ollama"
 import asyncio
 import json
 import sys
+from datetime import datetime, timezone
 
 import httpx
 
@@ -271,16 +272,102 @@ async def isi_pemakaian(data: dict):
     Mengisi angka pemakaian akun untuk menguji penegakan jatah.
 
     Dipakai uji_api.py agar bisa mensimulasikan "akun sudah memakai 100
-    pesan hari ini" tanpa harus benar-benar mengirim 100 pesan.
+    pesan" tanpa harus benar-benar mengirim 100 pesan.
+
+    Pemakaian kini disimpan pada JENDELA 24 JAM milik akun, jadi kuncinya
+    berasal dari _jendela_akun (bukan tanggal kalender lagi).
     """
+    import usage as _usage
+
     sub = str(data.get("sub") or "")
     req = int(data.get("requests") or 0)
     tok = int(data.get("tokens") or 0)
-    import usage as _usage
 
-    kunci = _usage._kunci_harian(sub)
+    if sub:
+        jendela = await _usage._jendela_akun(sub)
+        kunci = jendela["kunci"]
+    else:
+        kunci = _usage._kunci_harian()
+
     DB[kunci] = {"requests": req, "tokens": tok}
     return {"ok": True, "kunci": kunci}
+
+
+@main.app.post("/__uji/jendela")
+async def atur_jendela(data: dict):
+    """
+    Memundurkan awal jendela jatah akun, untuk menguji RESET.
+
+    Dengan memundurkan `mulai` lebih dari durasi jendela, jendela akun itu
+    dianggap sudah berakhir — sehingga pemakaian harus kembali 0 dan akun
+    boleh chat lagi. Ini cara menguji reset tanpa menunggu 24 jam.
+    """
+    import usage as _usage
+
+    sub = str(data.get("sub") or "")
+    mundur = int(data.get("mundur_detik") or 0)
+    if not sub or mundur <= 0:
+        return {"ok": False}
+
+    kunci_jendela = f"{_usage._PREFIX}:jendela:{sub}"
+    DB[kunci_jendela] = str(
+        int(datetime.now(timezone.utc).timestamp()) - mundur
+    )
+    return {"ok": True, "kunci": kunci_jendela}
+
+
+@main.app.get("/__uji/jendela/{sub}")
+async def lihat_jendela(sub: str):
+    """Melihat jendela jatah akun (untuk verifikasi uji)."""
+    import usage as _usage
+
+    jendela = await _usage._jendela_akun(sub)
+    return {
+        "kunci": jendela["kunci"],
+        "sisa_detik": jendela["sisa_detik"],
+        "akhir": jendela["akhir"],
+    }
+
+
+@main.app.post("/__uji/reset")
+async def reset_uji(data: dict):
+    """
+    Menghapus TOTAL jejak uji untuk satu akun: pemakaian jatah dan riwayat.
+
+    Mengapa perlu: tiap rangkaian uji mengubah state server. Bila satu uji
+    menyisakan akun dalam keadaan "jatah habis", uji berikutnya gagal
+    karena sebab yang salah — dan hasilnya jadi bergantung urutan.
+    Endpoint ini membuat tiap rangkaian uji mulai dari keadaan yang sama.
+    """
+    import usage as _usage
+    import penyimpanan as _penyimpanan
+
+    sub = str(data.get("sub") or "")
+    if not sub:
+        return {"ok": False}
+
+    dihapus = []
+
+    # 1. Jendela + pemakaian jatah.
+    kunci_jendela = f"{_usage._PREFIX}:jendela:{sub}"
+    DB.pop(kunci_jendela, None)
+    _usage._memori.pop(kunci_jendela, None)
+    for k in list(DB.keys()):
+        if k.startswith(f"{_usage._PREFIX}:u:{sub}:"):
+            DB.pop(k, None)
+            dihapus.append(k)
+    for k in list(_usage._memori.keys()):
+        if str(k).startswith(f"{_usage._PREFIX}:u:{sub}:"):
+            _usage._memori.pop(k, None)
+
+    # 2. Riwayat percakapan akun itu.
+    try:
+        await _penyimpanan.hapus_semua(sub)
+        dihapus.append("riwayat")
+    except Exception:  # noqa: BLE001
+        pass
+
+    return {"ok": True, "dihapus": dihapus}
 
 
 if __name__ == "__main__":

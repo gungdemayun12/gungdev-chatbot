@@ -105,6 +105,26 @@ JATAH_AKUN = {
     "rpd": int(os.getenv("JATAH_REQUEST_PER_AKUN", "100") or 100),
 }
 
+# ---------------------------------------------------------------------
+# JENDELA JATAH: 24 JAM BERGULIR PER AKUN (bukan jam dinding)
+# ---------------------------------------------------------------------
+# Jatah TIDAK direset serentak pukul 07:00 WIB untuk semua orang. Tiap
+# akun punya jendela 24 jam MILIKNYA SENDIRI yang dimulai saat pesan
+# pertama akun itu — sama seperti layanan AI pada umumnya.
+#
+# Contoh:
+#   Akun GungDe mulai chat 20:00 -> jendelanya 20:00 s/d 20:00 besok.
+#   Kalau jatahnya habis 22:00, ia pulih 20:00 besok (22 jam lagi),
+#   BUKAN jam 07:00 pagi.
+#   Akun Indah mulai chat 09:00 -> jendelanya 09:00 s/d 09:00 besok.
+#
+# Akun yang jatahnya TIDAK habis tidak pernah dibatasi sama sekali;
+# hitung mundur hanya ditampilkan sebagai informasi.
+#
+# Biayanya: Redis menyimpan satu angka "jendela mulai" per akun, dan
+# kedaluwarsa otomatis 2 x durasi jendela agar tidak menumpuk.
+JENDELA_JATAH_DETIK = int(os.getenv("JENDELA_JATAH_JAM", "24") or 24) * 3600
+
 # Jatah tamu. Nilai sebenarnya ditegakkan di main.py (3 pesan/hari lewat
 # penghitung per-IP); angka ini hanya untuk ditampilkan di panel.
 JATAH_TAMU = {"rpd": 3}
@@ -200,13 +220,19 @@ async def catat_request(
 
     Selalu mencatat TOTAL SITUS (dipakai menghitung sisa kuota penyedia),
     dan — bila `sub` diberikan — juga mencatat PEMAKAIAN AKUN itu sendiri
-    sehingga panel Usage bisa berkata "akun Anda hari ini: 12 permintaan".
+    pada JENDELA 24 JAM yang sedang berjalan, sehingga panel Usage bisa
+    berkata "akun Anda: 12 dari 100 pesan".
 
     Dipanggil dari dalam endpoint chat. Tidak pernah melempar exception.
     """
     kunci_global = _kunci_harian()
     sub_sah = _sub_sah(sub)
-    kunci_akun = _kunci_harian(sub_sah) if sub_sah else None
+    kunci_akun = None
+    if sub_sah:
+        try:
+            kunci_akun = (await _jendela_akun(sub_sah))["kunci"]
+        except Exception:  # noqa: BLE001
+            kunci_akun = None
 
     # --- Upstash (akurat lintas instan) ---
     if _UPSTASH_URL and _UPSTASH_TOKEN:
@@ -221,9 +247,9 @@ async def catat_request(
                 await _redis_perintah("HINCRBY", kunci_akun, "requests", 1)
                 if tokens > 0:
                     await _redis_perintah("HINCRBY", kunci_akun, "tokens", int(tokens))
-                # Agak lebih lama dari global: panel akun berguna untuk
-                # melihat pemakaian beberapa hari terakhir.
-                await _redis_perintah("EXPIRE", kunci_akun, 30 * 24 * 3600)
+                # Data jendela hanya berguna selama jendelanya hidup.
+                # Dua kali durasi jendela cukup, lalu terhapus sendiri.
+                await _redis_perintah("EXPIRE", kunci_akun, JENDELA_JATAH_DETIK * 2)
             return
         except Exception:  # noqa: BLE001
             pass  # lanjut ke cadangan memori
@@ -316,12 +342,20 @@ def model_terakhir() -> Optional[str]:
 
 async def baca_harian(sub: Optional[str] = None) -> Dict[str, int]:
     """
-    Membaca total request & token hari ini (UTC).
+    Membaca total request & token.
 
-    Tanpa `sub` -> total seluruh situs.
-    Dengan `sub` -> pemakaian akun itu saja.
+    Tanpa `sub` -> total seluruh situs pada hari UTC ini.
+    Dengan `sub` -> pemakaian akun itu pada JENDELA 24 JAM berjalannya
+    (bukan lagi per tanggal kalender), sesuai cara jatah dihitung.
     """
-    kunci = _kunci_harian(sub)
+    sub_sah = _sub_sah(sub)
+    if sub_sah:
+        try:
+            return await _baca_jendela(sub_sah)
+        except Exception:  # noqa: BLE001
+            return {"requests": 0, "tokens": 0}
+
+    kunci = _kunci_harian()
 
     if _UPSTASH_URL and _UPSTASH_TOKEN:
         hasil = await _redis_perintah("HMGET", kunci, "requests", "tokens")
@@ -393,12 +427,143 @@ def ambil_token_asli(umur_maks: float = 120.0) -> Optional[int]:
 
 
 def _detik_sampai_reset_harian() -> int:
-    """Sisa detik hingga 00:00 UTC (jendela harian Groq)."""
+    """Sisa detik hingga 00:00 UTC (jendela kuota PENYEDIA, bukan akun)."""
     sekarang = datetime.now(timezone.utc)
     besok = (sekarang + timedelta(days=1)).replace(
         hour=0, minute=0, second=0, microsecond=0
     )
     return max(0, int((besok - sekarang).total_seconds()))
+
+
+# ---------------------------------------------------------------------
+# JENDELA JATAH PER AKUN (24 jam bergulir)
+# ---------------------------------------------------------------------
+# Kunci Redis yang menyimpan KAPAN jendela akun itu dimulai:
+#     gungdev:jendela:<sub>  ->  "<epoch detik>"
+#
+# Jendela dimulai saat pesan pertama akun itu setelah jendela lamanya
+# berakhir. Selama jendela masih berjalan, angka pemakaian terus
+# bertambah di kunci harian biasa — hanya nama kuncinya memakai
+# penanda jendela, bukan tanggal kalender.
+#
+# MENGAPA TIDAK MEMAKAI TANGGAL: tanggal membuat semua akun reset
+# serentak pukul 00:00 UTC. Pengguna yang chat jam 06:50 hanya menikmati
+# jatahnya 10 menit. Jendela bergulir membuat tiap akun mendapat 24 jam
+# penuh sejak pemakaian pertamanya.
+async def _jendela_akun(sub: str) -> Dict[str, Any]:
+    """
+    Membaca (atau memulai) jendela jatah milik satu akun.
+
+    Mengembalikan:
+        {
+          "kunci": str,      # kunci Redis untuk pemakaian jendela ini
+          "mulai": float,    # epoch detik jendela dimulai
+          "akhir": float,    # epoch detik jendela berakhir (reset)
+          "sisa_detik": int,
+        }
+
+    Bila penyimpanan tidak tersedia, dipakai jendela berdasarkan
+    memori proses supaya perilakunya tetap masuk akal saat lokal.
+
+    PENTING — Redis adalah SUMBER KEBENARAN, memori hanya cadangan:
+    membaca memori lebih dulu membuat proses yang sudah lama hidup
+    (mis. server biasa atau instance serverless yang hangat) terus
+    memakai jendela lama meski Redis sudah menyimpan jendela baru.
+    Akibatnya jatah tidak pernah pulih. Karena itu memori hanya dipakai
+    bila Redis benar-benar tidak tersedia.
+    """
+    sekarang = datetime.now(timezone.utc).timestamp()
+    kunci_jendela = f"{_PREFIX}:jendela:{sub}"
+
+    mulai: float = 0.0
+    redis_terbaca = False
+    if _UPSTASH_URL and _UPSTASH_TOKEN:
+        try:
+            nilai = await _redis_perintah("GET", kunci_jendela)
+            if nilai is not None:
+                mulai = float(nilai)
+                redis_terbaca = True
+            else:
+                # Redis hidup tapi kunci belum ada -> memang belum pernah
+                # mulai. Jangan pakai memori yang mungkin sudah basi.
+                redis_terbaca = True
+        except Exception:  # noqa: BLE001
+            redis_terbaca = False
+
+    if not redis_terbaca:
+        mulai = float(_memori.get(kunci_jendela, 0) or 0)
+        # Angka tanggal lama (kunci berbasis tanggal) tidak relevan lagi;
+        # anggap belum pernah mulai agar tidak salah hitung.
+        if mulai <= 0:
+            mulai = 0.0
+
+    # Jendela baru dimulai bila belum pernah ada, atau sudah lewat.
+    if mulai <= 0 or sekarang >= mulai + JENDELA_JATAH_DETIK:
+        mulai_baru = sekarang
+        # Jaga-jaga: kunci pemakaian memakai int(detik). Bila jendela baru
+        # dimulai pada detik yang SAMA dengan jendela mana pun yang masih
+        # tersimpan, angka pemakaian lama bisa ikut terbaca sehingga akun
+        # yang sudah lewat jendelanya tetap ditolak. Karena itu penanda
+        # jendela baru dipastikan belum pernah dipakai: cari detik terkecil
+        # (mulai dari sekarang) yang kuncinya benar-benar kosong.
+        #
+        # Hanya berlaku bila pemakaian disimpan di Redis; pada cadangan
+        # memori, kunci kosong selalu berarti 0.
+        percobaan = 0
+        while percobaan < 5:
+            calon = f"{_PREFIX}:u:{sub}:w{int(mulai_baru)}"
+            if not (_UPSTASH_URL and _UPSTASH_TOKEN):
+                break
+            try:
+                isi = await _redis_perintah("HMGET", calon, "requests")
+            except Exception:  # noqa: BLE001
+                break
+            # HMGET mengembalikan [None] bila kunci belum ada.
+            if not isinstance(isi, list) or not isi or isi[0] in (None, ""):
+                break
+            # Sudah terpakai -> mundurkan penanda satu detik lalu coba lagi.
+            mulai_baru = float(int(mulai_baru) + 1)
+            percobaan += 1
+        mulai = mulai_baru
+        if _UPSTASH_URL and _UPSTASH_TOKEN:
+            try:
+                await _redis_perintah(
+                    "SET", kunci_jendela, int(mulai), "EX", JENDELA_JATAH_DETIK * 2
+                )
+            except Exception:  # noqa: BLE001
+                pass
+        _memori[kunci_jendela] = mulai
+    else:
+        # Simpan salinan agar tetap jalan bila Redis mati sesaat.
+        _memori[kunci_jendela] = mulai
+
+    akhir = mulai + JENDELA_JATAH_DETIK
+    return {
+        "kunci": f"{_PREFIX}:u:{sub}:w{int(mulai)}",
+        "mulai": mulai,
+        "akhir": akhir,
+        "sisa_detik": max(0, int(akhir - sekarang)),
+    }
+
+
+async def _baca_jendela(sub: str) -> Dict[str, int]:
+    """Membaca pemakaian akun pada jendela yang sedang berjalan."""
+    jendela = await _jendela_akun(sub)
+    kunci = jendela["kunci"]
+
+    if _UPSTASH_URL and _UPSTASH_TOKEN:
+        hasil = await _redis_perintah("HMGET", kunci, "requests", "tokens")
+        if isinstance(hasil, list) and len(hasil) == 2:
+            return {
+                "requests": int(hasil[0] or 0),
+                "tokens": int(hasil[1] or 0),
+            }
+
+    catatan = _memori.get(kunci, {})
+    return {
+        "requests": int(catatan.get("requests", 0)),
+        "tokens": int(catatan.get("tokens", 0)),
+    }
 
 
 # ---------------------------------------------------------------------
@@ -412,11 +577,11 @@ async def periksa_jatah(sub: Optional[str]) -> Dict[str, Any]:
         {
           "boleh": bool,        # False = tolak, jatah pesan habis
           "sub": str|None,      # akun yang diperiksa (None = tamu)
-          "terpakai": int,      # request akun hari ini
-          "batas": int,         # jatah request akun per hari
+          "terpakai": int,      # request akun pada jendela berjalan
+          "batas": int,         # jatah request akun per jendela
           "sisa": int,
           "token_terpakai": int,   # hanya informasi, BUKAN pembatas
-          "reset_detik": int,   # hitung mundur ke 00:00 UTC
+          "reset_detik": int,   # hitung mundur ke akhir JENDELA AKUN
           "alasan": str|None,   # 'request' bila ditolak
         }
 
@@ -428,6 +593,8 @@ async def periksa_jatah(sub: Optional[str]) -> Dict[str, Any]:
       melewati batas. Tidak ada penolakan berdasarkan perkiraan.
     - Hanya JUMLAH PESAN yang membatasi. Token dicatat sebagai informasi
       untuk pengguna, tidak pernah menolak (alasannya lihat JATAH_AKUN).
+    - Reset memakai JENDELA 24 JAM BERGULIR milik akun itu sendiri
+      (lihat _jendela_akun), bukan jam dinding yang sama untuk semua.
     """
     sub_sah = _sub_sah(sub)
     hasil: Dict[str, Any] = {
@@ -452,7 +619,8 @@ async def periksa_jatah(sub: Optional[str]) -> Dict[str, Any]:
         return hasil
 
     try:
-        catatan = await baca_harian(sub_sah)
+        jendela = await _jendela_akun(sub_sah)
+        catatan = await _baca_jendela(sub_sah)
     except Exception:  # noqa: BLE001
         return hasil
 
@@ -462,6 +630,7 @@ async def periksa_jatah(sub: Optional[str]) -> Dict[str, Any]:
     hasil["terpakai"] = terpakai
     hasil["token_terpakai"] = token_terpakai
     hasil["sisa"] = max(0, JATAH_AKUN["rpd"] - terpakai)
+    hasil["reset_detik"] = jendela["sisa_detik"]
 
     # Hanya jumlah pesan yang menentukan boleh/tidak.
     if terpakai >= JATAH_AKUN["rpd"]:
@@ -604,17 +773,27 @@ async def ringkasan(
     # ------------------------------------------------------------------
     sub_sah = _sub_sah(sub)
     if sub_sah:
-        milik = await baca_harian(sub_sah)
+        try:
+            jendela = await _jendela_akun(sub_sah)
+            milik = await _baca_jendela(sub_sah)
+        except Exception:  # noqa: BLE001
+            jendela = {
+                "sisa_detik": reset_harian,
+                "akhir": datetime.now(timezone.utc).timestamp() + reset_harian,
+            }
+            milik = {"requests": 0, "tokens": 0}
+
         jatah_req = JATAH_AKUN["rpd"]
         terpakai_req = max(0, int(milik["requests"]))
         terpakai_token = max(0, int(milik["tokens"]))
+        sisa_akun = jendela["sisa_detik"]
 
         hasil["akun"] = {
             "requests": {
                 "terpakai": terpakai_req,
                 # Ini JATAH SUNGGUHAN milik akun ini — bukan angka
                 # tampilan. Bila terpakai mencapai batas, /chat menolak
-                # sampai reset harian (lihat periksa_jatah).
+                # sampai jendela akun ini berakhir (lihat periksa_jatah).
                 "batas": jatah_req,
                 "sisa": max(0, jatah_req - terpakai_req),
                 "persen": _persen(terpakai_req, jatah_req),
@@ -628,15 +807,24 @@ async def ringkasan(
                 "persen": None,
             },
             "habis": terpakai_req >= jatah_req,
+            # Reset memakai JENDELA AKUN INI SENDIRI (24 jam bergulir
+            # sejak pesan pertamanya), bukan jam dinding bersama.
             "reset": {
-                "detik": reset_harian,
-                "jam": round(reset_harian / 3600, 1),
-                "waktu_utc": hasil["reset"]["waktu_utc"],
+                "detik": sisa_akun,
+                "jam": round(sisa_akun / 3600, 1),
+                "waktu_utc": datetime.fromtimestamp(
+                    jendela["akhir"], tz=timezone.utc
+                ).strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "zona": "UTC",
+                "bergulir": True,
+                "jendela_jam": round(JENDELA_JATAH_DETIK / 3600, 1),
             },
             "catatan": (
                 "Jatah ini milik akun Anda sendiri dan terpisah dari akun lain. "
-                "Reset setiap 00:00 UTC (07:00 WIB)."
+                f"Jendela {round(JENDELA_JATAH_DETIK / 3600)} jam dimulai saat "
+                "pesan pertama Anda, dan jatah kembali penuh saat jendela itu "
+                "berakhir. Akun yang tidak menghabiskan jatah tidak pernah "
+                "dibatasi."
             ),
         }
     else:
