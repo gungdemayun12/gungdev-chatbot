@@ -587,8 +587,9 @@ async def ringkasan(
         ),
         "catatan": (
             "Jumlah permintaan dibaca langsung dari penyedia AI sehingga akurat. "
-            "Jumlah token dihitung server dari panjang percakapan, jadi bisa "
-            "sedikit berbeda dari dashboard penyedia."
+            "Jumlah token dicatat dari angka resmi penyedia; bila penyedia tidak "
+            "mengirimkannya, server memakai perkiraan sehingga angkanya bisa "
+            "sedikit berbeda."
         ),
         "token_per_menit_sisa": (sisa_header or {}).get("remaining_tokens"),
     }
