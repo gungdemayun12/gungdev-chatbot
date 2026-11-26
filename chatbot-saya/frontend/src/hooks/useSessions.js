@@ -206,8 +206,11 @@ export function useSessions(settings, akunSub = null, apiUrl = '') {
     if (!sub || !siapSimpanRef.current) return
     if (!settings.saveHistory) return
     if (!getTokenRiwayat()) {
-      setStatusSimpan('perluLogin')
-      return
+      const pulih = await pulihkanTokenRiwayat()
+      if (!pulih || !getTokenRiwayat()) {
+        setStatusSimpan('perangkat')
+        return
+      }
     }
 
     const kotor = Array.from(kotorRef.current)
@@ -221,7 +224,19 @@ export function useSessions(settings, akunSub = null, apiUrl = '') {
 
       const hasil = await simpanSesiServer(apiRef.current, sesi)
       if (hasil.perluLogin) {
-        setStatusSimpan('perluLogin')
+        // ID token Google memang kedaluwarsa berkala. Selama sesi aplikasi
+        // masih login, pulihkan token secara diam-diam lalu ulangi sekali;
+        // jangan langsung menakut-nakuti pengguna dengan "Masuk ulang".
+        const pulih = await pulihkanTokenRiwayat()
+        if (pulih) {
+          const ulang = await simpanSesiServer(apiRef.current, sesi)
+          if (ulang.tersimpan) continue
+          if (ulang.perluLogin) {
+            setStatusSimpan('perangkat')
+            return
+          }
+        }
+        setStatusSimpan('perangkat')
         return
       }
       if (!hasil.tersimpan) semuaTersimpan = false
@@ -312,10 +327,26 @@ export function useSessions(settings, akunSub = null, apiUrl = '') {
       if (batal) return
 
       if (hasil.perluLogin) {
-        // Token tidak ada / kedaluwarsa: pakai salinan perangkat, dan
-        // beri tahu UI bahwa perlu masuk ulang.
+        // Token Google dapat kedaluwarsa walau pengguna belum logout.
+        // Coba pulihkan diam-diam; sesi login lokal tetap dipertahankan.
+        const pulih = await pulihkanTokenRiwayat()
+        if (pulih && !batal) {
+          const ulang = await ambilRiwayatServer(apiRef.current, { signal: kendali.signal })
+          if (!batal && ulang.ok && !ulang.perluLogin) {
+            setStatusSimpan(ulang.tersedia ? 'server' : 'perangkat')
+            siapSimpanRef.current = ulang.tersedia
+            if (ulang.sessions.length > 0) {
+              const dariServer = sanitizeSessions(ulang.sessions)
+              setSessions(dariServer)
+              setActiveId(ulang.activeId)
+            }
+            return
+          }
+        }
+        // Bila Google meminta interaksi, jangan tampilkan peringatan
+        // "Masuk ulang"; tetap gunakan cache perangkat dan retry nanti.
         siapSimpanRef.current = false
-        setStatusSimpan('perluLogin')
+        setStatusSimpan('perangkat')
         return
       }
 

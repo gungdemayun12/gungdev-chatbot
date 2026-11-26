@@ -437,12 +437,9 @@ export default function Sidebar({
               <span>Riwayat sementara hanya di perangkat ini</span>
             </div>
           )}
-          {user && statusSimpan === 'perluLogin' && (
-            <div className="sb-simpan is-warning" role="status">
-              <CloudOff size={14} aria-hidden="true" />
-              <span>Masuk ulang untuk menyinkronkan riwayat</span>
-            </div>
-          )}
+          {/* Token Google dapat kedaluwarsa tanpa pengguna logout. Hook
+              memulihkannya diam-diam; karena itu tidak menampilkan ajakan
+              "Masuk ulang" selama sesi aplikasi masih aktif. */}
 
           <button
             type="button"
