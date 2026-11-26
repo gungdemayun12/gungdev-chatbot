@@ -11,7 +11,9 @@
     { "source": "/chat", "destination": "/api/index" },
     { "source": "/chat/stream", "destination": "/api/index" },
     { "source": "/usage", "destination": "/api/index" },
-    { "source": "/capabilities", "destination": "/api/index" }
+    { "source": "/capabilities", "destination": "/api/index" },
+    { "source": "/api/sessions", "destination": "/api/index" },
+    { "source": "/api/sessions/(.*)", "destination": "/api/index" }
   ],
   "headers": [
     {

@@ -47,12 +47,14 @@ import os                   # membaca environment variable
 from typing import AsyncIterator, List, Optional, Sequence
 
 import httpx                # HTTP client async (dipakai Groq & cek kesehatan)
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 import lampiran             # ekstraksi teks file & validasi gambar
+import penyimpanan          # riwayat percakapan di server (Upstash Redis)
+import identitas            # verifikasi ID token Google di server
 import usage                # pencatat & penyedia data kuota (usage)
 
 # python-dotenv hanya dipakai saat pengembangan lokal.
@@ -456,6 +458,53 @@ class HealthResponse(BaseModel):
     status: str
     provider: str
     model: str
+
+
+# ---------------------------------------------------------------------
+# 4b. SKEMA DATA: RIWAYAT PERCAKAPAN DI SERVER
+# ---------------------------------------------------------------------
+class SesiSimpan(BaseModel):
+    """Body POST /api/sessions — menyimpan satu sesi percakapan."""
+    session: dict = Field(..., description="Satu objek sesi lengkap")
+
+
+class SesiBanyak(BaseModel):
+    """
+    Body POST /api/sessions/sync — menyimpan beberapa sesi sekaligus.
+
+    Dipakai sekali saat pengguna login pertama kali di perangkat yang
+    sudah punya riwayat lokal: salinan perangkat dikirim ke server agar
+    tidak hilang.
+    """
+    sessions: List[dict] = Field(default_factory=list, description="Daftar sesi")
+
+
+class SesiAktif(BaseModel):
+    """Body POST /api/sessions/active — sesi yang sedang dibuka."""
+    activeId: Optional[str] = Field(None, description="ID sesi aktif, atau null")
+
+
+async def identitas_pemanggil(authorization: Optional[str]) -> Optional[dict]:
+    """
+    Membaca header `Authorization: Bearer <ID token Google>` dan
+    memverifikasinya ke Google.
+
+    Mengembalikan payload akun (berisi `sub`) atau None bila header
+    tidak ada / token tidak sah.
+
+    PENTING: `sub` yang dipakai sebagai kunci penyimpanan SELALU berasal
+    dari jawaban Google yang sudah diverifikasi, bukan dari isi body
+    permintaan. Dengan begitu tidak ada cara bagi pengguna untuk mengaku
+    sebagai akun orang lain.
+    """
+    if not authorization:
+        return None
+
+    teks = authorization.strip()
+    if teks.lower().startswith("bearer "):
+        teks = teks[7:].strip()
+
+    return await identitas.verifikasi_token(teks)
 
 
 # ---------------------------------------------------------------------
@@ -1214,25 +1263,166 @@ async def health_check():
 # 12b. ENDPOINT GET /usage — pemakaian & sisa kuota AI
 # ---------------------------------------------------------------------
 @app.get("/usage")
-async def usage_check():
+async def usage_check(authorization: Optional[str] = Header(None)):
     """
     Menampilkan pemakaian kuota AI hari ini.
 
         {
-          "provider": "groq",
-          "model": "openai/gpt-oss-120b",
+          "provider": "gungdev",
+          "model": "gungdev",
           "requests": { "terpakai": 40, "batas": 1000, "sisa": 960, "persen": 4.0 },
           "tokens":   { "terpakai": 17500, "batas": 200000, "sisa": 182500, "persen": 8.8 },
           "per_menit": { "request_batas": 30, "token_batas": 8000, "reset_detik": 37 },
           "reset": { "detik": 25200, "jam": 7.0, "waktu_utc": "...", "zona": "UTC" },
-          "sumber": "penyedia" | "perkiraan"
+          "sumber": "penyedia" | "perkiraan",
+          "akun": { ... }      // HANYA bila pemanggil login (terverifikasi)
         }
 
+    Bagian "akun" berisi pemakaian MILIK AKUN ITU SENDIRI, sehingga tiap
+    pengguna punya angka masing-masing seperti layanan AI pada umumnya.
+    Angka kuota utama tetap global karena kuota penyedia memang dipakai
+    bersama.
+
     Endpoint ini TIDAK memanggil penyedia AI, jadi tidak menghabiskan
-    kuota sama sekali. Angkanya berasal dari header respons terakhir
-    atau dari pencatatan server sendiri.
+    kuota sama sekali. Token yang tidak sah hanya membuat bagian "akun"
+    tidak dikirim — tidak membuat permintaan gagal, karena tamu pun
+    berhak melihat sisa kuota.
     """
-    return await usage.ringkasan(PROVIDER, opsi_model_aktif())
+    akun = await identitas_pemanggil(authorization)
+    return await usage.ringkasan(
+        PROVIDER,
+        opsi_model_aktif(),
+        sub=(akun or {}).get("sub"),
+    )
+
+
+# ---------------------------------------------------------------------
+# 12d. ENDPOINT RIWAYAT PERCAKAPAN DI SERVER (/api/sessions)
+# ---------------------------------------------------------------------
+# Empat endpoint di bawah membuat riwayat sama di semua perangkat:
+#
+#   GET    /api/sessions          -> { tersedia, sessions, activeId }
+#   POST   /api/sessions          -> simpan SATU sesi
+#   POST   /api/sessions/sync     -> simpan BANYAK sesi (migrasi perangkat)
+#   POST   /api/sessions/active   -> simpan sesi yang sedang dibuka
+#   DELETE /api/sessions          -> hapus semua (atau ?id=... satu sesi)
+#
+# Semua WAJIB membawa `Authorization: Bearer <ID token Google>` yang sah.
+# Endpoint /chat & /chat/stream TIDAK berubah sama sekali.
+@app.get("/api/sessions")
+async def sessions_daftar(authorization: Optional[str] = Header(None)):
+    """
+    Mengambil seluruh riwayat milik akun yang sedang login.
+
+    `tersedia: false` berarti penyimpanan server sedang tidak bisa
+    dipakai (belum dikonfigurasi / kuota habis). Frontend memakai tanda
+    ini untuk memberi tahu pengguna bahwa riwayat sementara hanya ada di
+    perangkat ini — bukan untuk menampilkan error.
+    """
+    akun = await identitas_pemanggil(authorization)
+    if not akun:
+        raise HTTPException(
+            status_code=401,
+            detail="Sesi login tidak valid. Silakan masuk ulang dengan Google.",
+        )
+
+    data = await penyimpanan.daftar_sesi(akun["sub"])
+    return {
+        "tersedia": data["tersedia"] and penyimpanan.tersedia(),
+        "sesi": data["sessions"],
+        "activeId": data["activeId"],
+        "akun": {"name": akun.get("name", ""), "email": akun.get("email", "")},
+    }
+
+
+@app.post("/api/sessions")
+async def sessions_simpan(
+    body: SesiSimpan,
+    authorization: Optional[str] = Header(None),
+):
+    """Menyimpan satu sesi (tambah baru atau perbarui)."""
+    akun = await identitas_pemanggil(authorization)
+    if not akun:
+        raise HTTPException(
+            status_code=401,
+            detail="Sesi login tidak valid. Silakan masuk ulang dengan Google.",
+        )
+
+    tersimpan = await penyimpanan.simpan_sesi(akun["sub"], body.session)
+    return {"tersimpan": tersimpan}
+
+
+@app.post("/api/sessions/sync")
+async def sessions_sinkron(
+    body: SesiBanyak,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Menyimpan beberapa sesi sekaligus.
+
+    Dipakai sekali saat pengguna login di perangkat yang sudah punya
+    riwayat lokal, agar riwayat lama tidak hilang. Sesi yang sudah ada
+    di server akan DIPERBARUI (bukan diduplikasi) karena kuncinya ID sesi.
+    """
+    akun = await identitas_pemanggil(authorization)
+    if not akun:
+        raise HTTPException(
+            status_code=401,
+            detail="Sesi login tidak valid. Silakan masuk ulang dengan Google.",
+        )
+
+    hasil = await penyimpanan.simpan_banyak(akun["sub"], body.sessions)
+    return {
+        "tersimpan": hasil["tersimpan"],
+        "gagal": hasil["gagal"],
+        "total": len(body.sessions),
+    }
+
+
+@app.post("/api/sessions/active")
+async def sessions_aktif(
+    body: SesiAktif,
+    authorization: Optional[str] = Header(None),
+):
+    """Mencatat sesi yang sedang dibuka agar perangkat lain ikut sepakat."""
+    akun = await identitas_pemanggil(authorization)
+    if not akun:
+        raise HTTPException(
+            status_code=401,
+            detail="Sesi login tidak valid. Silakan masuk ulang dengan Google.",
+        )
+
+    ok = await penyimpanan.simpan_aktif(akun["sub"], body.activeId)
+    return {"tersimpan": ok}
+
+
+@app.delete("/api/sessions")
+async def sessions_hapus(
+    id: Optional[str] = None,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Menghapus riwayat milik akun.
+
+    ?id=<sesiId>  -> hapus satu sesi
+    tanpa id      -> hapus SEMUA sesi akun itu
+
+    Ini satu-satunya cara riwayat hilang dari server — sesuai permintaan
+    pemilik situs: "tersimpan selama pengguna tidak menghapusnya".
+    """
+    akun = await identitas_pemanggil(authorization)
+    if not akun:
+        raise HTTPException(
+            status_code=401,
+            detail="Sesi login tidak valid. Silakan masuk ulang dengan Google.",
+        )
+
+    if id:
+        ok = await penyimpanan.hapus_sesi(akun["sub"], id)
+        return {"terhapus": 1 if ok else 0}
+
+    ok = await penyimpanan.hapus_semua(akun["sub"])
+    return {"terhapus": "semua" if ok else 1}
 
 
 # ---------------------------------------------------------------------
@@ -1365,19 +1555,29 @@ async def capabilities():
 # 13. ENDPOINT POST /chat  (non-streaming, kontrak lama)
 # ---------------------------------------------------------------------
 @app.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest):
+async def chat(request: ChatRequest, authorization: Optional[str] = Header(None)):
     """
     Menerima {"message": "..."} lalu mengembalikan {"reply": "..."}.
 
     Kontrak lama TETAP SAMA. Field tambahan (history, system_prompt,
     temperature, max_tokens, model, images, files, research) opsional.
+
+    Header `Authorization` juga OPSIONAL: bila berisi ID token Google
+    yang sah, pemakaian dicatat atas nama akun itu sehingga panel Usage
+    menampilkan angka miliknya sendiri. Tanpa header, chat tetap jalan
+    seperti biasa (mode tamu) — kontrak tidak berubah.
     """
     messages, opsi = siapkan_permintaan(request)
 
     try:
         isi = await complete(messages, opsi)
         # Catat pemakaian (tidak pernah menggagalkan percakapan).
-        await usage.catat_request(tokens=_perkiraan_token(messages, isi), model=opsi["model"])
+        akun = await identitas_pemanggil(authorization)
+        await usage.catat_request(
+            tokens=_perkiraan_token(messages, isi),
+            model=opsi["model"],
+            sub=(akun or {}).get("sub"),
+        )
         return {"reply": isi}
     except HTTPException:
         raise
@@ -1389,7 +1589,7 @@ async def chat(request: ChatRequest):
 # 14. ENDPOINT POST /chat/stream  (Server-Sent Events)
 # ---------------------------------------------------------------------
 @app.post("/chat/stream")
-async def chat_stream(request: ChatRequest):
+async def chat_stream(request: ChatRequest, authorization: Optional[str] = Header(None)):
     """
     Versi streaming dari /chat. Format SSE (satu JSON per baris data:):
 
@@ -1401,8 +1601,16 @@ async def chat_stream(request: ChatRequest):
     `meta` dikirim paling awal dan hanya muncul bila model diganti
     otomatis (mis. gambar diproses model vision). Klien lama yang tidak
     mengenal field ini akan mengabaikannya, jadi kontrak tetap aman.
+
+    Header `Authorization` opsional seperti pada /chat: bila sah,
+    pemakaian dicatat atas nama akun itu.
     """
     messages, opsi = siapkan_permintaan(request)
+
+    # Identitas diverifikasi SEKALI di awal (bukan di dalam generator)
+    # agar hasil cache Google dipakai bersama oleh pencatatan usage.
+    akun = await identitas_pemanggil(authorization)
+    sub_akun = (akun or {}).get("sub")
 
     def sse(obj: dict) -> str:
         return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
@@ -1438,6 +1646,7 @@ async def chat_stream(request: ChatRequest):
             await usage.catat_request(
                 tokens=_perkiraan_token(messages, "".join(jawaban)),
                 model=opsi["model"],
+                sub=sub_akun,
             )
 
             yield sse({"done": True})

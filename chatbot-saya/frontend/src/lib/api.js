@@ -87,10 +87,16 @@ export async function checkHealth(baseUrl, { signal } = {}) {
  * Endpoint ini tidak memanggil penyedia AI, jadi TIDAK menghabiskan
  * kuota. Mengembalikan null bila backend lama belum punya /usage
  * (agar UI bisa menyembunyikan panel tanpa error).
+ *
+ * Bila `token` diberikan (pengguna login), backend memverifikasinya dan
+ * menyertakan bagian `akun` berisi pemakaian MILIK AKUN ITU. Token yang
+ * tidak sah tidak membuat permintaan gagal — pengguna tetap melihat
+ * sisa kuota umum, hanya tanpa bagian akun.
  */
-export async function fetchUsage(baseUrl, { signal } = {}) {
+export async function fetchUsage(baseUrl, { signal, token } = {}) {
   try {
-    const res = await fetch(`${normalizeUrl(baseUrl)}/usage`, { signal })
+    const headers = token ? { Authorization: `Bearer ${token}` } : undefined
+    const res = await fetch(`${normalizeUrl(baseUrl)}/usage`, { signal, headers })
     if (!res.ok) return null
     return await res.json()
   } catch {
@@ -133,6 +139,9 @@ export async function fetchCapabilities(baseUrl, { signal } = {}) {
  * @param {string[]} params.images     Gambar sebagai data URL base64.
  * @param {Array}  params.files        File teks hasil ekstraksi: [{name, text}]
  * @param {boolean} params.research    True = minta riset web.
+ * @param {string}  params.token       ID token Google (opsional). Bila ada,
+ *                                     server memverifikasinya dan mencatat
+ *                                     pemakaian atas nama akun itu.
  * @param {AbortSignal} params.signal  Untuk tombol "Stop"
  * @param {(delta: string) => void} params.onDelta
  * @param {(meta: object) => void} params.onMeta  Info model yang dipakai
@@ -149,6 +158,7 @@ export async function streamChat({
   images = [],
   files = [],
   research = false,
+  token,
   signal,
   onDelta,
   onMeta,
@@ -156,7 +166,12 @@ export async function streamChat({
 }) {
   const res = await fetch(`${normalizeUrl(baseUrl)}/chat/stream`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      // Hanya dikirim bila ada. Kontrak lama tidak berubah: server
+      // memperlakukan header ini sebagai opsional.
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
     body: JSON.stringify({
       message,
       history,

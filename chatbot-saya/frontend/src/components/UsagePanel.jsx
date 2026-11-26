@@ -15,6 +15,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import Modal from './Modal.jsx'
 import { Activity, RefreshCw } from './icons.jsx'
+import { getTokenRiwayat } from '../lib/riwayat.js'
 
 /* ---------------- Bantuan format ---------------- */
 
@@ -93,7 +94,11 @@ export function UsageContent({ apiUrl, apiOnline, aktif = true }) {
     setMemuat(true)
     setGalat(false)
     try {
-      const res = await fetch(`${apiUrl.replace(/\/+$/, '')}/usage`)
+      // Token dikirim agar backend menyertakan pemakaian akun ini.
+      const token = getTokenRiwayat()
+      const res = await fetch(`${apiUrl.replace(/\/+$/, '')}/usage`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      })
       if (!res.ok) throw new Error('HTTP ' + res.status)
       setData(await res.json())
     } catch {
@@ -124,6 +129,8 @@ export function UsageContent({ apiUrl, apiOnline, aktif = true }) {
 
   const persenRequest = data?.requests?.persen ?? 0
   const hampirHabis = persenRequest >= 90
+  // Bagian "pemakaian saya" hanya ada bila backend mengenali akunnya.
+  const akun = data?.akun || null
 
   return (
     <div className="usage">
@@ -173,6 +180,26 @@ export function UsageContent({ apiUrl, apiOnline, aktif = true }) {
               </div>
             </div>
           </div>
+
+          {/* --- Pemakaian akun ini sendiri ---
+               Hanya muncul saat pengguna login. Kuota di bawah ini
+               dipakai bersama semua pengunjung, jadi angka akun
+               ditampilkan terpisah agar tidak menyesatkan. */}
+          {akun && (
+            <div className="usage__akun">
+              <div className="usage__akun-head">
+                <span className="usage__akun-label">Pemakaian saya</span>
+                <span className="usage__akun-total">
+                  {angkaRingkas(akun.requests?.terpakai || 0)} permintaan
+                  <span className="usage__akun-sep">·</span>
+                  {angkaRingkas(akun.tokens?.terpakai || 0)} token
+                </span>
+              </div>
+              <div className="usage__akun-note">
+                Dihitung untuk akun ini saja, direset bersama kuota harian.
+              </div>
+            </div>
+          )}
 
           {hampirHabis && (
             <div className="usage__notice is-warning">

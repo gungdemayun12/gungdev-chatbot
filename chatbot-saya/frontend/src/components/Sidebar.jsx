@@ -232,6 +232,7 @@ export default function Sidebar({
   onLogout,
   guestSisa,
   guestHabis,
+  statusSimpan = 'lokal',
 }) {
   const [query, setQuery] = useState('')
   const [collapsedGroups, setCollapsedGroups] = useState({})
@@ -423,6 +424,23 @@ export default function Sidebar({
                 <span className="sb-profile__name">{nickname || 'Kamu'}</span>
                 <span className="sb-account__sub">Belum masuk</span>
               </span>
+            </div>
+          )}
+
+          {/* Status penyimpanan riwayat. Hanya muncul bila ada yang perlu
+              pengguna ketahui: server sedang tidak bisa dipakai, atau
+              sesi login perlu diperbarui. Saat normal tidak ditampilkan
+              agar tampilan tetap bersih. */}
+          {user && statusSimpan === 'perangkat' && (
+            <div className="sb-simpan is-warning" role="status">
+              <CloudOff size={14} aria-hidden="true" />
+              <span>Riwayat sementara hanya di perangkat ini</span>
+            </div>
+          )}
+          {user && statusSimpan === 'perluLogin' && (
+            <div className="sb-simpan is-warning" role="status">
+              <CloudOff size={14} aria-hidden="true" />
+              <span>Masuk ulang untuk menyinkronkan riwayat</span>
             </div>
           )}
 

@@ -23,6 +23,7 @@ import { useSessions } from './hooks/useSessions.js'
 import { useToasts } from './hooks/useToasts.js'
 import { useAuth } from './hooks/useAuth.js'
 import { checkHealth, streamChat, fetchUsage, fetchCapabilities } from './lib/api.js'
+import { getTokenRiwayat } from './lib/riwayat.js'
 import { gabungKemampuan, modelUntukGambar, modelUntukRiset, cariModel } from './lib/models.js'
 import {
   catatPesanTamu,
@@ -74,7 +75,8 @@ export default function App() {
     deleteSession,
     clearAll,
     tersimpan,
-  } = useSessions(settings, user?.sub || null)
+    statusSimpan,
+  } = useSessions(settings, user?.sub || null, apiUrl)
 
   const { toasts, toast, dismiss } = useToasts()
 
@@ -149,7 +151,9 @@ export default function App() {
   const [usageOpen, setUsageOpen] = useState(false)
 
   const segarkanUsage = useCallback(async () => {
-    const data = await fetchUsage(apiUrl)
+    // Token dikirim bila ada supaya backend bisa menyertakan bagian
+    // "pemakaian akun saya" — tiap akun punya angkanya sendiri.
+    const data = await fetchUsage(apiUrl, { token: getTokenRiwayat() })
     // Backend lama belum punya /usage -> null, panel disembunyikan.
     setUsage(data)
   }, [apiUrl])
@@ -208,6 +212,10 @@ export default function App() {
           images,
           files,
           research: pakaiRiset,
+          // Bila pengguna login, token membuat server mencatat pemakaian
+          // atas nama akunnya (usage per akun) — bukan menumpuk ke satu
+          // angka global yang dipakai bersama.
+          token: getTokenRiwayat(),
           signal: controller.signal,
           onMeta: (meta) => {
             /* Server memberi tahu bila model diganti otomatis
@@ -454,7 +462,10 @@ export default function App() {
       resetPemakaianTamu()
       setTamuPemakaian(bacaPemakaianTamu())
       if (isMobile()) setSidebarOpen(false)
-      toast(`Selamat datang, ${akun.name.split(' ')[0]}! Riwayat kini tersimpan.`, 'success')
+      toast(
+        `Selamat datang, ${akun.name.split(' ')[0]}! Riwayat Anda kini tersimpan di akun dan bisa dibuka dari perangkat lain.`,
+        'success',
+      )
     },
     [masukSebagai, toast],
   )
@@ -465,16 +476,18 @@ export default function App() {
   )
 
   /**
-   * Keluar: riwayat dan hitungan tamu dipulihkan ke keadaan tamu.
-   * Riwayat milik akun TETAP tersimpan di perangkat (di bawah kuncinya
-   * sendiri) sehingga saat masuk lagi, percakapan lama muncul kembali.
+   * Keluar: kembali ke mode tamu.
+   *
+   * Riwayat akun TETAP tersimpan di server (dan salinan perangkat),
+   * sehingga saat masuk lagi dengan akun yang sama — dari perangkat mana
+   * pun — percakapan lama muncul kembali.
    */
   const handleLogout = useCallback(() => {
     keluar()
     setInput('')
     setError(null)
     setTamuPemakaian(bacaPemakaianTamu())
-    toast('Anda sudah keluar. Riwayat akun tetap tersimpan di perangkat ini.', 'info')
+    toast('Anda sudah keluar. Riwayat tetap tersimpan di akun Anda.', 'info')
   }, [keluar, toast])
 
   /* Bila sesi login sudah ada saat halaman dimuat (pengguna menutup tab
@@ -683,6 +696,7 @@ export default function App() {
         onLogout={handleLogout}
         guestSisa={masuk ? null : tamu.sisa}
         guestHabis={tamu.habis}
+        statusSimpan={statusSimpan}
       />
 
       <main className="app__main">
@@ -839,8 +853,9 @@ export default function App() {
         }
       >
         <p className="modal__text">
-          Seluruh percakapan ({sessions.length} sesi) akan dihapus dari peramban ini. Pastikan Anda
-          sudah mengekspornya bila masih diperlukan.
+          Seluruh percakapan ({sessions.length} sesi) akan dihapus dari
+          {user ? ' akun Anda dan semua perangkat yang memakainya' : ' peramban ini'}. Tindakan ini
+          tidak bisa dibatalkan.
         </p>
         {!tersimpan && (
           <p className="modal__text modal__text--muted">

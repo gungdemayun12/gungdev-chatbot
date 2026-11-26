@@ -42,6 +42,14 @@ from typing import Any, Dict, Optional
 
 import httpx
 
+try:
+    # Dipakai hanya untuk memvalidasi `sub` akun sebelum dipakai di kunci
+    # Redis. Diimpor dengan pengaman agar usage.py tetap bisa dipakai
+    # sendiri (mis. dalam pengujian) tanpa modul lain.
+    import penyimpanan
+except ImportError:  # pragma: no cover
+    penyimpanan = None  # type: ignore[assignment]
+
 logger = logging.getLogger("chatbot.usage")
 
 # ---------------------------------------------------------------------
@@ -91,7 +99,30 @@ def _hari_ini() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
-def _kunci_harian() -> str:
+def _sub_sah(sub: Optional[str]) -> Optional[str]:
+    """Validasi `sub` lewat modul penyimpanan bila tersedia."""
+    if not sub:
+        return None
+    if penyimpanan is not None:
+        return penyimpanan.sub_sah(sub)
+    teks = str(sub).strip()
+    return teks if teks.isalnum() or "-" in teks or "_" in teks else None
+
+
+def _kunci_harian(sub: Optional[str] = None) -> str:
+    """
+    Kunci Redis untuk pencatatan usage.
+
+    Tanpa `sub`  -> gungdev:usage:<tanggal>          (total seluruh situs)
+    Dengan `sub` -> gungdev:usage:u:<sub>:<tanggal>  (milik satu akun)
+
+    Dua-duanya tetap dicatat: angka global dipakai untuk menghitung sisa
+    kuota penyedia (yang memang dipakai bersama), sedangkan angka per
+    akun dipakai panel "pemakaian saya".
+    """
+    sub = _sub_sah(sub)
+    if sub:
+        return f"{_PREFIX}:u:{sub}:{_hari_ini()}"
     return f"{_PREFIX}:{_hari_ini()}"
 
 
@@ -126,31 +157,50 @@ async def _redis_perintah(*perintah: Any) -> Optional[Any]:
         return None
 
 
-async def catat_request(tokens: int = 0, model: str = "") -> None:
+async def catat_request(
+    tokens: int = 0,
+    model: str = "",
+    sub: Optional[str] = None,
+) -> None:
     """
     Mencatat satu request yang berhasil dijawab.
 
+    Selalu mencatat TOTAL SITUS (dipakai menghitung sisa kuota penyedia),
+    dan — bila `sub` diberikan — juga mencatat PEMAKAIAN AKUN itu sendiri
+    sehingga panel Usage bisa berkata "akun Anda hari ini: 12 permintaan".
+
     Dipanggil dari dalam endpoint chat. Tidak pernah melempar exception.
     """
-    kunci = _kunci_harian()
+    kunci_global = _kunci_harian()
+    sub_sah = _sub_sah(sub)
+    kunci_akun = _kunci_harian(sub_sah) if sub_sah else None
 
     # --- Upstash (akurat lintas instan) ---
     if _UPSTASH_URL and _UPSTASH_TOKEN:
         try:
-            await _redis_perintah("HINCRBY", kunci, "requests", 1)
+            await _redis_perintah("HINCRBY", kunci_global, "requests", 1)
             if tokens > 0:
-                await _redis_perintah("HINCRBY", kunci, "tokens", int(tokens))
+                await _redis_perintah("HINCRBY", kunci_global, "tokens", int(tokens))
             # Kedaluwarsa 7 hari agar Redis tidak penuh oleh data lama.
-            await _redis_perintah("EXPIRE", kunci, 7 * 24 * 3600)
+            await _redis_perintah("EXPIRE", kunci_global, 7 * 24 * 3600)
+
+            if kunci_akun:
+                await _redis_perintah("HINCRBY", kunci_akun, "requests", 1)
+                if tokens > 0:
+                    await _redis_perintah("HINCRBY", kunci_akun, "tokens", int(tokens))
+                # Agak lebih lama dari global: panel akun berguna untuk
+                # melihat pemakaian beberapa hari terakhir.
+                await _redis_perintah("EXPIRE", kunci_akun, 30 * 24 * 3600)
             return
         except Exception:  # noqa: BLE001
             pass  # lanjut ke cadangan memori
 
     # --- Cadangan memori proses ---
-    catatan = _memori.setdefault(kunci, {"requests": 0, "tokens": 0})
-    catatan["requests"] += 1
-    if tokens > 0:
-        catatan["tokens"] += int(tokens)
+    for kunci in [k for k in (kunci_global, kunci_akun) if k]:
+        catatan = _memori.setdefault(kunci, {"requests": 0, "tokens": 0})
+        catatan["requests"] += 1
+        if tokens > 0:
+            catatan["tokens"] += int(tokens)
     _memori["__terakhir__"] = {
         "waktu": datetime.now(timezone.utc).isoformat(),
         "model": model,
@@ -231,9 +281,14 @@ def model_terakhir() -> Optional[str]:
         return None
 
 
-async def baca_harian() -> Dict[str, int]:
-    """Membaca total request & token hari ini (UTC)."""
-    kunci = _kunci_harian()
+async def baca_harian(sub: Optional[str] = None) -> Dict[str, int]:
+    """
+    Membaca total request & token hari ini (UTC).
+
+    Tanpa `sub` -> total seluruh situs.
+    Dengan `sub` -> pemakaian akun itu saja.
+    """
+    kunci = _kunci_harian(sub)
 
     if _UPSTASH_URL and _UPSTASH_TOKEN:
         hasil = await _redis_perintah("HMGET", kunci, "requests", "tokens")
@@ -281,6 +336,7 @@ async def ringkasan(
     provider: str,
     model: str,
     sisa_header: Optional[Dict[str, Any]] = None,
+    sub: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Menyusun data untuk panel Usage di frontend.
@@ -288,6 +344,12 @@ async def ringkasan(
     `sisa_header` berisi nilai x-ratelimit-* dari respons Groq terakhir
     (bila ada). Nilai dari penyedia SELALU diprioritaskan di atas
     hitungan lokal, karena penyedia yang menentukan kebenaran.
+
+    `sub` (opsional) = akun Google yang sudah Diverifikasi server. Bila
+    diisi, respons mendapat bagian "akun" berisi pemakaian MILIK AKUN ITU
+    SENDIRI. Bagian kuota penyedia tetap global karena memang dipakai
+    bersama semua pengguna — menampilkannya seolah milik satu akun akan
+    menyesatkan.
 
     CATATAN KEAMANAN: parameter `provider` & `model` tetap dipakai untuk
     menghitung batas kuota, tetapi NILAINYA TIDAK dikembalikan ke klien.
@@ -326,7 +388,7 @@ async def ringkasan(
 
     reset_harian = _detik_sampai_reset_harian()
 
-    return {
+    hasil: Dict[str, Any] = {
         # Nama penyedia & model SENGAJA diganti label publik: panel ini
         # dapat dibaca siapa saja, jadi detail teknis tidak boleh bocor.
         "provider": "gungdev",
@@ -373,3 +435,36 @@ async def ringkasan(
         ),
         "token_per_menit_sisa": (sisa_header or {}).get("remaining_tokens"),
     }
+
+    # ------------------------------------------------------------------
+    # Pemakaian MILIK AKUN INI SENDIRI.
+    #
+    # Penting dibedakan dari angka di atas: kuota penyedia dipakai
+    # bersama semua pengunjung, sedangkan angka di bawah ini benar-benar
+    # milik satu akun. Bila `sub` kosong (tamu), bagian ini tidak
+    # dikirim sama sekali — tamu memang tidak punya akun.
+    # ------------------------------------------------------------------
+    sub_sah = _sub_sah(sub)
+    if sub_sah:
+        milik = await baca_harian(sub_sah)
+        hasil["akun"] = {
+            "requests": {
+                "terpakai": milik["requests"],
+                # Batas "adil" per akun: jatah harian dibagi rata ke
+                # sejumlah pengguna aktif yang wajar. Ini BUKAN blokir —
+                # hanya angka acuan agar pengguna tahu posisinya.
+                "batas": batas["rpd"],
+                "persen": _persen(milik["requests"], batas["rpd"]),
+            },
+            "tokens": {
+                "terpakai": milik["tokens"],
+                "batas": batas["tpd"],
+                "persen": _persen(milik["tokens"], batas["tpd"]),
+            },
+            "catatan": (
+                "Angka ini pemakaian akun Anda sendiri hari ini (UTC). "
+                "Sisa kuota di atas dipakai bersama seluruh pengunjung situs."
+            ),
+        }
+
+    return hasil

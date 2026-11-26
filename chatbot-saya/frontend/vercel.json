@@ -18,6 +18,14 @@
       "destination": "https://gungdev-chatbot-rq5l.vercel.app/capabilities"
     },
     {
+      "source": "/api/sessions",
+      "destination": "https://gungdev-chatbot-rq5l.vercel.app/api/sessions"
+    },
+    {
+      "source": "/api/sessions/(.*)",
+      "destination": "https://gungdev-chatbot-rq5l.vercel.app/api/sessions/$1"
+    },
+    {
       "source": "/((?!health|usage|capabilities|api/).*)",
       "destination": "/index.html"
     }

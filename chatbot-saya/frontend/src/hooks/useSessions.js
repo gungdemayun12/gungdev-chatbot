@@ -1,5 +1,5 @@
 /**
- * useSessions.js — state SEMUA percakapan + persistensi localStorage.
+ * useSessions.js — state SEMUA percakapan + penyimpanan di SERVER.
  *
  * Model data:
  *   session = {
@@ -9,20 +9,47 @@
  *
  * "Satu sesi = satu item riwayat": seluruh bolak-balik pesan disimpan di
  * dalam satu objek session, jadi sidebar menampilkan satu baris per sesi.
+ *
+ * STRATEGI PENYIMPANAN (penting)
+ * ------------------------------
+ * Server adalah sumber kebenaran, tetapi TIDAK boleh membuat chat gagal.
+ * Karena itu penyimpanan berlapis:
+ *
+ *   1. SERVER (Upstash) — sumber kebenaran. Satu akun Google = riwayat
+ *      sama di semua perangkat. Diperbarui dengan sedikit jeda (debounce)
+ *      agar tidak mengirim satu permintaan untuk setiap huruf jawaban.
+ *
+ *   2. PERANGKAT (localStorage) — cadangan + kecepatan. Dibaca lebih dulu
+ *      saat halaman dibuka supaya sidebar langsung terisi (tanpa
+ *      berkedip), lalu ditimpa data server bila server lebih baru.
+ *      Bila server sedang tidak bisa dipakai (kuota habis / offline),
+ *      salinan ini yang menyelamatkan riwayat pengguna.
+ *
+ * Tamu: tidak disimpan di mana pun (sesuai keputusan pemilik situs).
  */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   KEYS,
   keyActiveSession,
   keySessions,
   readJSON,
   removeKey,
+  removeKeysWithPrefix,
   writeJSON,
   writeString,
 } from '../lib/storage.js'
 import { makeTitle } from '../lib/text.js'
+import { pulihkanTokenRiwayat } from '../lib/auth.js'
+import {
+  ambilRiwayatServer,
+  getTokenRiwayat,
+  hapusRiwayatServer,
+  simpanAktifServer,
+  simpanSesiServer,
+  sinkronSesiServer,
+} from '../lib/riwayat.js'
 
-/** ID unik sederhana (aman untuk localStorage). */
+/** ID unik sederhana (aman untuk localStorage & Redis). */
 function uid(prefix = 'id') {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
 }
@@ -41,7 +68,7 @@ export function createSession() {
   }
 }
 
-/** Validasi bentuk data dari localStorage. */
+/** Validasi bentuk data dari server / localStorage. */
 function sanitizeSessions(value) {
   if (!Array.isArray(value)) return []
   return value
@@ -65,18 +92,19 @@ function sanitizeSessions(value) {
     }))
 }
 
-export function useSessions(settings, akunSub = null) {
+/** Jeda sebelum menyimpan ke server (menggabungkan perubahan beruntun). */
+const JEDA_SIMPAN_MS = 900
+
+export function useSessions(settings, akunSub = null, apiUrl = '') {
   /* ---------------------------------------------------------------
-     Riwayat dipisah per akun Google.
+     `akunSub` = ID unik akun Google yang sedang login (null = tamu).
 
-     `akunSub` = ID unik akun yang sedang login (null untuk tamu).
-
-       tamu   -> tidak ada riwayat tersimpan (selalu mulai kosong)
-       login  -> gungdev:sessions:<sub>  &  gungdev:active-session:<sub>
+       tamu  -> tidak ada riwayat tersimpan (selalu mulai kosong)
+       login -> server + salinan perangkat
      --------------------------------------------------------------- */
 
-  /** Muat riwayat milik akun (atau kosong untuk tamu). */
-  function muatUntuk(sub) {
+  /** Membaca salinan perangkat milik akun (bisa kosong). */
+  function muatLokal(sub) {
     if (!sub) return { sessions: [], activeId: null }
     const sessions = sanitizeSessions(readJSON(keySessions(sub), []))
     let activeId = null
@@ -89,11 +117,37 @@ export function useSessions(settings, akunSub = null) {
     return { sessions, activeId }
   }
 
-  const awal = useMemo(() => muatUntuk(akunSub), [akunSub])
+  const awal = useMemo(() => muatLokal(akunSub), [akunSub])
 
   const [sessions, setSessions] = useState(awal.sessions)
   const [activeId, setActiveId] = useState(awal.activeId)
   const [loaded, setLoaded] = useState(false)
+
+  /* Keadaan penyimpanan — dipakai UI untuk jujur memberi tahu pengguna. */
+  // 'lokal'    = tamu (tidak disimpan)
+  // 'memuat'   = sedang membaca dari server
+  // 'server'   = tersimpan di server (sama di semua perangkat)
+  // 'perangkat'= server tidak bisa dipakai, riwayat hanya di perangkat ini
+  // 'perluLogin'= token tidak sah lagi; pengguna perlu masuk ulang
+  const [statusSimpan, setStatusSimpan] = useState(akunSub ? 'memuat' : 'lokal')
+
+  /* Menandai bahwa isi state sudah berasal dari server (atau sudah
+     dicoba). Tanpa ini, efek penyimpanan bisa menulis data lama
+     perangkat ke server sebelum data server selesai dibaca. */
+  const siapSimpanRef = useRef(false)
+
+  /* Sesi yang isinya berubah dan perlu dikirim ke server. */
+  const kotorRef = useRef(new Set())
+  const timerRef = useRef(null)
+
+  /* Sesi yang dihapus di perangkat; dikirim ke server berurutan. */
+  const hapusAntreRef = useRef([])
+
+  /* Menyimpan `apiUrl` di ref agar callback stabil. */
+  const apiRef = useRef(apiUrl)
+  useEffect(() => {
+    apiRef.current = apiUrl
+  }, [apiUrl])
 
   /* Berganti akun (login / keluar): ganti isi riwayat seketika.
      Ini juga yang membuat riwayat tamu tidak "terbawa" ke akun dan
@@ -101,14 +155,25 @@ export function useSessions(settings, akunSub = null) {
   const [subTerpasang, setSubTerpasang] = useState(akunSub)
   if (subTerpasang !== akunSub) {
     setSubTerpasang(akunSub)
-    const baru = muatUntuk(akunSub)
+    const baru = muatLokal(akunSub)
     setSessions(baru.sessions)
     setActiveId(baru.activeId)
+    setStatusSimpan(akunSub ? 'memuat' : 'lokal')
   }
 
-  /* Simulasikan pembacaan riwayat (untuk skeleton di sidebar).
-     Data sebenarnya sudah tersedia sinkron; delay kecil ini membuat
-     transisi terasa halus, bukan berkedip. */
+  /* Reset penanda & antrean setiap kali akun berganti. Dilakukan di
+     effect (bukan saat render) karena mengubah ref di tengah render
+     dilarang React dan bisa menghasilkan nilai yang tidak konsisten. */
+  useEffect(() => {
+    siapSimpanRef.current = false
+    kotorRef.current.clear()
+    if (timerRef.current) {
+      clearTimeout(timerRef.current)
+      timerRef.current = null
+    }
+  }, [akunSub])
+
+  /* Simulasikan pembacaan riwayat (untuk skeleton di sidebar). */
   useEffect(() => {
     const t = setTimeout(() => setLoaded(true), 220)
     return () => clearTimeout(t)
@@ -124,8 +189,206 @@ export function useSessions(settings, akunSub = null) {
     removeKey(KEYS.ACTIVE_SESSION)
   }, [])
 
-  /* Persistensi: HANYA untuk pengguna yang login DAN mengizinkan
-     riwayat disimpan. Tamu tidak pernah menulis apa pun. */
+  /* ---------------------------------------------------------------
+     1. MENYIMPAN SATU SESI KE SERVER (dengan jeda)
+     --------------------------------------------------------------- */
+
+  /* Salinan `sessions` terbaru untuk dipakai di dalam callback async
+     tanpa membuat callback ikut berubah setiap kali state berubah. */
+  const sessionsRef = useRef(sessions)
+  useEffect(() => {
+    sessionsRef.current = sessions
+  }, [sessions])
+
+  /** Mengirim semua sesi yang berubah ke server, satu per satu. */
+  const kirimPerubahan = useCallback(async () => {
+    const sub = subTerpasang
+    if (!sub || !siapSimpanRef.current) return
+    if (!settings.saveHistory) return
+    if (!getTokenRiwayat()) {
+      setStatusSimpan('perluLogin')
+      return
+    }
+
+    const kotor = Array.from(kotorRef.current)
+    kotorRef.current.clear()
+    if (kotor.length === 0) return
+
+    let semuaTersimpan = true
+    for (const sid of kotor) {
+      const sesi = sessionsRef.current.find((s) => s.id === sid)
+      if (!sesi) continue // sudah dihapus; tidak perlu disimpan
+
+      const hasil = await simpanSesiServer(apiRef.current, sesi)
+      if (hasil.perluLogin) {
+        setStatusSimpan('perluLogin')
+        return
+      }
+      if (!hasil.tersimpan) semuaTersimpan = false
+    }
+
+    setStatusSimpan(semuaTersimpan ? 'server' : 'perangkat')
+  }, [subTerpasang, settings.saveHistory])
+
+  /** Menjadwalkan pengiriman setelah perubahan berhenti sesaat. */
+  const jadwalkanSimpan = useCallback(
+    (id) => {
+      if (id) kotorRef.current.add(id)
+      if (timerRef.current) clearTimeout(timerRef.current)
+      timerRef.current = setTimeout(() => {
+        timerRef.current = null
+        kirimPerubahan()
+      }, JEDA_SIMPAN_MS)
+    },
+    [kirimPerubahan],
+  )
+
+  /* Kirim sisa perubahan saat halaman ditinggalkan (pengguna menutup
+     tab). `beforeunload` tidak bisa menunggu async, jadi yang dikirim
+     adalah permintaan "fire and forget"; salinan perangkat tetap ada
+     sebagai jaring pengaman.
+
+     PENTING: saklar "Simpan riwayat" WAJIB dihormati di sini juga.
+     Sempat terjadi bug: bila pengguna mematikan saklar lalu menutup tab,
+     sisa perubahan tetap terkirim ke server. Itu melanggar pilihan
+     pengguna, jadi pemeriksaannya disimpan di ref (effect ini sengaja
+     tidak dipasang ulang setiap setelan berubah — kalau dipasang ulang,
+     justru ada celah saat handler sedang dilepas). */
+  const simpanRef = useRef(settings.saveHistory)
+  useEffect(() => {
+    simpanRef.current = settings.saveHistory
+  }, [settings.saveHistory])
+
+  useEffect(() => {
+    const onKeluar = () => {
+      if (timerRef.current) clearTimeout(timerRef.current)
+      if (!simpanRef.current) return // pengguna mematikan penyimpanan
+      if (kotorRef.current.size === 0) return
+      if (!getTokenRiwayat()) return
+      const semua = Array.from(kotorRef.current)
+        .map((id) => sessionsRef.current.find((s) => s.id === id))
+        .filter(Boolean)
+      if (semua.length === 0) return
+      sinkronSesiServer(apiRef.current, semua)
+    }
+    window.addEventListener('pagehide', onKeluar)
+    return () => window.removeEventListener('pagehide', onKeluar)
+  }, [])
+
+  /* ---------------------------------------------------------------
+     2. MEMBACA DARI SERVER saat halaman dibuka / akun berganti
+     --------------------------------------------------------------- */
+  useEffect(() => {
+    if (!akunSub) {
+      siapSimpanRef.current = false
+      // Status awal untuk tamu sudah diatur saat render (lihat
+      // setStatusSimpan di blok pergantian akun), jadi tidak perlu
+      // setState di sini.
+      return undefined
+    }
+
+    let batal = false
+    const kendali = new AbortController()
+
+    const muat = async () => {
+      // Salinan perangkat dipakai lebih dulu supaya sidebar tidak kosong.
+      const lokal = muatLokal(akunSub)
+      if (!batal && lokal.sessions.length > 0) {
+        setSessions(lokal.sessions)
+        setActiveId(lokal.activeId)
+      }
+
+      /* Token hanya hidup di memori, jadi setelah refresh belum ada.
+         Minta Google memulihkannya lebih dulu — tanpa ini, pengguna
+         yang masih login akan melihat "Masuk ulang" padahal tidak
+         pernah keluar. */
+      if (!getTokenRiwayat()) {
+        setStatusSimpan('memuat')
+        await pulihkanTokenRiwayat()
+        if (batal) return
+      }
+
+      const hasil = await ambilRiwayatServer(apiRef.current, { signal: kendali.signal })
+      if (batal) return
+
+      if (hasil.perluLogin) {
+        // Token tidak ada / kedaluwarsa: pakai salinan perangkat, dan
+        // beri tahu UI bahwa perlu masuk ulang.
+        siapSimpanRef.current = false
+        setStatusSimpan('perluLogin')
+        return
+      }
+
+      if (!hasil.ok) {
+        // Server tidak bisa dihubungi: salinan perangkat yang berlaku.
+        siapSimpanRef.current = false
+        setStatusSimpan('perangkat')
+        return
+      }
+
+      if (!hasil.tersedia) {
+        // Server menjawab tetapi penyimpanannya belum aktif (env belum
+        // diisi / kuota habis). Riwayat tetap aman di perangkat.
+        siapSimpanRef.current = false
+        setStatusSimpan('perangkat')
+        return
+      }
+
+      // Server punya data. Bila kosong tetapi perangkat punya riwayat
+      // (pengguna login pertama kali di perangkat ini), migrasikan
+      // sekali agar riwayat lama tidak hilang.
+      //
+      // Migrasi hanya boleh terjadi bila pengguna MENYETUJUI penyimpanan
+      // riwayat. Bila saklarnya mati, salinan perangkat memang harus
+      // tetap tinggal di perangkat.
+      if (
+        hasil.sessions.length === 0 &&
+        lokal.sessions.length > 0 &&
+        simpanRef.current
+      ) {
+        await sinkronSesiServer(apiRef.current, lokal.sessions)
+        if (batal) return
+
+        const ulang = await ambilRiwayatServer(apiRef.current, { signal: kendali.signal })
+        if (batal) return
+        if (ulang.ok && ulang.sessions.length > 0) {
+          setSessions(sanitizeSessions(ulang.sessions))
+          setActiveId(ulang.activeId)
+          siapSimpanRef.current = true
+          setStatusSimpan('server')
+          return
+        }
+      }
+
+      if (hasil.sessions.length > 0) {
+        const dariServer = sanitizeSessions(hasil.sessions)
+        setSessions(dariServer)
+        // Pertahankan pilihan sesi aktif pengguna bila masih ada;
+        // kalau tidak, pakai yang dicatat server.
+        setActiveId((sekarang) => {
+          const masihAda = dariServer.some((s) => s.id === sekarang)
+          if (masihAda) return sekarang
+          return hasil.activeId && dariServer.some((s) => s.id === hasil.activeId)
+            ? hasil.activeId
+            : null
+        })
+      }
+
+      siapSimpanRef.current = true
+      setStatusSimpan('server')
+    }
+
+    muat()
+
+    return () => {
+      batal = true
+      kendali.abort()
+    }
+  }, [akunSub])
+
+  /* ---------------------------------------------------------------
+     3. SALINAN PERANGKAT (cadangan, selalu ditulis bila login)
+     --------------------------------------------------------------- */
   const bolehSimpan = Boolean(akunSub) && Boolean(settings.saveHistory)
   useEffect(() => {
     if (!bolehSimpan) return
@@ -138,21 +401,36 @@ export function useSessions(settings, akunSub = null) {
     if (activeId) writeString(keyActiveSession(akunSub), activeId)
   }, [activeId, bolehSimpan, akunSub])
 
+  /* Kirim sesi aktif ke server (tanpa jeda lama — jarang berubah). */
+  useEffect(() => {
+    if (!akunSub || !siapSimpanRef.current || !settings.saveHistory) return
+    if (!getTokenRiwayat()) return
+    simpanAktifServer(apiRef.current, activeId)
+  }, [activeId, akunSub, settings.saveHistory])
+
+  /* ---------------------------------------------------------------
+     4. OPERASI PADA SESI
+     --------------------------------------------------------------- */
   const activeSession = useMemo(
     () => sessions.find((s) => s.id === activeId) || null,
     [sessions, activeId],
   )
 
   /** Memperbarui satu sesi lewat fungsi updater. */
-  const updateSession = useCallback((id, updater) => {
-    setSessions((prev) =>
-      prev.map((s) => {
-        if (s.id !== id) return s
-        const next = typeof updater === 'function' ? updater(s) : { ...s, ...updater }
-        return { ...next, updatedAt: Date.now() }
-      }),
-    )
-  }, [])
+  const updateSession = useCallback(
+    (id, updater) => {
+      setSessions((prev) =>
+        prev.map((s) => {
+          if (s.id !== id) return s
+          const next = typeof updater === 'function' ? updater(s) : { ...s, ...updater }
+          return { ...next, updatedAt: Date.now() }
+        }),
+      )
+      // Setiap perubahan isi sesi perlu dikirim ke server.
+      jadwalkanSimpan(id)
+    },
+    [jadwalkanSimpan],
+  )
 
   /** Memastikan ada sesi aktif; membuat baru bila belum ada. */
   const ensureSession = useCallback(() => {
@@ -160,8 +438,9 @@ export function useSessions(settings, akunSub = null) {
     const s = createSession()
     setSessions((prev) => [s, ...prev])
     setActiveId(s.id)
+    jadwalkanSimpan(s.id)
     return s
-  }, [activeSession])
+  }, [activeSession, jadwalkanSimpan])
 
   /** Menambah pesan ke sesi (judul otomatis dari pesan pertama). */
   const addMessage = useCallback(
@@ -224,8 +503,11 @@ export function useSessions(settings, akunSub = null) {
     const s = createSession()
     setSessions((prev) => [s, ...prev])
     setActiveId(s.id)
+    // Sesi kosong belum punya pesan; tetap dicatat di server agar
+    // perangkat lain melihat baris yang sama.
+    jadwalkanSimpan(s.id)
     return s
-  }, [activeSession])
+  }, [activeSession, jadwalkanSimpan])
 
   const selectSession = useCallback((id) => setActiveId(id), [])
 
@@ -249,18 +531,62 @@ export function useSessions(settings, akunSub = null) {
     (id) => {
       setSessions((prev) => prev.filter((s) => s.id !== id))
       setActiveId((cur) => (cur === id ? null : cur))
+      kotorRef.current.delete(id)
+
+      // Hapus di server. Bila gagal, sesi akan muncul lagi saat halaman
+      // dimuat ulang — jadi pengguna diberi tahu lewat status.
+      if (akunSub && settings.saveHistory && getTokenRiwayat()) {
+        hapusRiwayatServer(apiRef.current, id).then((hasil) => {
+          if (!hasil.ok) setStatusSimpan('perangkat')
+        })
+      }
     },
-    [],
+    [akunSub, settings.saveHistory],
   )
 
   const clearAll = useCallback(() => {
     setSessions([])
     setActiveId(null)
+    kotorRef.current.clear()
+    if (timerRef.current) {
+      clearTimeout(timerRef.current)
+      timerRef.current = null
+    }
+
     if (akunSub) {
       writeJSON(keySessions(akunSub), [])
       removeKey(keyActiveSession(akunSub))
+
+      if (getTokenRiwayat()) {
+        hapusRiwayatServer(apiRef.current, null).then((hasil) => {
+          if (!hasil.ok) setStatusSimpan('perangkat')
+        })
+      }
     }
   }, [akunSub])
+
+  /* Saat keluar (logout), bersihkan antrean agar tidak mengirim data
+     milik akun sebelumnya. Salinan perangkat TIDAK dihapus — riwayat
+     akun tetap ada di kuncinya sendiri sehingga muncul lagi saat masuk. */
+  useEffect(() => {
+    if (akunSub) return
+    if (timerRef.current) {
+      clearTimeout(timerRef.current)
+      timerRef.current = null
+    }
+    kotorRef.current.clear()
+    hapusAntreRef.current = []
+    // Bersihkan sisa riwayat tamu (tamu tidak boleh punya riwayat).
+    removeKeysWithPrefix(KEYS.SESSIONS_PREFIX + 'tamu')
+  }, [akunSub])
+
+  /* Kirim sisa perubahan saat komponen dibongkar. */
+  useEffect(
+    () => () => {
+      if (timerRef.current) clearTimeout(timerRef.current)
+    },
+    [],
+  )
 
   return {
     sessions,
@@ -279,8 +605,10 @@ export function useSessions(settings, akunSub = null) {
     deleteSession,
     clearAll,
     setActiveId,
-    // False = riwayat tidak disimpan (tamu). Dipakai UI untuk jujur
-    // memberi tahu pengguna bahwa percakapannya akan hilang.
+    // False = riwayat tidak disimpan (tamu / saklar dimatikan). Dipakai UI
+    // untuk jujur memberi tahu pengguna bahwa percakapannya akan hilang.
     tersimpan: bolehSimpan,
+    // Keadaan penyimpanan nyata, untuk pesan di UI.
+    statusSimpan,
   }
 }

@@ -23,6 +23,7 @@
  *   milik orang lain yang bisa diakses lewat cara ini.
  */
 import { KEYS, readJSON, writeJSON, removeKey } from './storage.js'
+import { setTokenRiwayat, getTokenRiwayat, lupakanToken } from './riwayat.js'
 
 /** Client ID dibaca dari build (VITE_GOOGLE_CLIENT_ID di Vercel). */
 export const GOOGLE_CLIENT_ID = (import.meta.env?.VITE_GOOGLE_CLIENT_ID || '').trim()
@@ -139,6 +140,9 @@ export function simpanSesi(akun) {
 
 export function hapusSesi() {
   removeKey(KEYS.AUTH)
+  // Token riwayat ikut dilupakan: setelah keluar, perangkat ini tidak
+  // boleh lagi bisa membaca riwayat akun di server.
+  lupakanToken()
 }
 
 /* ------------------------------------------------------------------ */
@@ -172,6 +176,10 @@ async function siapkanGIS() {
     callback: (res) => {
       // Teruskan hasil ke semua pemanggil yang sedang menunggu.
       const akun = akunDariToken(res?.credential)
+      // ID token disimpan untuk dikirim ke backend riwayat. Backend
+      // memverifikasinya ke Google; tanpa token ini riwayat akun tidak
+      // bisa dibaca/ditulis (dan tidak ada akun lain yang bisa diakses).
+      setTokenRiwayat(res?.credential)
       const daftar = Array.from(pendengar)
       pendengar.clear()
       daftar.forEach(({ onAkun, onError }) => {
@@ -181,6 +189,96 @@ async function siapkanGIS() {
     },
   })
   siapGIS = true
+}
+
+/**
+ * Memulihkan ID token SETELAH halaman dimuat ulang.
+ *
+ * MASALAH YANG DIPECAHKAN
+ * -----------------------
+ * ID token Google hanya hidup di memori (aman, tetapi hilang saat
+ * refresh). Status login (`sub`, nama) justru disimpan 30 hari. Akibatnya
+ * setelah refresh pengguna masih terlihat "login" tetapi riwayatnya tidak
+ * bisa dibaca dari server — dan UI menyuruhnya "masuk ulang", padahal ia
+ * tidak pernah keluar. Itu membingungkan.
+ *
+ * SOLUSI
+ * ------
+ * Google menyediakan `prompt()` untuk meminta kredensial baru TANPA
+ * jendela popup, bila pengguna sebelumnya sudah menyetujui aplikasi ini.
+ * Bila Google masih mengingat pilihannya, token baru datang sendiri
+ * dalam hitungan detik.
+ *
+ * Bila Google memutuskan perlu interaksi (mis. pengguna logout dari
+ * Google, atau memakai mode Incognito), fungsi ini selesai tanpa token
+ * dan aplikasi memakai salinan perangkat — pengguna tidak dipaksa apa pun.
+ *
+ * Token TIDAK disimpan di localStorage: token adalah kredensial hidup,
+ * bukan data tampilan, dan menyimpannya berarti memperpanjang masa
+ * berlakunya jauh melebihi yang seharusnya.
+ *
+ * @returns {Promise<boolean>} true bila token berhasil dipulihkan
+ */
+export function pulihkanTokenRiwayat() {
+  if (!LOGIN_TERSEDIA) return Promise.resolve(false)
+  if (getTokenRiwayat()) return Promise.resolve(true)
+
+  return new Promise((resolve) => {
+    let selesai = false
+
+    /* Batas waktu: bila Google tidak menjawab (diblokir ekstensi,
+       internet lambat, dsb.), jangan biarkan halaman menunggu. */
+    const batas = setTimeout(() => {
+      if (selesai) return
+      selesai = true
+      resolve(false)
+    }, 8000)
+
+    const beres = (ok) => {
+      if (selesai) return
+      selesai = true
+      clearTimeout(batas)
+      resolve(ok)
+    }
+
+    muatSkripGoogle()
+      .then(() => {
+        if (!window.google?.accounts?.id?.prompt) {
+          beres(false)
+          return
+        }
+
+        /* Callback sementara HANYA untuk pemulihan ini. Login biasa
+           memakai callback di siapkanGIS(). */
+        window.google.accounts.id.initialize({
+          client_id: GOOGLE_CLIENT_ID,
+          auto_select: true,
+          cancel_on_tap_outside: true,
+          callback: (res) => {
+            const token = (res?.credential || '').trim()
+            if (!token) {
+              beres(false)
+              return
+            }
+            setTokenRiwayat(token)
+            beres(true)
+          },
+        })
+
+        window.google.accounts.id.prompt((notifikasi) => {
+          /* `isNotDisplayed` / `isSkippedMoment` = Google tidak memberi
+             token tanpa interaksi. Itu bukan error. */
+          if (
+            notifikasi?.isNotDisplayed?.() ||
+            notifikasi?.isSkippedMoment?.() ||
+            notifikasi?.isDismissedMoment?.()
+          ) {
+            beres(false)
+          }
+        })
+      })
+      .catch(() => beres(false))
+  })
 }
 
 /**
