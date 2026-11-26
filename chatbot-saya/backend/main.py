@@ -951,6 +951,14 @@ def _openrouter_payload(model: str, messages: List[dict], opsi: dict, streaming:
         "max_tokens": opsi["max_tokens"],
         "stream": streaming,
     }
+    # Meminta usage pada chunk terakhir agar panel token mendapat angka resmi
+    # OpenRouter bila endpoint/model menyediakannya.
+    if streaming:
+        payload["stream_options"] = {"include_usage": True}
+    if opsi.get("penelitian"):
+        # OpenRouter tidak memakai tool browser_search milik Groq. Jangan
+        # mengirim tool Groq ke sini; fitur research provider lama tetap aman.
+        logger.info("Riset diminta pada OpenRouter; memakai model tanpa tool Groq.")
     return payload
 
 
