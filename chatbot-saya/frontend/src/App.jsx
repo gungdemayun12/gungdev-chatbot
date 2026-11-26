@@ -85,6 +85,7 @@ export default function App() {
   const [error, setError] = useState(null)
   const [streamingText, setStreamingText] = useState('')
   const [streamingId, setStreamingId] = useState(null)
+  const [generationPhase, setGenerationPhase] = useState('')
   const [apiOnline, setApiOnline] = useState(false)
 
   /* ---------------- Kemampuan model (gambar / riset) ---------------- */
@@ -183,6 +184,7 @@ export default function App() {
       setLoading(true)
       setError(null)
       setStreamingText('')
+      setGenerationPhase(pakaiRiset ? 'research' : 'thinking')
 
       const controller = new AbortController()
       abortRef.current = controller
@@ -224,6 +226,7 @@ export default function App() {
             if (meta?.penyesuaian) catatanModel = meta.penyesuaian
           },
           onDelta: (delta) => {
+            setGenerationPhase('writing')
             buffer += delta
             const id = ensureAssistantSlot()
             setStreamingId(id)
@@ -282,6 +285,7 @@ export default function App() {
         setLoading(false)
         setStreamingText('')
         setStreamingId(null)
+        setGenerationPhase('')
         abortRef.current = null
       }
     },
@@ -733,6 +737,7 @@ export default function App() {
           onModelChange={(id) => updateSettings({ model: id })}
           daftarModel={daftarModel}
           research={research}
+           generationPhase={generationPhase}
           onResearchChange={handleResearchChange}
           onLampiranBerubah={handleLampiranBerubah}
           masuk={masuk}

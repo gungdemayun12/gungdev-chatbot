@@ -82,6 +82,7 @@ export default function ChatArea({
   onModelChange,
   daftarModel,
   research,
+  generationPhase = '',
   onResearchChange,
   onLampiranBerubah,
   /* --- Status login --- */
@@ -314,6 +315,7 @@ export default function ChatArea({
           onModelChange={onModelChange}
           daftarModel={daftarModel}
           research={research}
+           generationPhase={generationPhase}
           onResearchChange={onResearchChange}
           onLampiranBerubah={onLampiranBerubah}
         />
@@ -322,8 +324,12 @@ export default function ChatArea({
       {/* Indikator stop saat streaming (muncul juga di atas input di mobile) */}
       {loading && (
         <div className="chat__streaming-hint" aria-live="polite">
-          <span className="pulse-dot" aria-hidden="true" />
-          GungDev sedang menjawab…
+          <span className={`pulse-dot ${generationPhase === 'research' ? 'is-research' : ''}`} aria-hidden="true" />
+          {generationPhase === 'research'
+            ? 'GungDev sedang menelusuri web…'
+            : generationPhase === 'thinking'
+              ? 'GungDev sedang berpikir…'
+              : 'GungDev sedang menulis…'}
           <button type="button" className="link-btn" onClick={onStop}>
             <Square size={11} fill="currentColor" /> Hentikan
           </button>

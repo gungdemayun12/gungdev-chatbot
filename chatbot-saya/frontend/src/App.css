@@ -1577,6 +1577,10 @@
   animation: softPulse 1.2s infinite ease-in-out;
 }
 
+.pulse-dot.is-research {
+  box-shadow: 0 0 0 4px var(--accent-soft), 0 0 12px var(--accent);
+}
+
 .link-btn {
   display: inline-flex;
   align-items: center;

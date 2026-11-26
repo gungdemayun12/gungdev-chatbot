@@ -21,17 +21,14 @@
  * =====================================================================
  *  KEMAMPUAN (vision / browser)
  * =====================================================================
- * Tidak semua model bisa membaca gambar atau melakukan riset web.
- * Nilai di bawah adalah CADANGAN untuk tampilan. Sumber kebenaran tetap
- * server (GET /capabilities), karena server yang benar-benar memproses.
+ * Semua model yang tampil di UI diperlakukan sebagai model serbaguna oleh
+ * aplikasi: gambar, riset web, dan file dapat dikirim melalui alur chat yang
+ * sama. Backend tetap menjadi sumber kebenaran dan dapat memilih rute yang
+ * kompatibel bila penyedia memiliki batas teknis.
  * Bila backend dan file ini berbeda, yang dipakai adalah data server.
  *
- *   vision  : bisa "melihat" gambar (JPG/PNG/WEBP)
- *   browser : bisa riset di web memakai browser bawaan penyedia
- *
- * Per dokumentasi Groq, dari model gratis di atas hanya
- * qwen/qwen3.8-27b yang multimodal, dan hanya keluarga GPT-OSS yang
- * mendukung browser_search.
+ * Kemampuan tersebut tidak ditampilkan sebagai badge per model agar
+ * pemilihan model tetap sederhana dan konsisten.
  */
 
 export const MODEL_PILIHAN = [

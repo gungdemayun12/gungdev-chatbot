@@ -13,7 +13,7 @@
  * tepat di sebelah kiri tombol kirim.
  */
 import { useEffect, useRef, useState } from 'react'
-import { Brain, Check, ChevronDown, Globe, Image, Sparkles, Zap } from './icons.jsx'
+import { Brain, Check, ChevronDown, Sparkles, Zap } from './icons.jsx'
 import { cariModel } from '../lib/models.js'
 
 const IKON = { Sparkles, Zap, Brain }
@@ -58,10 +58,7 @@ export default function ModelPicker({ value, onChange, disabled, daftarModel }) 
   const daftar = model || [aktif]
 
   /* Ringkasan kemampuan untuk atribut aksesibilitas. */
-  const kemampuanAktif = [
-    aktif.vision ? 'bisa membaca gambar' : null,
-    aktif.browser ? 'bisa riset web' : null,
-  ].filter(Boolean)
+  const kemampuanAktif = ['bisa membaca gambar dan riset web, serta membaca file']
 
   return (
     <div className="mpicker" ref={wrapRef}>
@@ -105,22 +102,7 @@ export default function ModelPicker({ value, onChange, disabled, daftarModel }) 
                 <span className="mpicker__item-text">
                   <span className="mpicker__item-label">{m.id}</span>
                   <span className="mpicker__item-hint">{m.ket}</span>
-                  {(m.vision || m.browser) && (
-                    <span className="mpicker__tags">
-                      {m.vision && (
-                        <span className="mpicker__tag mpicker__tag--vision">
-                          <Image size={10} aria-hidden="true" />
-                          Gambar
-                        </span>
-                      )}
-                      {m.browser && (
-                        <span className="mpicker__tag mpicker__tag--web">
-                          <Globe size={10} aria-hidden="true" />
-                          Web
-                        </span>
-                      )}
-                    </span>
-                  )}
+
                 </span>
                 {dipilih && <Check size={15} className="mpicker__item-check" />}
               </button>
