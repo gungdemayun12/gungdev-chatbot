@@ -97,6 +97,20 @@ def _env_float(nama: str, default: float) -> float:
 GROQ_API_KEY = _env("GROQ_API_KEY")
 GROQ_BASE_URL = _env("GROQ_BASE_URL", "https://api.groq.com/openai/v1").rstrip("/")
 
+# ---- OpenRouter (OpenAI-compatible cloud) ----
+OPENROUTER_API_KEY = _env("OPENROUTER_API_KEY")
+OPENROUTER_BASE_URL = _env(
+    "OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"
+).rstrip("/")
+OPENROUTER_SITE_URL = _env("OPENROUTER_SITE_URL", "https://gungdev-chatbot-ai.vercel.app")
+OPENROUTER_APP_NAME = _env("OPENROUTER_APP_NAME", "GungDev")
+OPENROUTER_MODEL_DEFAULT = _env("OPENROUTER_MODEL", "google/gemini-3.1-flash-lite")
+OPENROUTER_MODELS = [
+    "google/gemini-2.5-flash-tts",
+    "google/gemini-3.1-flash-lite",
+    "deepseek/deepseek-v4.1-flash",
+]
+
 # Model default.
 #
 # CATATAN PENTING (diperbarui):
@@ -152,11 +166,12 @@ _MODEL_GROQ_CADANGAN = [
 #   Lihat console.groq.com/docs/deprecations
 #
 # Menambah/mengganti model: cukup ubah list di bawah.
-MODEL_DIIZINKAN = [
-    "openai/gpt-oss-120b",   # paling teliti
-    "openai/gpt-oss-20b",    # paling cepat
-    "qwen/qwen3.8-27b",      # alternatif (status preview di Groq)
+MODEL_GROQ_DIIZINKAN = [
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "qwen/qwen3.8-27b",
 ]
+MODEL_DIIZINKAN = MODEL_GROQ_DIIZINKAN + OPENROUTER_MODELS
 
 # Model yang dipakai bila klien tidak mengirim pilihan / mengirim nilai
 # di luar daftar.
@@ -177,6 +192,8 @@ MODEL_DEFAULT_PILIHAN = "openai/gpt-oss-120b"
 #    bergambar ke model vision, bukan membiarkannya gagal.
 MODEL_VISION = {
     "qwen/qwen3.8-27b",
+    "google/gemini-2.5-flash-tts",
+    "google/gemini-3.1-flash-lite",
 }
 
 # Model yang dipakai bila pesan berisi gambar tetapi pilihan pengguna
@@ -359,30 +376,35 @@ logger = logging.getLogger("gungdev-backend")
 # 3. PEMILIHAN PROVIDER
 # ---------------------------------------------------------------------
 def pilih_provider() -> str:
-    """
-    Menentukan provider aktif.
-
-    Urutan prioritas:
-      1. AI_PROVIDER=groq / ollama  (dipaksa manual)
-      2. GROQ_API_KEY ada           -> groq
-      3. selain itu                 -> ollama
-    """
+    """Menentukan provider aktif dari environment atau ketersediaan key."""
     dipaksa = _env("AI_PROVIDER").lower()
-    if dipaksa in ("groq", "ollama"):
+    if dipaksa in ("groq", "openrouter", "ollama"):
         return dipaksa
-    return "groq" if GROQ_API_KEY else "ollama"
+    if GROQ_API_KEY:
+        return "groq"
+    if OPENROUTER_API_KEY:
+        return "openrouter"
+    return "ollama"
 
 
 PROVIDER = pilih_provider()
-MODEL_NAME = GROQ_MODEL if PROVIDER == "groq" else OLLAMA_MODEL
+MODEL_NAME = (
+    GROQ_MODEL if PROVIDER == "groq" else
+    OPENROUTER_MODEL_DEFAULT if PROVIDER == "openrouter" else OLLAMA_MODEL
+)
 
 if PROVIDER == "groq":
+
     logger.info("Provider aktif: GROQ (%s) model %s", GROQ_BASE_URL, MODEL_NAME)
     if not GROQ_API_KEY:
         logger.warning(
             "AI_PROVIDER=groq tetapi GROQ_API_KEY kosong. "
             "Permintaan akan gagal dengan HTTP 401."
         )
+elif PROVIDER == "openrouter":
+    logger.info("Provider aktif: OpenRouter model %s", MODEL_NAME)
+    if not OPENROUTER_API_KEY:
+        logger.warning("AI_PROVIDER=openrouter tetapi OPENROUTER_API_KEY kosong.")
 else:
     logger.info("Provider aktif: OLLAMA lokal (%s) model %s", OLLAMA_HOST, MODEL_NAME)
 
@@ -912,6 +934,80 @@ def _teks_dari_pesan(pesan: dict) -> str:
     return ""
 
 
+def _openrouter_headers() -> dict:
+    return {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": OPENROUTER_SITE_URL,
+        "X-Title": OPENROUTER_APP_NAME,
+    }
+
+
+def _openrouter_payload(model: str, messages: List[dict], opsi: dict, streaming: bool) -> dict:
+    payload = {
+        "model": model,
+        "messages": messages,
+        "temperature": opsi["temperature"],
+        "max_tokens": opsi["max_tokens"],
+        "stream": streaming,
+    }
+    return payload
+
+
+async def openrouter_complete(messages: List[dict], opsi: dict) -> str:
+    model = opsi.get("model") or OPENROUTER_MODEL_DEFAULT
+    async with httpx.AsyncClient(timeout=TIMEOUT_GROQ) as http:
+        res = await http.post(
+            f"{OPENROUTER_BASE_URL}/chat/completions",
+            headers=_openrouter_headers(),
+            json=_openrouter_payload(model, messages, opsi, False),
+        )
+        if res.status_code >= 400:
+            logger.error("OpenRouter menolak permintaan: %s %s", res.status_code, res.text[:200])
+            raise HTTPException(status_code=502, detail="Layanan AI GungDev menolak permintaan. Silakan coba lagi.")
+        data = res.json()
+        pakai = data.get("usage") or {}
+        usage.simpan_token_asli(pakai.get("total_tokens") or 0, pakai.get("prompt_tokens") or 0, pakai.get("completion_tokens") or 0)
+        isi = _teks_dari_pesan((data.get("choices") or [{}])[0].get("message") or {})
+        if not isi:
+            raise HTTPException(status_code=502, detail="Layanan AI mengembalikan jawaban kosong. Silakan coba lagi.")
+        return isi
+
+
+async def openrouter_stream(messages: List[dict], opsi: dict) -> AsyncIterator[str]:
+    model = opsi.get("model") or OPENROUTER_MODEL_DEFAULT
+    async with httpx.AsyncClient(timeout=TIMEOUT_GROQ) as http:
+        req = http.build_request("POST", f"{OPENROUTER_BASE_URL}/chat/completions", headers=_openrouter_headers(), json=_openrouter_payload(model, messages, opsi, True))
+        res = await http.send(req, stream=True)
+        if res.status_code >= 400:
+            body = await res.aread()
+            await res.aclose()
+            logger.error("OpenRouter menolak streaming: %s %s", res.status_code, body[:200])
+            raise HTTPException(status_code=502, detail="Layanan AI GungDev menolak streaming. Silakan coba lagi.")
+        try:
+            async for baris in res.aiter_lines():
+                if not baris.startswith("data:"):
+                    continue
+                data = baris[5:].strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    obj = json.loads(data)
+                except json.JSONDecodeError:
+                    continue
+                pakai = obj.get("usage") or {}
+                if pakai:
+                    usage.simpan_token_asli(pakai.get("total_tokens") or 0, pakai.get("prompt_tokens") or 0, pakai.get("completion_tokens") or 0)
+                try:
+                    delta = obj["choices"][0]["delta"].get("content") or ""
+                except (KeyError, IndexError, TypeError):
+                    delta = ""
+                if isinstance(delta, str) and delta:
+                    yield delta
+        finally:
+            await res.aclose()
+
+
 async def groq_complete(messages: List[dict], opsi: dict) -> str:
     """
     Meminta jawaban lengkap (non-streaming) ke Groq.
@@ -1222,6 +1318,8 @@ async def complete(messages: List[dict], opsi: dict) -> str:
     """Menghasilkan jawaban lengkap dari provider aktif."""
     if PROVIDER == "groq":
         return await groq_complete(messages, opsi)
+    if PROVIDER == "openrouter":
+        return await openrouter_complete(messages, opsi)
     return await ollama_complete(messages, opsi)
 
 
@@ -1229,6 +1327,10 @@ async def stream(messages: List[dict], opsi: dict) -> AsyncIterator[str]:
     """Menghasilkan jawaban bertahap dari provider aktif."""
     if PROVIDER == "groq":
         async for delta in groq_stream(messages, opsi):
+            yield delta
+        return
+    if PROVIDER == "openrouter":
+        async for delta in openrouter_stream(messages, opsi):
             yield delta
         return
     async for delta in ollama_stream(messages, opsi):
