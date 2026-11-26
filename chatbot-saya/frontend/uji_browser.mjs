@@ -104,6 +104,25 @@ async function jalankan() {
     await ctx.close()
   }
 
+  /* Bersihkan JATAH kedua akun. Uji sebelumnya (mis. uji jatah) bisa
+     meninggalkan akun di 100/100 sehingga chat ditolak — itu perilaku
+     yang benar, tetapi membuat uji riwayat ini gagal karena sebab yang
+     salah. Uji riwayat tidak sedang menguji jatah. */
+  {
+    const ctxJatah = await browser.newContext()
+    const pJatah = await ctxJatah.newPage()
+    try {
+      for (const sub of ['100000000000000001', '200000000000000002']) {
+        await pJatah.request.post(`${API}/__uji/pakai`, {
+          data: { sub, requests: 0, tokens: 0 },
+        })
+      }
+    } catch {
+      /* Endpoint uji tidak ada (server bukan server_uji) — abaikan. */
+    }
+    await ctxJatah.close()
+  }
+
   /* ================= PERANGKAT 1 — AKUN A ================= */
   console.log('\n=== PERANGKAT 1 (akun A) ===')
   const d1 = await bukaSebagai(browser, {

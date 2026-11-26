@@ -2820,6 +2820,24 @@ select.input {
   line-height: 1.45;
 }
 
+/* Bar jatah akun: lebih tipis daripada bar kuota utama karena ini
+   informasi pendamping, bukan angka utama panel. */
+.usage__akun-track {
+  margin-top: 8px;
+  height: 6px;
+}
+
+.usage__akun-habis {
+  margin-top: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--danger, #e5484d) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger, #e5484d) 30%, transparent);
+}
+
 /* --- Bar kuota --- */
 .usage-bar {
   display: flex;

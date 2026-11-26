@@ -82,6 +82,39 @@ BATAS_KUOTA: Dict[str, Dict[str, int]] = {
 BATAS_DEFAULT = {"rpm": 30, "rpd": 1000, "tpm": 8000, "tpd": 200000}
 
 # ---------------------------------------------------------------------
+# JATAH HARIAN PER AKUN
+# ---------------------------------------------------------------------
+# Kuota penyedia (1000 request/hari) dipakai BERSAMA semua pengunjung dan
+# tidak bisa dibagi oleh kita — Groq yang memegangnya. Tanpa batas per
+# akun, satu pengguna yang sangat aktif bisa menghabiskan kuota seluruh
+# situs sehingga pengunjung lain tiba-tiba tidak bisa chat.
+#
+# Karena itu tiap akun mendapat jatah sendiri yang ditegakkan di server.
+# Angka dipilih agar kuota gratis cukup untuk sekitar 10 akun aktif:
+#     10 akun x 100 request = 1000 request/hari  (pas dengan batas Groq)
+#
+# PENTING — kenapa HANYA jumlah pesan yang membatasi:
+# Token tetap DICATAT dan DITAMPILKAN agar pengguna tahu pemakaiannya,
+# tetapi sengaja TIDAK dipakai sebagai pembatas. Panjang jawaban AI
+# sangat bervariasi (jawaban singkat 100 token, jawaban panjang 3.000
+# token), sehingga membatasi token akan membuat pengguna yang bertanya
+# hal sederhana mendapat jatah jauh lebih banyak daripada yang bertanya
+# hal rumit — padahal keduanya satu pesan. Jumlah pesan lebih adil dan
+# lebih mudah dipahami.
+JATAH_AKUN = {
+    "rpd": int(os.getenv("JATAH_REQUEST_PER_AKUN", "100") or 100),
+}
+
+# Jatah tamu. Nilai sebenarnya ditegakkan di main.py (3 pesan/hari lewat
+# penghitung per-IP); angka ini hanya untuk ditampilkan di panel.
+JATAH_TAMU = {"rpd": 3}
+
+# Toleransi token tak terduga. Bila pencatat token gagal total, server
+# tetap perlu menghitung sesuatu yang wajar agar angka di panel tidak
+# tiba-tiba nol. Nilai ini hanya memengaruhi pencatatan, bukan pembatas.
+TOKEN_MIN_PER_REQUEST = 200
+
+# ---------------------------------------------------------------------
 # Penyimpanan ringan: Upstash Redis (REST) bila tersedia, memori bila tidak.
 # ---------------------------------------------------------------------
 _UPSTASH_URL = os.getenv("UPSTASH_REDIS_REST_URL", "").strip()
@@ -305,6 +338,60 @@ async def baca_harian(sub: Optional[str] = None) -> Dict[str, int]:
     }
 
 
+# ---------------------------------------------------------------------
+# Token ASLI dari penyedia
+# ---------------------------------------------------------------------
+# Groq mengirim angka token sebenarnya di setiap respons (prompt_tokens +
+# completion_tokens). Angka itu jauh lebih akurat daripada menebak dari
+# panjang teks, jadi disimpan di sini lalu dibaca oleh endpoint chat
+# untuk dicatat. Nilainya per-instans (memori proses) karena hanya
+# dipakai sesaat setelah respons diterima, dalam permintaan yang sama.
+_token_terakhir: Dict[str, int] = {}
+
+
+def simpan_token_asli(total: int, prompt: int = 0, completion: int = 0) -> None:
+    """
+    Menyimpan angka token sebenarnya dari respons penyedia.
+
+    Dipanggil tepat setelah respons Groq diterima, lalu dibaca oleh
+    endpoint /chat untuk mencatat ke Redis. Tidak pernah melempar
+    exception.
+    """
+    try:
+        nilai = int(total or 0)
+        if nilai <= 0:
+            nilai = int(prompt or 0) + int(completion or 0)
+        if nilai <= 0:
+            return
+        _token_terakhir["total"] = nilai
+        _token_terakhir["prompt"] = int(prompt or 0)
+        _token_terakhir["completion"] = int(completion or 0)
+        _token_terakhir["waktu"] = datetime.now(timezone.utc).timestamp()
+    except Exception:  # noqa: BLE001
+        return
+
+
+def ambil_token_asli(umur_maks: float = 120.0) -> Optional[int]:
+    """
+    Mengambil angka token asli yang terakhir disimpan.
+
+    `umur_maks` (detik) mencegah angka basi dari permintaan lain
+    terpakai — pada serverless tiap permintaan punya proses sendiri,
+    tetapi pada server biasa (lokal) prosesnya dipakai bersama.
+    Mengembalikan None bila tidak ada atau sudah terlalu lama.
+    """
+    try:
+        total = _token_terakhir.get("total")
+        waktu = _token_terakhir.get("waktu")
+        if not total or not waktu:
+            return None
+        if datetime.now(timezone.utc).timestamp() - float(waktu) > umur_maks:
+            return None
+        return int(total)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _detik_sampai_reset_harian() -> int:
     """Sisa detik hingga 00:00 UTC (jendela harian Groq)."""
     sekarang = datetime.now(timezone.utc)
@@ -312,6 +399,76 @@ def _detik_sampai_reset_harian() -> int:
         hour=0, minute=0, second=0, microsecond=0
     )
     return max(0, int((besok - sekarang).total_seconds()))
+
+
+# ---------------------------------------------------------------------
+# JATAH: memeriksa apakah akun masih boleh chat
+# ---------------------------------------------------------------------
+async def periksa_jatah(sub: Optional[str]) -> Dict[str, Any]:
+    """
+    Memeriksa jatah harian akun SEBELUM chat dikerjakan.
+
+    Mengembalikan:
+        {
+          "boleh": bool,        # False = tolak, jatah pesan habis
+          "sub": str|None,      # akun yang diperiksa (None = tamu)
+          "terpakai": int,      # request akun hari ini
+          "batas": int,         # jatah request akun per hari
+          "sisa": int,
+          "token_terpakai": int,   # hanya informasi, BUKAN pembatas
+          "reset_detik": int,   # hitung mundur ke 00:00 UTC
+          "alasan": str|None,   # 'request' bila ditolak
+        }
+
+    ATURAN PENTING:
+    - Penyimpanan mati TIDAK boleh memblokir chat. Bila angka tidak bisa
+      dibaca, fungsi ini mengembalikan `boleh=True` — lebih baik
+      kehilangan penegakan jatah daripada mematikan situs.
+    - Penolakan hanya terjadi bila angka BENAR-BENAR terbaca dan sudah
+      melewati batas. Tidak ada penolakan berdasarkan perkiraan.
+    - Hanya JUMLAH PESAN yang membatasi. Token dicatat sebagai informasi
+      untuk pengguna, tidak pernah menolak (alasannya lihat JATAH_AKUN).
+    """
+    sub_sah = _sub_sah(sub)
+    hasil: Dict[str, Any] = {
+        "boleh": True,
+        "sub": sub_sah,
+        "terpakai": 0,
+        "batas": JATAH_AKUN["rpd"],
+        "sisa": JATAH_AKUN["rpd"],
+        "token_terpakai": 0,
+        "reset_detik": _detik_sampai_reset_harian(),
+        "alasan": None,
+    }
+
+    # Tamu tidak punya akun -> jatah per-IP ditangani main.py.
+    if not sub_sah:
+        hasil["batas"] = JATAH_TAMU["rpd"]
+        hasil["sisa"] = JATAH_TAMU["rpd"]
+        return hasil
+
+    # Penyimpanan tidak tersedia: jangan memblokir siapa pun.
+    if not (_UPSTASH_URL and _UPSTASH_TOKEN):
+        return hasil
+
+    try:
+        catatan = await baca_harian(sub_sah)
+    except Exception:  # noqa: BLE001
+        return hasil
+
+    terpakai = max(0, int(catatan.get("requests", 0)))
+    token_terpakai = max(0, int(catatan.get("tokens", 0)))
+
+    hasil["terpakai"] = terpakai
+    hasil["token_terpakai"] = token_terpakai
+    hasil["sisa"] = max(0, JATAH_AKUN["rpd"] - terpakai)
+
+    # Hanya jumlah pesan yang menentukan boleh/tidak.
+    if terpakai >= JATAH_AKUN["rpd"]:
+        hasil["boleh"] = False
+        hasil["alasan"] = "request"
+
+    return hasil
 
 
 def _detik_sampai_reset_menit() -> int:
@@ -447,24 +604,46 @@ async def ringkasan(
     sub_sah = _sub_sah(sub)
     if sub_sah:
         milik = await baca_harian(sub_sah)
+        jatah_req = JATAH_AKUN["rpd"]
+        terpakai_req = max(0, int(milik["requests"]))
+        terpakai_token = max(0, int(milik["tokens"]))
+
         hasil["akun"] = {
             "requests": {
-                "terpakai": milik["requests"],
-                # Batas "adil" per akun: jatah harian dibagi rata ke
-                # sejumlah pengguna aktif yang wajar. Ini BUKAN blokir —
-                # hanya angka acuan agar pengguna tahu posisinya.
-                "batas": batas["rpd"],
-                "persen": _persen(milik["requests"], batas["rpd"]),
+                "terpakai": terpakai_req,
+                # Ini JATAH SUNGGUHAN milik akun ini — bukan angka
+                # tampilan. Bila terpakai mencapai batas, /chat menolak
+                # sampai reset harian (lihat periksa_jatah).
+                "batas": jatah_req,
+                "sisa": max(0, jatah_req - terpakai_req),
+                "persen": _persen(terpakai_req, jatah_req),
             },
+            # Token hanya INFORMASI: dicatat dan ditampilkan agar
+            # pengguna tahu pemakaiannya, tetapi tidak membatasi chat.
             "tokens": {
-                "terpakai": milik["tokens"],
-                "batas": batas["tpd"],
-                "persen": _persen(milik["tokens"], batas["tpd"]),
+                "terpakai": terpakai_token,
+                "batas": None,
+                "sisa": None,
+                "persen": None,
+            },
+            "habis": terpakai_req >= jatah_req,
+            "reset": {
+                "detik": reset_harian,
+                "jam": round(reset_harian / 3600, 1),
+                "waktu_utc": hasil["reset"]["waktu_utc"],
+                "zona": "UTC",
             },
             "catatan": (
-                "Angka ini pemakaian akun Anda sendiri hari ini (UTC). "
-                "Sisa kuota di atas dipakai bersama seluruh pengunjung situs."
+                "Jatah ini milik akun Anda sendiri dan terpisah dari akun lain. "
+                "Reset setiap 00:00 UTC (07:00 WIB)."
             ),
+        }
+    else:
+        # Tamu: tidak punya akun, jadi tidak ada jatah per akun.
+        # Batas 3 pesan/hari per IP ditegakkan di main.py.
+        hasil["tamu"] = {
+            "batas_pesan": JATAH_TAMU["rpd"],
+            "catatan": "Masuk dengan Google untuk mendapat jatah 100 pesan/hari.",
         }
 
     return hasil

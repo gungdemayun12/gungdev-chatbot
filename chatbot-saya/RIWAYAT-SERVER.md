@@ -14,11 +14,66 @@ masih tersimpan di perangkat masing-masing.
 |---|---|
 | Riwayat hanya di browser | Riwayat di server, **sama di semua perangkat** |
 | Hapus data browser = riwayat hilang | Riwayat aman di server |
-| Semua pengunjung berbagi satu angka usage | Tiap akun punya angka **Pemakaian saya** |
+| Semua pengunjung berbagi satu angka usage | Tiap akun punya **jatah 100 pesan/hari** sendiri |
+| Tidak ada pembatas per akun | Satu akun habis jatah **tidak** memengaruhi akun lain |
 | — | Bila server tak bisa dipakai, salinan perangkat dipakai otomatis |
 
 Kontrak API lama **tidak berubah**: `/chat`, `/chat/stream`, `/health`,
 `/capabilities` tetap sama persis.
+
+---
+
+## Jatah chat per akun (baru)
+
+| Hal | Nilai |
+|---|---|
+| Jatah pesan per akun | **100 pesan/hari** |
+| Jatah tamu | 3 pesan/hari (per IP, tidak berubah) |
+| Reset | **00:00 UTC = 07:00 WIB** setiap hari |
+| Token | **Dicatat & ditampilkan**, tetapi **tidak membatasi** |
+| Kuota bersama situs | 1.000 permintaan/hari (dari penyedia, dipakai bersama) |
+
+### Mengapa hanya jumlah pesan yang membatasi?
+
+Panjang jawaban AI sangat bervariasi: jawaban singkat ~100 token,
+jawaban panjang ~3.000 token. Bila token dijadikan pembatas, pengguna
+yang bertanya hal rumit akan kehabisan jatah jauh lebih cepat padahal
+sama-sama satu pesan. Jumlah pesan lebih adil dan lebih mudah dipahami.
+
+Token tetap dicatat (diambil dari **angka resmi penyedia**, bukan
+perkiraan) dan ditampilkan di panel supaya pengguna tahu pemakaiannya.
+
+### Apa yang terjadi saat jatah habis?
+
+- Pesan ditolak dengan penjelasan jelas: berapa lama lagi pulih.
+- **Akun lain tidak terpengaruh** — masing-masing punya jatah sendiri.
+- Riwayat percakapan lama **tetap bisa dibaca**.
+- Kuota penyedia tidak terpakai oleh permintaan yang ditolak.
+
+### Bila penyimpanan bermasalah
+
+Chat **tidak pernah** diblokir karena penyimpanan mati. Bila angka
+pemakaian tidak bisa dibaca, server memilih meloloskan chat — lebih baik
+kehilangan penegakan jatah sesaat daripada mematikan situs bagi semua
+orang. Jatah kembali berlaku otomatis saat penyimpanan pulih.
+
+---
+
+## Tentang penyimpanan riwayat (Redis)
+
+| Hal | Nilai |
+|---|---|
+| Maksimal percakapan per akun | 200 sesi (yang terlama otomatis dibuang) |
+| Maksimal pesan per percakapan | 400 pesan |
+| Ukuran maksimal per percakapan | ~900 KB |
+| Umur data | 1 tahun sejak terakhir disentuh |
+
+Kuota gratis Upstash: **10.000 perintah/hari**, **500.000/bulan**,
+**256 MB**. Reset harian 00:00 UTC, bulanan tiap tanggal 1.
+
+Bila kuota habis: chat tetap jalan, riwayat berhenti ke server, salinan
+perangkat dipakai, dan sidebar memberi tahu dengan jujur.
+
 
 ---
 
@@ -108,21 +163,29 @@ Bila belum muncul, buka panel Usage dan lihat pesan di sidebar:
 |---|---|
 | `backend/penyimpanan.py` | Penyimpanan riwayat di Upstash (per akun, per sesi) |
 | `backend/identitas.py` | Verifikasi ID token Google ke `oauth2.googleapis.com` |
-| `backend/usage.py` | Pencatatan usage global + per akun |
-| `backend/main.py` | Endpoint `/api/sessions` (GET/POST/sync/active/DELETE) |
+| `backend/usage.py` | Pencatatan usage + **jatah harian per akun** |
+| `backend/main.py` | Endpoint `/api/sessions`, penegakan jatah di `/chat` |
 | `frontend/src/lib/riwayat.js` | Semua permintaan riwayat + token |
 | `frontend/src/hooks/useSessions.js` | Server sebagai sumber kebenaran, perangkat sebagai cadangan |
+| `frontend/src/components/UsagePanel.jsx` | Panel pemakaian + jatah akun |
 
 ## Menjalankan uji
 
 ```powershell
 # Backend (tanpa perlu Upstash asli — Redis & Google dipalsukan)
 cd chatbot-saya/backend
-python uji_server_riwayat.py      # 54 pemeriksaan
+python uji_server_riwayat.py      # 54 pemeriksaan penyimpanan riwayat
+python uji_jatah.py               # 43 pemeriksaan jatah per akun
 python server_uji.py              # jalankan server uji di port 8000
-python uji_api.py                 # 24 pemeriksaan endpoint
+python uji_api.py                 # 24 pemeriksaan endpoint lama
+python uji_jatah_api.py           # 28 pemeriksaan penegakan jatah via HTTP
 
 # Frontend (butuh server_uji.py + npm run dev berjalan)
 cd chatbot-saya/frontend
-node uji_browser.mjs              # 16 pemeriksaan lintas "perangkat"
+node uji_browser.mjs              # 16 pemeriksaan riwayat lintas "perangkat"
+node uji_jatah_browser.mjs        # 11 pemeriksaan jatah di UI
 ```
+
+> **Penting:** `server_uji.py` menyimpan state di memori proses. Restart
+> server sebelum menjalankan rangkaian uji agar hasil tidak tercemar sisa
+> uji sebelumnya.

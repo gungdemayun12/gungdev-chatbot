@@ -182,21 +182,76 @@ export function UsageContent({ apiUrl, apiOnline, aktif = true }) {
           </div>
 
           {/* --- Pemakaian akun ini sendiri ---
-               Hanya muncul saat pengguna login. Kuota di bawah ini
-               dipakai bersama semua pengunjung, jadi angka akun
-               ditampilkan terpisah agar tidak menyesatkan. */}
+               Ini JATAH SUNGGUHAN milik akun ini (100 pesan/hari),
+               terpisah dari kuota bersama di bawah. Bila habis, chat
+               ditolak sampai reset — jadi angkanya harus terlihat
+               jelas, bukan tersembunyi di rincian. */}
           {akun && (
             <div className="usage__akun">
               <div className="usage__akun-head">
                 <span className="usage__akun-label">Pemakaian saya</span>
                 <span className="usage__akun-total">
-                  {angkaRingkas(akun.requests?.terpakai || 0)} permintaan
-                  <span className="usage__akun-sep">·</span>
-                  {angkaRingkas(akun.tokens?.terpakai || 0)} token
+                  {angkaRingkas(akun.requests?.terpakai || 0)}
+                  <span className="usage__akun-sep"> / </span>
+                  {angkaRingkas(akun.requests?.batas || 0)} pesan
+                </span>
+              </div>
+
+              <div
+                className={`usage-bar__track usage__akun-track ${warnaBar(
+                  akun.requests?.persen ?? 0,
+                )}`}
+                role="progressbar"
+                aria-valuenow={Math.round(akun.requests?.persen ?? 0)}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label={`Jatah pesan akun ini: ${akun.requests?.persen ?? 0}% terpakai`}
+              >
+                <div
+                  className="usage-bar__fill"
+                  style={{
+                    width: `${Math.max(
+                      akun.requests?.persen ?? 0,
+                      (akun.requests?.terpakai || 0) > 0 ? 1.5 : 0,
+                    )}%`,
+                  }}
+                />
+              </div>
+
+              <div className="usage__akun-note">
+                Sisa <strong>{angkaRingkas(akun.requests?.sisa || 0)}</strong> pesan
+                hari ini
+                {akun.reset?.detik > 0 && (
+                  <> · pulih dalam {durasi(akun.reset.detik)}</>
+                )}
+                {(akun.tokens?.terpakai || 0) > 0 && (
+                  <>
+                    <span className="usage__akun-sep">·</span>
+                    {angkaRingkas(akun.tokens.terpakai)} token terpakai
+                  </>
+                )}
+              </div>
+
+              {akun.habis && (
+                <div className="usage__akun-habis">
+                  Jatah Anda hari ini habis. Chat bisa dipakai lagi setelah
+                  reset — riwayat lama tetap bisa dibaca.
+                </div>
+              )}
+            </div>
+          )}
+
+          {!akun && data.tamu && (
+            <div className="usage__akun">
+              <div className="usage__akun-head">
+                <span className="usage__akun-label">Mode tamu</span>
+                <span className="usage__akun-total">
+                  {angkaRingkas(data.tamu.batas_pesan || 0)} pesan/hari
                 </span>
               </div>
               <div className="usage__akun-note">
-                Dihitung untuk akun ini saja, direset bersama kuota harian.
+                Masuk dengan Google untuk mendapat jatah{' '}
+                <strong>100 pesan/hari</strong> milik akun Anda sendiri.
               </div>
             </div>
           )}
@@ -253,10 +308,12 @@ export function UsageContent({ apiUrl, apiOnline, aktif = true }) {
 
           {/* --- Penjelasan jujur --- */}
           <p className="usage__fineprint">
-            Jumlah permintaan dibaca langsung dari penyedia AI, jadi akurat.
-            Jumlah token dihitung server dari panjang percakapan dan bisa
-            sedikit berbeda dari dashboard penyedia. Panel ini tidak memakai
-            kuota saat dibuka.
+            Jatah <strong>Pemakaian saya</strong> adalah milik akun Anda sendiri
+            ({angkaRingkas(akun?.requests?.batas || 100)} pesan/hari) dan terpisah
+            dari akun lain. Bila habis, chat berhenti sampai reset — riwayat tetap
+            bisa dibaca. Bar <strong>Permintaan</strong> dan <strong>Token</strong>{' '}
+            di atas adalah kuota bersama seluruh pengunjung situs, ditampilkan agar
+            Anda tahu kondisi layanan. Panel ini tidak memakai kuota saat dibuka.
           </p>
 
           <button

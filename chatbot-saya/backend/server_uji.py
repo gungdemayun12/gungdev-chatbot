@@ -209,10 +209,21 @@ main.app.router.routes = [
 
 @main.app.post("/chat")
 async def chat_uji(request: main.ChatRequest, authorization: str | None = main.Header(None)):
-    """Versi /chat untuk uji: membalas {reply} tanpa menyentuh penyedia AI."""
+    """
+    Versi /chat untuk uji: membalas {reply} tanpa menyentuh penyedia AI.
+
+    PENTING: stub ini WAJIB memakai jalur jatah yang sama dengan produksi
+    (periksa_jatah + pesan_jatah_habis). Sempat terjadi: stub tidak
+    memeriksa jatah sehingga uji jatah "lulus" padahal endpoint
+    produksinya bisa saja salah. Yang diuji harus jalur yang sama.
+    """
     akun = await main.identitas_pemanggil(authorization)
+    jatah = await usage.periksa_jatah((akun or {}).get("sub"))
+    if not jatah["boleh"]:
+        raise main.HTTPException(status_code=429, detail=main.pesan_jatah_habis(jatah))
+
     await usage.catat_request(
-        tokens=50, model="openai/gpt-oss-120b", sub=(akun or {}).get("sub")
+        tokens=usage.TOKEN_MIN_PER_REQUEST, model="openai/gpt-oss-120b", sub=jatah.get("sub")
     )
     return {"reply": f"Jawaban untuk: {request.message[:40]}"}
 
@@ -220,6 +231,11 @@ async def chat_uji(request: main.ChatRequest, authorization: str | None = main.H
 @main.app.post("/chat/stream")
 async def chat_stream_uji(request: main.ChatRequest, authorization: str | None = main.Header(None)):
     akun = await main.identitas_pemanggil(authorization)
+
+    # Jatah diperiksa SEBELUM stream dimulai, sama seperti produksi.
+    jatah = await usage.periksa_jatah((akun or {}).get("sub"))
+    if not jatah["boleh"]:
+        raise main.HTTPException(status_code=429, detail=main.pesan_jatah_habis(jatah))
 
     def sse(obj):
         return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
@@ -230,7 +246,7 @@ async def chat_stream_uji(request: main.ChatRequest, authorization: str | None =
             await asyncio.sleep(0.05)
             yield sse({"delta": potong})
         await usage.catat_request(
-            tokens=50, model="openai/gpt-oss-120b", sub=(akun or {}).get("sub")
+            tokens=usage.TOKEN_MIN_PER_REQUEST, model="openai/gpt-oss-120b", sub=jatah.get("sub")
         )
         yield sse({"done": True})
 
@@ -247,6 +263,24 @@ async def lihat_db():
 async def lihat_log():
     """Jejak semua perintah Redis (untuk menelusuri siapa menulis apa)."""
     return {"log": JEJAK[-80:]}
+
+
+@main.app.post("/__uji/pakai")
+async def isi_pemakaian(data: dict):
+    """
+    Mengisi angka pemakaian akun untuk menguji penegakan jatah.
+
+    Dipakai uji_api.py agar bisa mensimulasikan "akun sudah memakai 100
+    pesan hari ini" tanpa harus benar-benar mengirim 100 pesan.
+    """
+    sub = str(data.get("sub") or "")
+    req = int(data.get("requests") or 0)
+    tok = int(data.get("tokens") or 0)
+    import usage as _usage
+
+    kunci = _usage._kunci_harian(sub)
+    DB[kunci] = {"requests": req, "tokens": tok}
+    return {"ok": True, "kunci": kunci}
 
 
 if __name__ == "__main__":

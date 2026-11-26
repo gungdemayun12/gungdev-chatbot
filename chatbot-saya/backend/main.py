@@ -866,6 +866,12 @@ def _groq_payload(model: str, messages: List[dict], opsi: dict, streaming: bool)
         "stream": streaming,
     }
 
+    # Saat streaming, Groq tidak mengirim angka token kecuali diminta.
+    # Tanpa ini pencatatan jatah token hanya bisa menebak dari panjang
+    # teks, sehingga angka di panel Usage tidak akurat.
+    if streaming:
+        payload["stream_options"] = {"include_usage": True}
+
     if opsi.get("penelitian"):
         payload["tools"] = [{"type": "browser_search"}]
         payload["tool_choice"] = "required"
@@ -958,6 +964,18 @@ async def groq_complete(messages: List[dict], opsi: dict) -> str:
             except (KeyError, IndexError, TypeError):
                 pesan = {}
 
+            # Simpan angka token SEBENARNYA dari penyedia. Ini membuat
+            # pencatatan jatah akurat, bukan perkiraan dari panjang teks.
+            try:
+                pakai = data.get("usage") or {}
+                usage.simpan_token_asli(
+                    pakai.get("total_tokens") or 0,
+                    pakai.get("prompt_tokens") or 0,
+                    pakai.get("completion_tokens") or 0,
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
             isi = _teks_dari_pesan(pesan)
 
             if not isi:
@@ -1045,6 +1063,20 @@ async def groq_stream(messages: List[dict], opsi: dict) -> AsyncIterator[str]:
                     obj = json.loads(data)
                 except json.JSONDecodeError:
                     continue
+
+                # Potongan terakhir (dengan stream_options.include_usage)
+                # membawa angka token sebenarnya. Disimpan agar jatah
+                # akun dihitung dari angka asli, bukan perkiraan.
+                pakai = obj.get("usage")
+                if isinstance(pakai, dict) and pakai:
+                    try:
+                        usage.simpan_token_asli(
+                            pakai.get("total_tokens") or 0,
+                            pakai.get("prompt_tokens") or 0,
+                            pakai.get("completion_tokens") or 0,
+                        )
+                    except Exception:  # noqa: BLE001
+                        pass
 
                 try:
                     delta = obj["choices"][0]["delta"].get("content") or ""
@@ -1238,6 +1270,60 @@ def _perkiraan_token(messages: List[dict], jawaban: str) -> int:
         return max(1, panjang // 4)
     except Exception:  # noqa: BLE001
         return 0
+
+
+def _token_untuk_catatan(messages: List[dict], jawaban: str) -> int:
+    """
+    Menentukan jumlah token yang dicatat untuk satu permintaan.
+
+    Urutan prioritas:
+      1. Angka ASLI dari penyedia (Groq mengirim usage di setiap
+         respons). Ini yang dipakai kapan pun tersedia.
+      2. Perkiraan dari panjang teks — hanya bila penyedia tidak
+         mengirim angka (mis. Ollama lokal).
+
+    Batas minimum selalu dipakai agar jatah tidak bisa diakali dengan
+    membuat pencatatan token gagal (biaya 0 token = jatah tak terbatas).
+    """
+    asli = usage.ambil_token_asli()
+    if asli and asli > 0:
+        return int(asli)
+    try:
+        perkiraan = _perkiraan_token(messages, jawaban)
+    except Exception:  # noqa: BLE001
+        perkiraan = 0
+    return max(usage.TOKEN_MIN_PER_REQUEST, int(perkiraan or 0))
+
+
+def pesan_jatah_habis(jatah: dict) -> str:
+    """
+    Pesan yang dilihat pengguna saat jatah hariannya habis.
+
+    Ditulis jelas dan menenangkan: apa yang terjadi, kapan pulih, dan
+    apa yang bisa dilakukan sekarang. Tanpa menyebut nama penyedia AI
+    atau detail infrastruktur.
+    """
+    jam = jatah.get("reset_detik") or 0
+    if jam >= 3600:
+        waktu = f"{int(jam // 3600)} jam lagi"
+    elif jam >= 60:
+        waktu = f"{int(jam // 60)} menit lagi"
+    else:
+        waktu = f"{int(jam)} detik lagi"
+
+    if jatah.get("alasan") == "token":
+        # Tidak dipakai lagi (token bukan pembatas), tetapi dipertahankan
+        # agar kode lama/pemanggil lain tidak menghasilkan pesan kosong.
+        inti = "Pemakaian token Anda hari ini sudah mencapai batas."
+    else:
+        inti = "Jatah pesan Anda hari ini sudah habis."
+
+    return (
+        f"{inti} Jatah pulih otomatis dalam {waktu}. "
+        f"Jatah ini hanya milik akun Anda — "
+        f"akun lain tidak terpengaruh. Anda masih bisa membaca "
+        f"riwayat percakapan yang sudah ada."
+    )
 
 
 # ---------------------------------------------------------------------
@@ -1569,14 +1655,21 @@ async def chat(request: ChatRequest, authorization: Optional[str] = Header(None)
     """
     messages, opsi = siapkan_permintaan(request)
 
+    # Identitas diverifikasi SEBELUM memanggil AI, agar jatah harian akun
+    # bisa ditegakkan. Bila jatah habis, permintaan ditolak dengan pesan
+    # yang jelas — kuota penyedia tidak ikut terpakai.
+    akun = await identitas_pemanggil(authorization)
+    jatah = await usage.periksa_jatah((akun or {}).get("sub"))
+    if not jatah["boleh"]:
+        raise HTTPException(status_code=429, detail=pesan_jatah_habis(jatah))
+
     try:
         isi = await complete(messages, opsi)
         # Catat pemakaian (tidak pernah menggagalkan percakapan).
-        akun = await identitas_pemanggil(authorization)
         await usage.catat_request(
-            tokens=_perkiraan_token(messages, isi),
+            tokens=_token_untuk_catatan(messages, isi),
             model=opsi["model"],
-            sub=(akun or {}).get("sub"),
+            sub=jatah.get("sub"),
         )
         return {"reply": isi}
     except HTTPException:
@@ -1612,6 +1705,14 @@ async def chat_stream(request: ChatRequest, authorization: Optional[str] = Heade
     akun = await identitas_pemanggil(authorization)
     sub_akun = (akun or {}).get("sub")
 
+    # Jatah diperiksa SEBELUM streaming dimulai. Bila diperiksa di dalam
+    # generator, status HTTP sudah terkirim sebagai 200 dan pengguna
+    # hanya melihat jawaban kosong — pesannya harus jelas.
+    jatah = await usage.periksa_jatah(sub_akun)
+    if not jatah["boleh"]:
+        raise HTTPException(status_code=429, detail=pesan_jatah_habis(jatah))
+    sub_akun = jatah.get("sub")
+
     def sse(obj: dict) -> str:
         return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
 
@@ -1644,7 +1745,7 @@ async def chat_stream(request: ChatRequest, authorization: Optional[str] = Heade
 
             # Catat pemakaian setelah jawaban selesai terkumpul.
             await usage.catat_request(
-                tokens=_perkiraan_token(messages, "".join(jawaban)),
+                tokens=_token_untuk_catatan(messages, "".join(jawaban)),
                 model=opsi["model"],
                 sub=sub_akun,
             )
