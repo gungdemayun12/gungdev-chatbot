@@ -10,8 +10,11 @@
     { "source": "/health", "destination": "/api/index" },
     { "source": "/chat", "destination": "/api/index" },
     { "source": "/chat/stream", "destination": "/api/index" },
+    { "source": "/api/chat", "destination": "/api/index" },
+    { "source": "/api/chat/stream", "destination": "/api/index" },
     { "source": "/usage", "destination": "/api/index" },
     { "source": "/capabilities", "destination": "/api/index" },
+    { "source": "/diagnostik", "destination": "/api/index" },
     { "source": "/api/sessions", "destination": "/api/index" },
     { "source": "/api/sessions/(.*)", "destination": "/api/index" }
   ],

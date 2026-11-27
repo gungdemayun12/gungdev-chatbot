@@ -18,6 +18,26 @@
       "destination": "https://gungdev-chatbot-rq5l.vercel.app/capabilities"
     },
     {
+      "source": "/diagnostik",
+      "destination": "https://gungdev-chatbot-rq5l.vercel.app/diagnostik"
+    },
+    {
+      "source": "/chat",
+      "destination": "https://gungdev-chatbot-rq5l.vercel.app/chat"
+    },
+    {
+      "source": "/chat/stream",
+      "destination": "https://gungdev-chatbot-rq5l.vercel.app/chat/stream"
+    },
+    {
+      "source": "/api/chat",
+      "destination": "https://gungdev-chatbot-rq5l.vercel.app/chat"
+    },
+    {
+      "source": "/api/chat/stream",
+      "destination": "https://gungdev-chatbot-rq5l.vercel.app/chat/stream"
+    },
+    {
       "source": "/api/sessions",
       "destination": "https://gungdev-chatbot-rq5l.vercel.app/api/sessions"
     },
@@ -26,7 +46,7 @@
       "destination": "https://gungdev-chatbot-rq5l.vercel.app/api/sessions/$1"
     },
     {
-      "source": "/((?!health|usage|capabilities|api/).*)",
+      "source": "/((?!health|usage|capabilities|diagnostik|chat|api/).*)",
       "destination": "/index.html"
     }
   ],
