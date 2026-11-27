@@ -208,6 +208,68 @@ GEMINI_MODELS = [
     "gemini-3.1-flash-lite",
 ]
 
+# ---------------------------------------------------------------------
+# PENYEDIA KEEMPAT: NVIDIA NIM (build.nvidia.com)
+# ---------------------------------------------------------------------
+# MENGAPA DITAMBAHKAN
+# -------------------
+# Kapasitas harian situs dibatasi oleh TOTAL TOKEN dari semua penyedia.
+# Setiap penyedia baru yang punya kuota sendiri menambah kapasitas itu,
+# dan kapasitas itulah yang menentukan seberapa besar jatah per akun
+# boleh dinaikkan. Menambah penyedia = menambah jatah, bukan sekadar
+# menambah pilihan model.
+#
+# KEADAAN GRATISNYA (dicek Nov 2026, jujur apa adanya)
+# ---------------------------------------------------
+# NVIDIA memberi "trial credits" (~1.000 panggilan) untuk akun Developer
+# Program gratis, tanpa kartu kredit. Ini BUKAN kuota harian permanen
+# seperti Groq — kreditnya terbatas dan berlaku ±90 hari. Artinya NVIDIA
+# cocok sebagai:
+#   - jalur cadangan keempat saat Groq + Gemini + OpenRouter habis, dan
+#   - sumber model tambahan (GLM, Kimi, DeepSeek, Nemotron) yang bisa
+#     dipilih pengguna.
+# NVIDIA TIDAK dihitung sebagai kapasitas harian permanen di usage.py,
+# karena kreditnya akan habis. Menghitungnya sebagai kapasitas tetap
+# akan membuat jatah per akun terlalu tinggi lalu kuota habis mendadak.
+#
+# Bentuk API-nya kompatibel OpenAI, jadi tidak ada kontrak yang berubah.
+# Bila NVIDIA_API_KEY kosong, seluruh bagian ini dilewati.
+NVIDIA_API_KEY = _env("NVIDIA_API_KEY")
+NVIDIA_BASE_URL = _env(
+    "NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1"
+).rstrip("/")
+NVIDIA_MODEL_DEFAULT = _env("NVIDIA_MODEL", "openai/gpt-oss-120b")
+
+# Model NVIDIA yang boleh dipilih. Nama harus PERSIS seperti di katalog
+# build.nvidia.com — nama yang salah akan dibalas 404, dan server
+# melewatinya otomatis ke cadangan.
+#
+# PENTING: id model harus UNIK terhadap penyedia lain. NVIDIA juga punya
+# "openai/gpt-oss-120b", PERSIS sama dengan id Groq. Kalau dimasukkan apa
+# adanya, router akan menganggap model itu milik NVIDIA padahal selama ini
+# dilayani Groq — pengguna yang memilih GPT-OSS 120B tiba-tiba pindah
+# penyedia. Karena itu model yang id-nya sudah dipakai penyedia lain
+# diberi awalan "nvidia/" di sisi kita (lihat _nvidia_nama_asli).
+NVIDIA_MODELS = [
+    "nvidia/gpt-oss-120b",
+    "nvidia/deepseek-v4.1-flash",
+    "zai-org/glm-5",
+    "moonshotai/kimi-2.5",
+    "nvidia/nemotron-3.5-super-vl-120b-a12b",
+]
+
+# Pemetaan id pilihan-pengguna -> nama model asli di katalog NVIDIA.
+# Yang tidak ada di sini dikirim apa adanya.
+_NVIDIA_NAMA_ASLI = {
+    "nvidia/gpt-oss-120b": "openai/gpt-oss-120b",
+    "nvidia/deepseek-v4.1-flash": "deepseek-ai/deepseek-v4.1-flash",
+}
+
+
+def _nvidia_nama_asli(model: str) -> str:
+    """Menerjemahkan id pilihan pengguna menjadi nama model katalog NVIDIA."""
+    return _NVIDIA_NAMA_ASLI.get(model, model)
+
 # Model default.
 #
 # CATATAN PENTING (diperbarui):
@@ -268,7 +330,9 @@ MODEL_GROQ_DIIZINKAN = [
     "openai/gpt-oss-20b",
     "qwen/qwen3.8-27b",
 ]
-MODEL_DIIZINKAN = MODEL_GROQ_DIIZINKAN + OPENROUTER_MODELS + GEMINI_MODELS
+MODEL_DIIZINKAN = (
+    MODEL_GROQ_DIIZINKAN + OPENROUTER_MODELS + GEMINI_MODELS + NVIDIA_MODELS
+)
 
 # Model yang dipakai bila klien tidak mengirim pilihan / mengirim nilai
 # di luar daftar.
@@ -302,6 +366,9 @@ MODEL_VISION = {
     "nvidia/nemotron-3.5-super-vl:free",
     "inclusionai/ling-3.2-flash:free",
     "particle-ai/particle-1:free",
+    # Model NVIDIA NIM yang multimodal (varian VL = vision-language).
+    "nvidia/nemotron-3.5-super-vl-120b-a12b",
+    "zai-org/glm-5",
 }
 
 # Model yang dipakai bila pesan berisi gambar tetapi pilihan pengguna
@@ -1782,6 +1849,226 @@ async def gemini_stream(messages: List[dict], opsi: dict) -> AsyncIterator[str]:
 
 
 # ---------------------------------------------------------------------
+# 9b. PEMANGGILAN KE NVIDIA NIM (penyedia keempat, kompatibel OpenAI)
+# ---------------------------------------------------------------------
+def _nvidia_headers() -> dict:
+    return {
+        "Authorization": f"Bearer {NVIDIA_API_KEY}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
+
+def _nvidia_payload(model: str, messages: List[dict], opsi: dict, streaming: bool) -> dict:
+    """
+    Body permintaan untuk NVIDIA NIM.
+
+    NIM memakai standar OpenAI, tetapi beberapa modelnya menolak
+    `temperature` 0 (dianggap tidak valid), jadi nilai itu digeser
+    sedikit. Selain itu `max_tokens` dikirim sebagai `max_tokens` biasa —
+    NIM tidak mengenal `max_completion_tokens` milik Groq.
+    """
+    suhu = opsi["temperature"]
+    if not isinstance(suhu, (int, float)) or suhu <= 0:
+        suhu = 0.1
+
+    return {
+        "model": _nvidia_nama_asli(model),
+        "messages": messages,
+        "temperature": suhu,
+        "max_tokens": opsi["max_tokens"],
+        "stream": streaming,
+    }
+
+
+def _kandidat_nvidia(model: str, ada_gambar: bool) -> List[str]:
+    """Model NVIDIA yang dicoba berurutan; nama salah dibalas 404."""
+    utama = model if model in NVIDIA_MODELS else NVIDIA_MODEL_DEFAULT
+    kandidat = [utama]
+    for m in NVIDIA_MODELS:
+        if m == utama:
+            continue
+        if ada_gambar and m not in MODEL_VISION:
+            continue
+        kandidat.append(m)
+    return kandidat
+
+
+def _pesan_nvidia_error(kode: int, badan: str) -> str:
+    """Pesan kesalahan NVIDIA dalam Bahasa Indonesia yang tenang."""
+    if kode in (401, 403):
+        return (
+            "Layanan AI menolak kunci akses NVIDIA. Periksa kembali "
+            "NVIDIA_API_KEY di pengaturan server."
+        )
+    if kode == 404:
+        return "Model NVIDIA yang dipilih tidak tersedia. Silakan pilih model lain."
+    if kode in (402, 429):
+        return (
+            "Kuota layanan AI sedang penuh. Silakan coba lagi beberapa saat lagi."
+        )
+    logger.warning("NVIDIA menolak permintaan: HTTP %s %s", kode, badan[:200])
+    return "Layanan AI sedang bermasalah. Silakan coba lagi."
+
+
+async def nvidia_complete(messages: List[dict], opsi: dict) -> str:
+    """Jawaban lengkap (non-streaming) dari NVIDIA NIM."""
+    kandidat = _kandidat_nvidia(
+        opsi.get("model") or NVIDIA_MODEL_DEFAULT, bool(opsi.get("ada_gambar"))
+    )
+    error_terakhir: Optional[HTTPException] = None
+
+    async with httpx.AsyncClient(timeout=TIMEOUT_GEMINI) as http:
+        for model in kandidat:
+            res = await http.post(
+                f"{NVIDIA_BASE_URL}/chat/completions",
+                headers=_nvidia_headers(),
+                json=_nvidia_payload(model, messages, opsi, False),
+            )
+
+            if res.status_code >= 400:
+                sebab = res.text[:300]
+                logger.warning(
+                    "NVIDIA menolak %s: HTTP %s %s", model, res.status_code, sebab
+                )
+                error_terakhir = HTTPException(
+                    status_code=502,
+                    detail=_pesan_nvidia_error(res.status_code, sebab),
+                )
+                # Naikkan status asli agar failover kuota tetap bekerja.
+                if res.status_code in _STATUS_KUOTA:
+                    error_terakhir = HTTPException(
+                        status_code=res.status_code,
+                        detail=_pesan_nvidia_error(res.status_code, sebab),
+                    )
+                if res.status_code in (402, 404, 429) and model != kandidat[-1]:
+                    continue
+                raise error_terakhir
+
+            data = res.json()
+            pakai = data.get("usage") or {}
+            if pakai:
+                try:
+                    usage.simpan_token_asli(
+                        pakai.get("total_tokens") or 0,
+                        pakai.get("prompt_tokens") or 0,
+                        pakai.get("completion_tokens") or 0,
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+
+            isi = _teks_dari_pesan((data.get("choices") or [{}])[0].get("message") or {})
+            if not isi:
+                logger.warning("NVIDIA %s memberi jawaban kosong.", model)
+                error_terakhir = HTTPException(
+                    status_code=502,
+                    detail="Layanan AI mengembalikan jawaban kosong. Silakan coba lagi.",
+                )
+                if model != kandidat[-1]:
+                    continue
+                raise error_terakhir
+
+            if model != kandidat[0]:
+                logger.info("NVIDIA memakai model cadangan %s.", model)
+            return isi
+
+    raise error_terakhir or HTTPException(
+        status_code=502, detail="Layanan AI sedang bermasalah. Silakan coba lagi."
+    )
+
+
+async def nvidia_stream(messages: List[dict], opsi: dict) -> AsyncIterator[str]:
+    """Mengalirkan jawaban dari NVIDIA NIM (SSE, format OpenAI)."""
+    kandidat = _kandidat_nvidia(
+        opsi.get("model") or NVIDIA_MODEL_DEFAULT, bool(opsi.get("ada_gambar"))
+    )
+
+    async with httpx.AsyncClient(timeout=TIMEOUT_STREAM) as http:
+        res = None
+        for model in kandidat:
+            payload = _nvidia_payload(model, messages, opsi, streaming=True)
+            permintaan = http.build_request(
+                "POST",
+                f"{NVIDIA_BASE_URL}/chat/completions",
+                headers=_nvidia_headers(),
+                json=payload,
+            )
+            kandidat_res = await http.send(permintaan, stream=True)
+
+            if kandidat_res.status_code == 404 and model != kandidat[-1]:
+                await kandidat_res.aread()
+                logger.warning(
+                    "Model NVIDIA '%s' tidak tersedia; mencoba cadangan.", model
+                )
+                await kandidat_res.aclose()
+                continue
+
+            if kandidat_res.status_code >= 400:
+                badan = await kandidat_res.aread()
+                kode = kandidat_res.status_code
+                await kandidat_res.aclose()
+                logger.error("NVIDIA menolak streaming: %s %s", kode, badan[:200])
+                # Kode asli dipertahankan agar failover kuota bisa bekerja.
+                raise HTTPException(
+                    status_code=kode if kode in _STATUS_KUOTA else 502,
+                    detail=_pesan_nvidia_error(kode, badan.decode("utf-8", "replace")),
+                )
+
+            res = kandidat_res
+            break
+
+        if res is None:
+            raise HTTPException(
+                status_code=502,
+                detail="Model NVIDIA tidak tersedia. Silakan pilih model lain.",
+            )
+
+        try:
+            async for baris in res.aiter_lines():
+                if not baris or not baris.startswith("data:"):
+                    continue
+                data = baris[5:].strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    obj = json.loads(data)
+                except json.JSONDecodeError:
+                    continue
+
+                pakai = obj.get("usage")
+                if isinstance(pakai, dict) and pakai:
+                    try:
+                        usage.simpan_token_asli(
+                            pakai.get("total_tokens") or 0,
+                            pakai.get("prompt_tokens") or 0,
+                            pakai.get("completion_tokens") or 0,
+                        )
+                    except Exception:  # noqa: BLE001
+                        pass
+
+                try:
+                    pilihan = obj["choices"][0]
+                except (KeyError, IndexError, TypeError):
+                    pilihan = {}
+                try:
+                    delta = (pilihan.get("delta") or {}).get("content") or ""
+                except AttributeError:
+                    delta = ""
+                if _terpotong_dari_finish(pilihan.get("finish_reason")):
+                    _tandai_terpotong()
+                if isinstance(delta, list):
+                    delta = "".join(
+                        b.get("text", "")
+                        for b in delta
+                        if isinstance(b, dict) and isinstance(b.get("text"), str)
+                    )
+                if isinstance(delta, str) and delta:
+                    yield delta
+        finally:
+            await res.aclose()
+
+
+# ---------------------------------------------------------------------
 # 10. PEMANGGILAN KE OLLAMA (lokal)
 # ---------------------------------------------------------------------
 def _pesan_untuk_ollama(messages: List[dict]) -> List[dict]:
@@ -1925,33 +2212,37 @@ def _penyedia_untuk_model(model: str) -> str:
     di_openrouter = model in OPENROUTER_MODELS
     di_groq = model in MODEL_GROQ_DIIZINKAN
     di_gemini = model in GEMINI_MODELS
+    di_nvidia = model in NVIDIA_MODELS
+
+    # Daftar penyedia penyelamat, dipakai berurutan bila penyedia yang
+    # dituju tidak punya kunci. Disusun sekali agar tidak berulang.
+    def penyelamat(kecuali: str) -> Optional[str]:
+        for nama, ada in (
+            ("groq", GROQ_API_KEY),
+            ("gemini", GEMINI_API_KEY),
+            ("openrouter", OPENROUTER_API_KEY),
+            ("nvidia", NVIDIA_API_KEY),
+        ):
+            if nama != kecuali and ada:
+                return nama
+        return None
 
     if di_openrouter:
         if OPENROUTER_API_KEY:
             return "openrouter"
-        # Kunci OpenRouter tidak ada: jangan biarkan chat mati. Groq
-        # dipakai sebagai penyelamat bila kuncinya tersedia.
-        if GROQ_API_KEY:
-            return "groq"
-        if GEMINI_API_KEY:
-            return "gemini"
-        return PROVIDER
+        return penyelamat("openrouter") or PROVIDER
+    if di_nvidia:
+        if NVIDIA_API_KEY:
+            return "nvidia"
+        return penyelamat("nvidia") or PROVIDER
     if di_gemini:
         if GEMINI_API_KEY:
             return "gemini"
-        if GROQ_API_KEY:
-            return "groq"
-        if OPENROUTER_API_KEY:
-            return "openrouter"
-        return PROVIDER
+        return penyelamat("gemini") or PROVIDER
     if di_groq:
         if GROQ_API_KEY:
             return "groq"
-        if GEMINI_API_KEY:
-            return "gemini"
-        if OPENROUTER_API_KEY:
-            return "openrouter"
-        return PROVIDER
+        return penyelamat("groq") or PROVIDER
     # Model tidak dikenali penyedianya: pakai penyedia aktif.
     return PROVIDER
 
@@ -1974,7 +2265,7 @@ def _urutan_penyedia(penyedia_utama: str) -> List[str]:
     Urutannya: penyedia pilihan pengguna lebih dulu (agar pilihannya
     dihormati), lalu penyedia lain sebagai penyelamat.
     """
-    semua = ["groq", "gemini", "openrouter"]
+    semua = ["groq", "gemini", "openrouter", "nvidia"]
 
     def tersedia(nama: str) -> bool:
         if nama == "groq":
@@ -1983,6 +2274,8 @@ def _urutan_penyedia(penyedia_utama: str) -> List[str]:
             return bool(GEMINI_API_KEY)
         if nama == "openrouter":
             return bool(OPENROUTER_API_KEY)
+        if nama == "nvidia":
+            return bool(NVIDIA_API_KEY)
         return False
 
     urutan = [penyedia_utama] if tersedia(penyedia_utama) else []
@@ -2090,6 +2383,8 @@ async def complete(messages: List[dict], opsi: dict) -> str:
                 return await gemini_complete(messages, opsi)
             if penyedia == "openrouter":
                 return await openrouter_complete(messages, opsi)
+            if penyedia == "nvidia":
+                return await nvidia_complete(messages, opsi)
             if penyedia == "groq":
                 return await groq_complete(messages, opsi)
             return await ollama_complete(messages, opsi)
@@ -2128,6 +2423,8 @@ async def stream(messages: List[dict], opsi: dict) -> AsyncIterator[str]:
                 aliran = gemini_stream(messages, opsi)
             elif penyedia == "openrouter":
                 aliran = openrouter_stream(messages, opsi)
+            elif penyedia == "nvidia":
+                aliran = nvidia_stream(messages, opsi)
             elif penyedia == "groq":
                 aliran = groq_stream(messages, opsi)
             else:

@@ -105,6 +105,25 @@ KUOTA_BERSAMA = {
     "rpd_penyedia_langka": 50,
     # Model Groq gratis yang kuotanya terpisah satu sama lain.
     "model_groq": 3,
+    # ------------------------------------------------------------------
+    # NVIDIA NIM: SENGAJA TIDAK DIHITUNG
+    # ------------------------------------------------------------------
+    # NVIDIA memberi "trial credits" (~1.000 panggilan) untuk akun
+    # Developer gratis — BUKAN kuota harian permanen seperti Groq.
+    # Kreditnya terbatas dan berlaku ±90 hari.
+    #
+    # Kalau kredit itu dihitung sebagai kapasitas harian, jatah per akun
+    # akan naik berdasarkan kuota yang bisa hilang tanpa peringatan, dan
+    # begitu kredit habis SEMUA pengunjung kehilangan jatah itu sekaligus.
+    # Karena itu NVIDIA dipakai sebagai:
+    #   - jalur cadangan keempat saat Groq/Gemini/OpenRouter habis, dan
+    #   - sumber model tambahan yang bisa dipilih pengguna,
+    # tetapi TIDAK dipakai sebagai dasar menaikkan jatah.
+    #
+    # Artinya: menambah NVIDIA memperbanyak PILIHAN MODEL, bukan
+    # menambah jatah harian. Menambah jatah butuh penyedia dengan kuota
+    # harian tetap (lihat catatan di RIWAYAT-SERVER.md).
+    "trial_nvidia_dihitung": 0,
     "rpd_per_model_groq": 1_000,
     "tpd_per_model_groq": 200_000,
     # Gemini (penyedia cadangan). Google TIDAK lagi mempublikasikan angka

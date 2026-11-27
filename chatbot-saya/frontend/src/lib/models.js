@@ -41,8 +41,7 @@
 export const MODEL_PILIHAN = [
   {
     // Nama asli model — ditampilkan di menu.
-    id: 'openai/gpt-oss-120b',
-    // Nama pendek untuk tombol di kotak pesan (ruangnya sempit).
+    id: 'openai/gpt-oss-120b',    // Nama pendek untuk tombol di kotak pesan (ruangnya sempit).
     singkat: 'GPT-OSS 120B',
     ket: 'Paling teliti, cocok untuk soal rumit',
     Icon: 'Sparkles',
@@ -143,6 +142,51 @@ export const MODEL_PILIHAN = [
     vision: true,
     browser: true,
   },
+  // --- NVIDIA NIM (penyedia keempat, gratis tanpa kartu kredit) ---
+  // Id di sini SENGAJA diawali "nvidia/" untuk dua model yang nama
+  // aslinya bentrok dengan penyedia lain (Groq juga punya
+  // "openai/gpt-oss-120b"). Backend menerjemahkannya kembali ke nama
+  // katalog NVIDIA saat memanggil API.
+  {
+    id: 'nvidia/gpt-oss-120b',
+    singkat: 'GPT-OSS 120B (NVIDIA)',
+    ket: 'Versi NVIDIA dari GPT-OSS 120B',
+    Icon: 'Sparkles',
+    vision: false,
+    browser: true,
+  },
+  {
+    id: 'zai-org/glm-5',
+    singkat: 'GLM-5',
+    ket: 'Kuat untuk penalaran panjang',
+    Icon: 'Brain',
+    vision: true,
+    browser: true,
+  },
+  {
+    id: 'moonshotai/kimi-2.5',
+    singkat: 'Kimi 2.5',
+    ket: 'Konteks sangat panjang',
+    Icon: 'Brain',
+    vision: false,
+    browser: true,
+  },
+  {
+    id: 'nvidia/deepseek-v4.1-flash',
+    singkat: 'DeepSeek V4.1 (NVIDIA)',
+    ket: 'Analisis cepat lewat NVIDIA',
+    Icon: 'Zap',
+    vision: false,
+    browser: true,
+  },
+  {
+    id: 'nvidia/nemotron-3.5-super-vl-120b-a12b',
+    singkat: 'Nemotron 3.5 VL (NVIDIA)',
+    ket: 'Bisa membaca gambar dan dokumen',
+    Icon: 'Sparkles',
+    vision: true,
+    browser: true,
+  },
 ]
 
 /** Pilihan bawaan (juga dipakai bila pilihan tersimpan tidak dikenal). */
@@ -153,7 +197,7 @@ export const MODEL_DEFAULT = 'openai/gpt-oss-120b'
  *
  * MENGAPA DIBATASI
  * ----------------
- * Daftar lengkap berisi 12 model. Di ponsel, menu itu jadi sangat panjang
+ * Daftar lengkap berisi 17 model. Di ponsel, menu itu jadi sangat panjang
  * dan mendorong kotak ketik keluar layar. Padahal sebagian besar pengguna
  * hanya perlu beberapa pilihan yang jelas.
  *
@@ -206,6 +250,17 @@ const NAMA_CADANGAN = {
     singkat: 'Gemini 3.1 Lite (OpenRouter)',
     ket: 'Ringan untuk chat cepat',
     Icon: 'Zap',
+  },
+  // NVIDIA NIM — dijaga tetap ada agar bila MODEL_PILIHAN di atas
+  // diubah, model dari server tidak muncul sebagai id mentah.
+  'nvidia/gpt-oss-120b': { singkat: 'GPT-OSS 120B (NVIDIA)', ket: 'Versi NVIDIA dari GPT-OSS 120B', Icon: 'Sparkles' },
+  'zai-org/glm-5': { singkat: 'GLM-5', ket: 'Kuat untuk penalaran panjang', Icon: 'Brain' },
+  'moonshotai/kimi-2.5': { singkat: 'Kimi 2.5', ket: 'Konteks sangat panjang', Icon: 'Brain' },
+  'nvidia/deepseek-v4.1-flash': { singkat: 'DeepSeek V4.1 (NVIDIA)', ket: 'Analisis cepat lewat NVIDIA', Icon: 'Zap' },
+  'nvidia/nemotron-3.5-super-vl-120b-a12b': {
+    singkat: 'Nemotron 3.5 VL (NVIDIA)',
+    ket: 'Bisa membaca gambar dan dokumen',
+    Icon: 'Sparkles',
   },
 }
 

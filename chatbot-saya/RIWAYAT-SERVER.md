@@ -386,7 +386,7 @@ Bila belum muncul, buka panel Usage dan lihat pesan di sidebar:
 | `frontend/src/components/Berpikir.jsx` | Animasi "berpikir" (titik + label tahap) |
 | `frontend/src/components/UsagePanel.jsx` | Panel pemakaian + jatah akun |
 
-## Failover antar penyedia (Gemini sebagai cadangan)
+## Failover antar penyedia (Gemini & NVIDIA sebagai cadangan)
 
 ### Masalahnya
 
@@ -399,19 +399,23 @@ melihat pesan error, padahal masalahnya hanya di satu jalur.
 ### Solusinya
 
 Google Gemini ditambahkan sebagai **jalur ketiga yang gratis** (tanpa kartu
-kredit, konteks 1 juta token). Permintaan otomatis dialihkan ke penyedia
-lain bila penyedia utama kehabisan kuota.
+kredit, konteks 1 juta token), lalu NVIDIA NIM sebagai **jalur keempat**.
+Permintaan otomatis dialihkan ke penyedia lain bila penyedia utama
+kehabisan kuota.
 
 Urutan percobaan:
 
 | Kondisi | Urutan |
 |---|---|
-| Pengguna memilih model Groq | Groq → Gemini → OpenRouter |
-| Pengguna memilih model Gemini | Gemini → Groq → OpenRouter |
-| Pengguna memilih model `:free` OpenRouter | OpenRouter → Groq → Gemini |
+| Pengguna memilih model Groq | Groq → Gemini → OpenRouter → NVIDIA |
+| Pengguna memilih model Gemini | Gemini → Groq → OpenRouter → NVIDIA |
+| Pengguna memilih model `:free` OpenRouter | OpenRouter → Groq → Gemini → NVIDIA |
+| Pengguna memilih model NVIDIA | NVIDIA → Groq → Gemini → OpenRouter |
 
 Penyedia pilihan pengguna **selalu dicoba lebih dulu**, jadi pilihannya
-tetap dihormati. Penyedia lain hanya menjadi penyelamat.
+tetap dihormati. Penyedia lain hanya menjadi penyelamat. Bila kunci sebuah
+penyedia kosong, penyedia itu otomatis keluar dari urutan — tidak ada
+permintaan yang dikirim ke tempat tanpa kunci.
 
 ### Kapan failover terjadi (dan kapan TIDAK)
 
@@ -499,6 +503,74 @@ Untuk memeriksa apakah cadangan sudah aktif, buka `/capabilities` dan
 lihat field `cadangan_aktif` (`true` = siap dipakai). Field ini **tidak**
 ditampilkan di UI — nama penyedia tidak pernah muncul ke pengguna.
 
+## Penyedia keempat: NVIDIA NIM
+
+Cukup pasang **satu** Environment Variable tambahan di Vercel:
+
+```
+NVIDIA_API_KEY = (ambil gratis di https://build.nvidia.com)
+```
+
+Butuh akun NVIDIA Developer Program (gratis, tanpa kartu kredit). Endpoint
+`https://integrate.api.nvidia.com/v1` kompatibel OpenAI, jadi format pesan,
+streaming, dan gambar sama persis dengan penyedia lain — **tidak ada
+kontrak API yang berubah**. Bila variabel ini kosong, seluruh bagian
+NVIDIA dilewati dan model NVIDIA otomatis dialihkan ke penyedia lain
+(pengguna melihat chat tetap berjalan, bukan error).
+
+### Model tambahan yang dibuka
+
+| Id yang dikirim ke browser | Model katalog NVIDIA |
+|---|---|
+| `nvidia/gpt-oss-120b` | `openai/gpt-oss-120b` |
+| `nvidia/deepseek-v4.1-flash` | `deepseek-ai/deepseek-v4.1-flash` |
+| `zai-org/glm-5` | `zai-org/glm-5` |
+| `moonshotai/kimi-2.5` | `moonshotai/kimi-2.5` |
+| `nvidia/nemotron-3.5-super-vl-120b-a12b` | sama |
+
+### Mengapa dua id diberi awalan `nvidia/`
+
+NVIDIA juga punya model bernama **persis** `openai/gpt-oss-120b` — sama
+dengan id Groq. Kalau dimasukkan apa adanya, router akan menganggap model
+itu milik NVIDIA, padahal selama ini dilayani Groq: pengguna GPT-OSS 120B
+diam-diam pindah penyedia, dan kuota Groq tidak terpakai sementara trial
+credit NVIDIA ikut terbakar. Karena itu id-nya diberi awalan `nvidia/` di
+sisi kita, lalu diterjemahkan kembali ke nama katalog saat memanggil API
+(`_NVIDIA_NAMA_ASLI` / `_nvidia_nama_asli`). `uji_unik_model.py` mengunci
+aturan ini: setiap id harus menunjuk tepat satu penyedia.
+
+### Jujur: NVIDIA TIDAK menaikkan jatah harian
+
+Ini penting agar tidak ada harapan yang keliru.
+
+| Penyedia | Bentuk gratisnya | Menambah jatah? |
+|---|---|---|
+| Groq | kuota **harian tetap** per model (1.000 req, 200.000 token) | ✅ ya |
+| Gemini | kuota harian per project Google | ✅ ya |
+| OpenRouter `:free` | 50 request/hari | ✅ ya (kecil) |
+| **NVIDIA NIM** | **trial credit** ±1.000 panggilan, berlaku ±90 hari | ❌ **tidak** |
+
+Kredit NVIDIA terbatas dan bisa habis. Kalau dihitung sebagai kapasitas
+harian, jatah per akun akan naik berdasarkan kuota yang bisa lenyap tanpa
+peringatan — dan begitu kredit habis, semua pengunjung kehilangan jatah itu
+sekaligus. Karena itu di `usage.py` ada `trial_nvidia_dihitung: 0` dan
+jatah tetap **48**. NVIDIA dipakai sebagai **pilihan model tambahan** dan
+**jalur cadangan keempat**, bukan sebagai dasar menaikkan jatah.
+
+### Penyedia yang TIDAK dipakai (dan alasannya)
+
+| Penyedia | Alasan tidak dipakai |
+|---|---|
+| Cerebras | tanpa free tier; hanya $5 credit 30 hari |
+| Mistral | dokumentasi resmi: Free mode **tidak** termasuk akses API |
+| GitHub Models | layanan ditutup 30 Juli 2026 |
+| Cloudflare Workers AI | 10.000 Neuron/hari terlalu kecil |
+| SambaNova | 20 request/hari per model, perlu payment method |
+
+Cara menaikkan jatah yang **benar-benar** bekerja: menambah project Google
+Gemini (kuota dihitung per project, bukan per key), menambah model Groq
+yang kuotanya terpisah, atau berlangganan Groq berbayar.
+
 ## Menjalankan uji
 
 ```powershell
@@ -508,8 +580,11 @@ python uji_server_riwayat.py      # 55 pemeriksaan penyimpanan riwayat
 python uji_jatah.py               # 78 pemeriksaan jatah, reset & kerahasiaan
 python uji_routing_penyedia.py    # 14 pemeriksaan routing model -> penyedia
 python uji_gemini.py              # 40 pemeriksaan Gemini & failover antar penyedia
+python uji_nvidia.py              # 47 pemeriksaan penyedia keempat (NVIDIA NIM)
+python uji_unik_model.py          # 6 pemeriksaan id model tidak bentrok antar penyedia
 python uji_terpotong.py           # 29 pemeriksaan deteksi & sambung jawaban terpotong
 python uji_model_gemini.py        # cek model Gemini mana yang hidup untuk key Anda
+python uji_model_baru.py          # cari model Gemini TAMBAHAN yang hidup (jujur, tanpa pengalihan)
 python server_uji.py              # jalankan server uji di port 8000
 python uji_api.py                 # 25 pemeriksaan endpoint lama
 python uji_jatah_api.py           # 44 pemeriksaan jatah/reset via HTTP
