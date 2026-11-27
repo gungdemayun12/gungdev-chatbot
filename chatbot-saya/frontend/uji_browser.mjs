@@ -173,6 +173,54 @@ async function jalankan() {
     )
   }
 
+  /* Tunggu sampai server SUNGGUH-SUNGGUH kosong, lalu hapus sekali lagi.
+     Mengapa perlu: saat sebuah konteks browser ditutup, hook
+     `useSessions` mengirim sisa perubahan lewat `pagehide`. Kalau uji
+     lain (mis. uji_login_bertahan) baru saja menutup halamannya, kiriman
+     itu bisa MENDARAT SESUDAH pembersihan di atas — sehingga perangkat 2
+     melihat sisa data dan uji gagal karena sebab yang salah.
+
+     Jadi: beri jeda agar kiriman `pagehide` selesai, lalu bersihkan dan
+     PASTIKAN kosong. Bila masih ada sisa, ulangi (maks. 5 putaran). */
+  {
+    const ctx = await browser.newContext()
+    const page = await ctx.newPage()
+    await page.goto(URL_APP, { waitUntil: 'domcontentloaded' })
+    const akhir = await page.evaluate(
+      async ({ api, toks }) => {
+        const mod = await import('/src/lib/riwayat.js')
+        const hitung = async (t) => {
+          mod.setTokenRiwayat(t)
+          const res = await fetch(api + '/api/sessions', {
+            headers: { Authorization: `Bearer ${t}` },
+          })
+          return ((await res.json()).sesi || []).length
+        }
+        const tunggu = (ms) => new Promise((r) => setTimeout(r, ms))
+        let hasil = []
+        for (let putaran = 0; putaran < 5; putaran += 1) {
+          await tunggu(1200) // biarkan kiriman pagehide mendarat
+          hasil = []
+          for (const t of toks) {
+            mod.setTokenRiwayat(t)
+            await mod.hapusRiwayatServer(api, null)
+            hasil.push(await hitung(t))
+          }
+          if (hasil.every((n) => n === 0)) break
+        }
+        mod.lupakanToken()
+        return hasil
+      },
+      { api: API, toks: [TOKEN_A, TOKEN_B] },
+    )
+    await ctx.close()
+    cek(
+      'Server tetap kosong setelah menunggu kiriman pagehide',
+      akhir.every((n) => n === 0),
+      `sesi tersisa = ${JSON.stringify(akhir)}`,
+    )
+  }
+
   /* Bersihkan JATAH kedua akun. Uji sebelumnya (mis. uji jatah) bisa
      meninggalkan akun di 100/100 sehingga chat ditolak — itu perilaku
      yang benar, tetapi membuat uji riwayat ini gagal karena sebab yang
