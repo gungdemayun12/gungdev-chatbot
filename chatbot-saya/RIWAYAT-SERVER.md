@@ -124,17 +124,21 @@ seperti peringatan. Panduannya:
 ### Animasi "berpikir" saat AI bekerja
 
 Jawaban panjang atau riset web bisa memakan puluhan detik. Selama itu UI
-menampilkan indikator kecil di area chat dan di bawah kotak pesan:
+menampilkan indikator berbentuk kotak kecil di area chat, plus versi
+ringkas di bawah kotak pesan:
 
 ```
-• • •  Berpikir  ·  Menimbang jawaban terbaik...        6 dtk
+┌─────────────────────────────────────────────┐
+│ • • •   Menelusuri...                10 dtk │
+│         Mencari di web · Masih bekerja…     │
+└─────────────────────────────────────────────┘
 ```
 
 - **Tiga titik** berdenyut bergantian (CSS `berpikirDenyut`), labelnya
   berkilau lembut — menandakan aplikasi masih hidup, bukan macet.
 - **Label jujur mengikuti tahap nyata**: `Berpikir` → `Menelusuri`
   (saat riset web) → `Menyusun` (saat teks mulai mengalir).
-- **Penghitung detik** muncul setelah 5 detik: bukti proses berjalan.
+- **Penghitung detik** muncul setelah 3 detik: bukti proses berjalan.
   Tidak ada progress bar yang mengarang persentase.
 - **Kalimat penenang** muncul bertahap saat menunggu lama (8, 20, 40, 75
   detik) — mis. "Masih bekerja, terima kasih sudah menunggu."
@@ -145,6 +149,21 @@ menampilkan indikator kecil di area chat dan di bawah kotak pesan:
 Tahapnya diatur dari `generationPhase` di `App.jsx` (`thinking`,
 `research`, `writing`), jadi label tidak pernah menampilkan proses yang
 tidak benar-benar terjadi.
+
+**Kapan indikator tampil?** Selama balon asisten terakhir belum berisi
+teks untuk permintaan yang sedang berjalan. Ada dua bug yang pernah terjadi
+di sini dan keduanya sudah ditutup oleh uji regresi:
+
+1. Kondisi memakai `messages.some((m) => m.id === streamingId)`, padahal
+   `streamingId` bisa masih menyimpan ID jawaban lama → indikator tidak
+   pernah muncul.
+2. Saat mengirim pesan kedua, balon asisten terakhir adalah jawaban
+   pertama yang sudah berisi → dianggap "sudah selesai" sehingga layar
+   terlihat kosong. Perbaikannya: bandingkan **urutan** — balon asisten
+   terakhir harus berada setelah pesan pengguna terakhir.
+3. Percakapan masih kosong (pengguna pertama kali) juga menampilkan
+   indikator, karena pesan pengguna belum ikut dirender pada detik-detik
+   awal.
 
 ### Konfirmasi sebelum keluar
 
@@ -330,7 +349,7 @@ cd chatbot-saya/frontend
 node uji_browser.mjs              # 18 pemeriksaan riwayat lintas "perangkat"
 node uji_jatah_browser.mjs        # 23 pemeriksaan jatah/hitung mundur di UI
 node uji_pengaturan_keluar.mjs    # 29 pemeriksaan konfirmasi keluar & pengaturan
-node uji_berpikir.mjs             # 17 pemeriksaan animasi "berpikir"
+node uji_berpikir.mjs             # 20 pemeriksaan animasi "berpikir"
 node uji_alur_lengkap.mjs         # 26 pemeriksaan alur ujung-ke-ujung
 ```
 

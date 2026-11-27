@@ -106,6 +106,29 @@ export default function ChatArea({
   const title = session?.title || 'Percakapan baru'
   const isEmpty = messages.length === 0
 
+  /* Apakah animasi "berpikir" perlu tampil di area chat?
+
+     Patokannya: balon asisten TERAKHIR belum berisi teks untuk permintaan
+     yang sedang berjalan. Dua hal penting:
+
+     1. `streamingId` bisa masih menyimpan ID jawaban sebelumnya, jadi
+        tidak bisa dipakai sebagai penanda "ini jawaban yang sekarang".
+        Yang dipakai: apakah balon asisten terakhir berada SETELAH pesan
+        pengguna terakhir. Urutan itulah yang menentukan.
+     2. Saat riset web, server bisa lama tanpa mengirim satu karakter pun.
+        Selama balon terakhir kosong, animasi harus tetap tampil — kalau
+        tidak, layar terlihat diam seperti aplikasi mati. */
+  const indeksUserTerakhir = messages.map((m) => m.role).lastIndexOf('user')
+  const balonTerakhir = [...messages].reverse().find((m) => m.role === 'assistant')
+  const indeksBalonTerakhir = balonTerakhir ? messages.indexOf(balonTerakhir) : -1
+  const balonMilikPermintaanIni = indeksBalonTerakhir > indeksUserTerakhir
+  const isiBalonTerakhir = balonMilikPermintaanIni
+    ? balonTerakhir.id === streamingId && streamingText
+      ? streamingText
+      : balonTerakhir.content || ''
+    : ''
+  const perluIndikatorMenunggu = !isiBalonTerakhir.trim()
+
   /* Deteksi posisi scroll: tampilkan tombol "ke bawah" jika pengguna
      menggulir jauh dari dasar, dan matikan auto-scroll saat itu. */
   const handleScroll = useCallback(() => {
@@ -250,7 +273,31 @@ export default function ChatArea({
       >
         <div className={`chat__inner ${isEmpty ? 'chat__inner--empty' : ''}`}>
           {isEmpty ? (
-            <EmptyState nickname={nickname} onPick={onPickSuggestion} />
+            <>
+              <EmptyState nickname={nickname} onPick={onPickSuggestion} />
+              {/* Kasus pertama kali memakai aplikasi: pesan pengguna belum
+                  ikut tampil di daftar, jadi tanpa ini layar terlihat
+                  kosong total selama AI bekerja. */}
+              {loading && (
+                <div className="chat__menunggu chat__menunggu--tengah" data-uji="berpikir-wrapper">
+                  <div className="msg__avatar" aria-hidden="true">
+                    G
+                  </div>
+                  <div className="msg__body">
+                    <Berpikir
+                      aktif={loading}
+                      fase={
+                        generationPhase === 'research'
+                          ? 'research'
+                          : generationPhase === 'writing'
+                            ? 'menulis'
+                            : 'berpikir'
+                      }
+                    />
+                  </div>
+                </div>
+              )}
+            </>
           ) : (
             <div className="chat__messages">
               {messages.map((m, index) => {
@@ -281,10 +328,17 @@ export default function ChatArea({
               })}
 
               {/* Animasi berpikir di AREA CHAT selama balon jawaban belum
-                  dibuat (server belum mengirim teks apa pun). Tanpa ini,
-                  pengguna hanya melihat layar diam dan tidak tahu apakah
-                  aplikasi masih bekerja — terutama saat riset web. */}
-              {loading && !messages.some((m) => m.id === streamingId) && (
+                  berisi teks apa pun. Tanpa ini, pengguna hanya melihat
+                  layar diam dan tidak tahu apakah aplikasi masih bekerja —
+                  terutama saat riset web.
+
+                  CATATAN: pengecekannya TIDAK boleh memakai
+                  `m.id === streamingId`, karena `streamingId` bisa masih
+                  menyimpan ID jawaban lama sehingga kondisinya salah dan
+                  animasi hilang sama sekali. Yang benar: cari tahu apakah
+                  ada balon asisten terakhir yang masih kosong. Bila tidak
+                  ada (server belum mengirim apa pun), tampilkan animasi. */}
+              {loading && perluIndikatorMenunggu && (
                 <div className="chat__menunggu" data-uji="berpikir-wrapper">
                   <div className="msg__avatar" aria-hidden="true">
                     G

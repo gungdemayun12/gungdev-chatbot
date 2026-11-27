@@ -1592,29 +1592,41 @@
    hiasan, melainkan kepastian: "aplikasi masih jalan".
    ===================================================================== */
 
+/* Kotak indikator: latar tipis + sudut membulat agar jelas terlihat
+   sebagai "status yang sedang berjalan", bukan teks biasa yang samar.
+   Tetap tenang — hanya satu tingkat di atas latar, bukan warna mencolok. */
 .berpikir {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
-  padding: 6px 0;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: var(--radius-md, 12px);
+  background: var(--bg-elevated, var(--surface-2, rgba(255, 255, 255, 0.04)));
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
   font-size: 0.8125rem;
   color: var(--text-tertiary);
+  max-width: 100%;
+}
+
+/* Saat riset web, beri aksen tipis supaya bedanya terasa. */
+.berpikir.is-research {
+  border-color: var(--accent-soft, rgba(255, 255, 255, 0.16));
 }
 
 .berpikir__titik {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
   flex: none;
 }
 
-/* Tiga titik kecil yang berdenyut bergantian. Warna aksen dipakai
-   hemat supaya tetap tenang, bukan mencolok. */
+/* Tiga titik yang berdenyut bergantian. Ukurannya cukup besar agar
+   terlihat dari kejauhan — inilah tanda utama "masih bekerja". */
 .berpikir__titik i {
   display: block;
-  width: 4px;
-  height: 4px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: var(--accent);
   opacity: 0.35;
@@ -1640,20 +1652,26 @@
 
 .berpikir__teks {
   display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
   min-width: 0;
 }
 
+/* Label tahap — sengaja dibuat lebih besar dan terang supaya langsung
+   terlihat sebagai tanda "ada yang sedang dikerjakan", bukan teks samar
+   yang mudah terlewat. */
 .berpikir__label {
-  font-weight: 500;
-  color: var(--text-secondary);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
   /* Efek kilau lembut: menandakan teks ini "hidup". */
   background: linear-gradient(
     90deg,
     var(--text-secondary) 0%,
-    var(--text) 50%,
-    var(--text-secondary) 100%
+    var(--text) 45%,
+    var(--text-secondary) 90%
   );
   background-size: 200% 100%;
   -webkit-background-clip: text;
@@ -1665,6 +1683,7 @@
 .berpikir__ket {
   font-size: 0.75rem;
   color: var(--text-tertiary);
+  line-height: 1.35;
 }
 
 .berpikir__elipsis {
@@ -1690,10 +1709,34 @@
   opacity: 0.8;
 }
 
-/* Versi ringkas untuk hint di bawah kotak pesan. */
+/* Versi ringkas untuk hint di bawah kotak pesan: tanpa kotak dan tanpa
+   keterangan, supaya tidak ramai saat sudah ada indikator di area chat. */
 .berpikir--ringkas {
   padding: 0;
+  gap: 6px;
   font-size: var(--fs-xs);
+  background: none;
+  border: none;
+  border-radius: 0;
+}
+
+.berpikir--ringkas .berpikir__label {
+  font-size: var(--fs-xs);
+  font-weight: 500;
+}
+
+.berpikir--ringkas .berpikir__titik i {
+  width: 5px;
+  height: 5px;
+}
+
+/* Penempatan indikator saat percakapan masih kosong (EmptyState): dibuat
+   rata tengah agar terlihat sebagai lanjutan dari sapaan. */
+.chat__menunggu--tengah {
+  justify-content: center;
+  max-width: 620px;
+  margin: 0 auto;
+  padding: 0 var(--sp-4);
 }
 
 @keyframes berpikirDenyut {

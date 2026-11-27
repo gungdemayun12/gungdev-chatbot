@@ -88,28 +88,32 @@ export default function Berpikir({ fase = 'menunggu', aktif = true, ringkas = fa
         <i />
       </span>
 
+      {/* Bagian teks: label tahap (mengikuti gaya contoh desain) lalu
+          keterangan kecil di bawahnya. */}
       <span className="berpikir__teks">
-        <span className="berpikir__label">{t.label}</span>
+        <span className="berpikir__label">
+          {t.label}
+          <span className="berpikir__elipsis" aria-hidden="true">
+            ...
+          </span>
+        </span>
         {!ringkas && (
           <span className="berpikir__ket">
             {t.ket}
-            {/* Titik-titik yang berdenyut memberi kesan "sedang berjalan". */}
-            <span className="berpikir__elipsis" aria-hidden="true">
-              ...
-            </span>
+            {/* Kalimat penenang menyusul di baris yang sama supaya
+                pengguna punya penanda tambahan saat menunggu lama. */}
+            {tenang && (
+              <span className="berpikir__tenang" data-uji="berpikir-tenang">
+                {' '}
+                · {tenang.teks}
+              </span>
+            )}
           </span>
         )}
       </span>
 
-      {/* Setelah beberapa detik, tambahkan kalimat penenang. */}
-      {!ringkas && tenang && (
-        <span className="berpikir__tenang" data-uji="berpikir-tenang">
-          {tenang.teks}
-        </span>
-      )}
-
       {/* Waktu berjalan: bukti nyata bahwa proses masih hidup. */}
-      {!ringkas && detik >= 5 && (
+      {!ringkas && detik >= 3 && (
         <span className="berpikir__detik">{detik} dtk</span>
       )}
     </div>

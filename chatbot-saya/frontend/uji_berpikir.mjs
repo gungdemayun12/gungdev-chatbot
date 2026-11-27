@@ -183,6 +183,50 @@ async function jalankan() {
   const hintTersisa = await page.$('.chat__streaming-hint')
   cek('Hint bawah hilang setelah selesai', !hintTersisa)
 
+  /* ============ 3b. PESAN KEDUA (REGRESI) ============
+     Bug nyata: setelah jawaban pertama selesai, mengirim pesan lagi TIDAK
+     memunculkan animasi di area chat — layar terlihat kosong/diam.
+     Penyebabnya `streamingId` masih menyimpan ID jawaban lama sehingga
+     dianggap "sudah ada jawaban". Uji ini mengunci perilakunya. */
+  console.log('\n=== 3b. ANIMASI MUNCUL LAGI SAAT PESAN KEDUA ===')
+  await aturJeda(8)
+  await kirim(page, 'Pertanyaan kedua yang juga butuh waktu')
+  await page.waitForTimeout(1500)
+
+  const animasiKedua = await page.$('[data-uji="berpikir"]:not(.berpikir--ringkas)')
+  cek('Animasi tampil lagi saat pesan kedua dikirim', Boolean(animasiKedua))
+  if (animasiKedua) {
+    const teksKedua = (await animasiKedua.textContent()) || ''
+    cek(
+      'Label tahap tetap terbaca di pesan kedua',
+      /Berpikir|Menelusuri|Menyusun/.test(teksKedua),
+      teksKedua.slice(0, 60).replace(/\n/g, ' | '),
+    )
+  }
+
+  // Tunggu sampai balon asisten TERAKHIR berisi jawaban DAN animasi hilang
+  // dari DOM (bukan sekadar "sudah ada teks"), agar tidak balapan waktu.
+  await page
+    .waitForFunction(
+      () => {
+        const balon = Array.from(document.querySelectorAll('.msg--assistant'))
+        const last = balon[balon.length - 1]
+        const adaIsi = Boolean(last && last.querySelector('.msg__content'))
+        const masihAnimasi = Boolean(
+          document.querySelector('[data-uji="berpikir"]:not(.berpikir--ringkas)'),
+        )
+        return adaIsi && !masihAnimasi
+      },
+      { timeout: 25000 },
+    )
+    .catch(() => {})
+  const setelahKedua = await page.$('[data-uji="berpikir"]:not(.berpikir--ringkas)')
+  cek('Animasi hilang lagi setelah jawaban kedua muncul', !setelahKedua)
+
+  // Tombol riset baru muncul setelah streaming selesai; tunggu sebentar.
+  await page.waitForSelector('.composer__tool--research', { timeout: 10000 }).catch(() => {})
+  await aturJeda(6)
+
   /* ============ 4. RISET WEB: LABEL BERUBAH ============ */
   console.log('\n=== 4. LABEL RISET WEB ===')
   await aturJeda(6)
