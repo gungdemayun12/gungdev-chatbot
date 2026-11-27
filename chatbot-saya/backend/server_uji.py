@@ -173,6 +173,48 @@ class ClientTiruan:
         if "tokeninfo" in url:
             data = TOKEN_VALID.get((params or {}).get("id_token", ""))
             return ResTiruan(200, data) if data else ResTiruan(400, {"error": "invalid_token"})
+        # Wikipedia (riset web tiruan) -> hasil palsu tapi berbentuk sama.
+        # Judul sengaja memuat kata kunci query, karena riset.py menyaring
+        # hasil yang tidak relevan (perilaku nyata yang harus diuji apa
+        # adanya, bukan dilewati).
+        if "wikipedia.org" in url:
+            kueri = (params or {}).get("srsearch") or "topik"
+            judul = str(kueri)[:60]
+            if "rest_v1/page/summary" in url:
+                return ResTiruan(
+                    200,
+                    {
+                        "title": judul,
+                        "extract": (
+                            f"Ini ringkasan artikel uji tentang {judul} dari "
+                            "ensiklopedia yang dipakai untuk memastikan riset web "
+                            "benar-benar menyertakan sumber."
+                        ),
+                    },
+                )
+            return ResTiruan(
+                200,
+                {
+                    "query": {
+                        "search": [
+                            {
+                                "title": judul,
+                                "snippet": f"Ringkasan uji tentang <b>{judul}</b>.",
+                            },
+                            {
+                                "title": f"{judul} lanjutan",
+                                "snippet": f"Keterangan tambahan tentang {judul}.",
+                            },
+                        ]
+                    }
+                },
+            )
+        if "bing.com" in url:
+            kelas = type("R", (), {})()
+            kelas.status_code = 200
+            kelas.text = "<html><body></body></html>"
+            kelas.headers = {}
+            return kelas
         return ResTiruan(404, {})
 
     def build_request(self, *a, **k):

@@ -56,6 +56,7 @@ import lampiran             # ekstraksi teks file & validasi gambar
 import penyimpanan          # riwayat percakapan di server (Upstash Redis)
 import identitas            # verifikasi ID token Google di server
 import usage                # pencatat & penyedia data kuota (usage)
+import riset                # riset web nyata untuk SEMUA model
 
 # python-dotenv hanya dipakai saat pengembangan lokal.
 # Di Vercel/Render variabel masuk lewat environment, bukan file .env.
@@ -104,11 +105,29 @@ OPENROUTER_BASE_URL = _env(
 ).rstrip("/")
 OPENROUTER_SITE_URL = _env("OPENROUTER_SITE_URL", "https://gungdev-chatbot-ai.vercel.app")
 OPENROUTER_APP_NAME = _env("OPENROUTER_APP_NAME", "GungDev")
-OPENROUTER_MODEL_DEFAULT = _env("OPENROUTER_MODEL", "google/gemini-3.1-flash-lite")
+OPENROUTER_MODEL_DEFAULT = _env("OPENROUTER_MODEL", "openai/gpt-oss-20b")
+# Daftar model OpenRouter yang boleh dipilih. Semua di sini mendukung
+# tool calling sehingga bisa riset (riset tetap dikerjakan di server).
 OPENROUTER_MODELS = [
     "google/gemini-2.5-flash-tts",
     "google/gemini-3.1-flash-lite",
     "deepseek/deepseek-v4.1-flash",
+    # Model :free — bisa dipakai tanpa kredit OpenRouter.
+    # Dipakai sebagai cadangan bila model berbayar menolak karena kredit
+    # habis, sehingga situs tetap bisa dipakai.
+    "google/gemma-4-31b-it:free",
+    "nvidia/nemotron-3.5-super-vl:free",
+    "inclusionai/ling-3.2-flash:free",
+]
+
+# Model OpenRouter GRATIS yang dipakai otomatis bila model berbayar
+# menolak karena kredit/tagihan (HTTP 402). Tujuannya: pengguna tetap
+# mendapat jawaban, bukan pesan error.
+OPENROUTER_CADANGAN = [
+    "google/gemma-4-31b-it:free",
+    "nvidia/nemotron-3.5-super-vl:free",
+    "inclusionai/ling-3.2-flash:free",
+    "nvidia/nemotron-3.5-lightning:free",
 ]
 
 # Model default.
@@ -194,6 +213,12 @@ MODEL_VISION = {
     "qwen/qwen3.8-27b",
     "google/gemini-2.5-flash-tts",
     "google/gemini-3.1-flash-lite",
+    # Model OpenRouter :free yang multimodal (bisa membaca gambar).
+    "google/gemma-4-31b-it:free",
+    "google/gemma-4-26b-a4b-it:free",
+    "nvidia/nemotron-3.5-super-vl:free",
+    "inclusionai/ling-3.2-flash:free",
+    "particle-ai/particle-1:free",
 }
 
 # Model yang dipakai bila pesan berisi gambar tetapi pilihan pengguna
@@ -273,15 +298,16 @@ def model_untuk_permintaan(
     dipilih = model_dari_pilihan(pilihan)
     model = dipilih
 
-    if penelitian and model not in MODEL_BROWSER:
-        logger.info(
-            "Riset web diminta dengan model %s yang tidak mendukung "
-            "browser_search. Beralih ke %s.",
-            model,
-            MODEL_BROWSER_DEFAULT,
-        )
-        model = MODEL_BROWSER_DEFAULT
-    elif ada_gambar and model not in MODEL_VISION:
+    # CATATAN PENTING (diperbarui):
+    #   Riset TIDAK lagi memaksa ganti model. Riset dikerjakan di server
+    #   (lihat riset.py) sehingga SEMUA model bisa riset dengan kualitas
+    #   yang sama. Pengguna tidak perlu berpindah model hanya untuk
+    #   mencari informasi di web.
+    #
+    #   Model tetap hanya diganti bila ada GAMBAR dan modelnya tidak
+    #   multimodal — karena itu keterbatasan nyata penyedia (mengirim
+    #   gambar ke model teks akan ditolak dengan error 400).
+    if ada_gambar and model not in MODEL_VISION:
         logger.info(
             "Gambar dilampirkan tetapi model %s bukan model vision. "
             "Beralih ke %s.",
@@ -962,36 +988,178 @@ def _openrouter_payload(model: str, messages: List[dict], opsi: dict, streaming:
     return payload
 
 
-async def openrouter_complete(messages: List[dict], opsi: dict) -> str:
-    model = opsi.get("model") or OPENROUTER_MODEL_DEFAULT
-    async with httpx.AsyncClient(timeout=TIMEOUT_GROQ) as http:
-        res = await http.post(
-            f"{OPENROUTER_BASE_URL}/chat/completions",
-            headers=_openrouter_headers(),
-            json=_openrouter_payload(model, messages, opsi, False),
+def _kandidat_openrouter(model: str, ada_gambar: bool) -> List[str]:
+    """
+    Daftar model yang dicoba berurutan untuk OpenRouter.
+
+    Mengapa perlu cadangan: model berbayar (Gemini/DeepSeek) akan
+    ditolak dengan HTTP 402 bila kredit key habis. Tanpa cadangan,
+    pengguna hanya melihat error dan Activity OpenRouter tetap nol
+    karena tidak ada permintaan yang berhasil. Dengan cadangan ini,
+    permintaan otomatis dialihkan ke model :free sehingga chat tetap
+    jalan tanpa biaya.
+
+    Bila permintaan memuat GAMBAR, hanya model vision yang dicoba —
+    mengirim gambar ke model teks hanya menghasilkan error 400.
+    """
+    utama = model or OPENROUTER_MODEL_DEFAULT
+    kandidat = [utama]
+    for m in OPENROUTER_CADANGAN:
+        if m == utama:
+            continue
+        if ada_gambar and m not in MODEL_VISION:
+            continue
+        kandidat.append(m)
+    return kandidat
+
+
+def _pesan_openrouter_error(status: int, teks: str, model: str) -> HTTPException:
+    """Menerjemahkan error OpenRouter menjadi pesan yang berguna."""
+    rendah = (teks or "").lower()
+    if status == 402 or "insufficient" in rendah or "credit" in rendah:
+        return HTTPException(
+            status_code=503,
+            detail=(
+                "Kredit layanan AI sedang tidak tersedia. Coba lagi nanti, "
+                "atau pilih model lain dari menu model."
+            ),
         )
-        if res.status_code >= 400:
-            logger.error("OpenRouter menolak permintaan: %s %s", res.status_code, res.text[:200])
-            raise HTTPException(status_code=502, detail="Layanan AI GungDev menolak permintaan. Silakan coba lagi.")
-        data = res.json()
-        pakai = data.get("usage") or {}
-        usage.simpan_token_asli(pakai.get("total_tokens") or 0, pakai.get("prompt_tokens") or 0, pakai.get("completion_tokens") or 0)
-        isi = _teks_dari_pesan((data.get("choices") or [{}])[0].get("message") or {})
-        if not isi:
-            raise HTTPException(status_code=502, detail="Layanan AI mengembalikan jawaban kosong. Silakan coba lagi.")
-        return isi
+    if status == 401:
+        return HTTPException(
+            status_code=502,
+            detail="Layanan AI menolak kunci akses. Hubungi pemilik situs.",
+        )
+    if status == 404:
+        return HTTPException(
+            status_code=502,
+            detail=f"Model '{model}' tidak tersedia. Pilih model lain dari menu.",
+        )
+    if status == 429:
+        return HTTPException(
+            status_code=429,
+            detail="Terlalu banyak permintaan. Tunggu sebentar lalu coba lagi.",
+        )
+    return HTTPException(
+        status_code=502,
+        detail="Layanan AI sedang sibuk. Silakan coba lagi sebentar lagi.",
+    )
+
+
+async def openrouter_complete(messages: List[dict], opsi: dict) -> str:
+    """
+    Meminta jawaban lengkap ke OpenRouter, dengan cadangan model gratis.
+
+    Bila model utama menolak karena kredit habis (402) atau model tidak
+    ada (404), permintaan dicoba dengan model :free berikutnya. Ini yang
+    membuat GungDev tetap bisa dipakai tanpa biaya.
+    """
+    utama = opsi.get("model") or OPENROUTER_MODEL_DEFAULT
+    kandidat = _kandidat_openrouter(utama, bool(opsi.get("ada_gambar")))
+    error_terakhir: Optional[HTTPException] = None
+
+    async with httpx.AsyncClient(timeout=TIMEOUT_GROQ) as http:
+        for model in kandidat:
+            res = await http.post(
+                f"{OPENROUTER_BASE_URL}/chat/completions",
+                headers=_openrouter_headers(),
+                json=_openrouter_payload(model, messages, opsi, False),
+            )
+
+            if res.status_code >= 400:
+                sebab = res.text[:300]
+                logger.warning(
+                    "OpenRouter menolak %s: HTTP %s %s", model, res.status_code, sebab
+                )
+                error_terakhir = _pesan_openrouter_error(res.status_code, sebab, model)
+                # Hanya masalah model/kredit yang layak dicoba ulang.
+                if res.status_code in (402, 404, 429) and model != kandidat[-1]:
+                    continue
+                raise error_terakhir
+
+            data = res.json()
+            pakai = data.get("usage") or {}
+            usage.simpan_token_asli(
+                pakai.get("total_tokens") or 0,
+                pakai.get("prompt_tokens") or 0,
+                pakai.get("completion_tokens") or 0,
+            )
+            isi = _teks_dari_pesan((data.get("choices") or [{}])[0].get("message") or {})
+            if not isi:
+                logger.warning("OpenRouter %s memberi jawaban kosong.", model)
+                error_terakhir = HTTPException(
+                    status_code=502,
+                    detail="Layanan AI mengembalikan jawaban kosong. Silakan coba lagi.",
+                )
+                if model != kandidat[-1]:
+                    continue
+                raise error_terakhir
+
+            if model != utama:
+                logger.info("OpenRouter memakai model cadangan %s (bukan %s).", model, utama)
+            return isi
+
+    raise error_terakhir or HTTPException(
+        status_code=502, detail="Layanan AI sedang sibuk. Silakan coba lagi."
+    )
 
 
 async def openrouter_stream(messages: List[dict], opsi: dict) -> AsyncIterator[str]:
-    model = opsi.get("model") or OPENROUTER_MODEL_DEFAULT
+    """
+    Streaming dari OpenRouter, dengan cadangan model gratis.
+
+    Penentuan model dilakukan SEBELUM byte pertama dikirim, sehingga
+    bila model utama ditolak (kredit habis / tidak ada) kita masih bisa
+    mengalihkan ke model :free tanpa merusak stream yang sudah berjalan.
+    """
+    utama = opsi.get("model") or OPENROUTER_MODEL_DEFAULT
+    kandidat = _kandidat_openrouter(utama, bool(opsi.get("ada_gambar")))
+    error_terakhir: Optional[HTTPException] = None
+
     async with httpx.AsyncClient(timeout=TIMEOUT_GROQ) as http:
-        req = http.build_request("POST", f"{OPENROUTER_BASE_URL}/chat/completions", headers=_openrouter_headers(), json=_openrouter_payload(model, messages, opsi, True))
-        res = await http.send(req, stream=True)
-        if res.status_code >= 400:
-            body = await res.aread()
-            await res.aclose()
-            logger.error("OpenRouter menolak streaming: %s %s", res.status_code, body[:200])
-            raise HTTPException(status_code=502, detail="Layanan AI GungDev menolak streaming. Silakan coba lagi.")
+        res = None
+        model_terpakai = utama
+        for model in kandidat:
+            req = http.build_request(
+                "POST",
+                f"{OPENROUTER_BASE_URL}/chat/completions",
+                headers=_openrouter_headers(),
+                json=_openrouter_payload(model, messages, opsi, True),
+            )
+            kandidat_res = await http.send(req, stream=True)
+
+            if kandidat_res.status_code >= 400:
+                body = await kandidat_res.aread()
+                await kandidat_res.aclose()
+                sebab = body.decode("utf-8", "replace")[:300]
+                logger.warning(
+                    "OpenRouter menolak streaming %s: HTTP %s %s",
+                    model,
+                    kandidat_res.status_code,
+                    sebab,
+                )
+                error_terakhir = _pesan_openrouter_error(
+                    kandidat_res.status_code, sebab, model
+                )
+                if kandidat_res.status_code in (402, 404, 429) and model != kandidat[-1]:
+                    continue
+                raise error_terakhir
+
+            res = kandidat_res
+            model_terpakai = model
+            break
+
+        if res is None:
+            raise error_terakhir or HTTPException(
+                status_code=502, detail="Layanan AI sedang sibuk. Silakan coba lagi."
+            )
+
+        if model_terpakai != utama:
+            logger.info(
+                "OpenRouter streaming memakai model cadangan %s (bukan %s).",
+                model_terpakai,
+                utama,
+            )
+
         try:
             async for baris in res.aiter_lines():
                 if not baris.startswith("data:"):
@@ -1005,7 +1173,11 @@ async def openrouter_stream(messages: List[dict], opsi: dict) -> AsyncIterator[s
                     continue
                 pakai = obj.get("usage") or {}
                 if pakai:
-                    usage.simpan_token_asli(pakai.get("total_tokens") or 0, pakai.get("prompt_tokens") or 0, pakai.get("completion_tokens") or 0)
+                    usage.simpan_token_asli(
+                        pakai.get("total_tokens") or 0,
+                        pakai.get("prompt_tokens") or 0,
+                        pakai.get("completion_tokens") or 0,
+                    )
                 try:
                     delta = obj["choices"][0]["delta"].get("content") or ""
                 except (KeyError, IndexError, TypeError):
@@ -1485,6 +1657,16 @@ async def diagnostik():
             else OPENROUTER_API_KEY if PROVIDER == "openrouter"
             else True
         ),
+        # Provider AKTIF. Hanya nama jenisnya ("groq"/"openrouter"/
+        # "ollama"), bukan URL atau key: ini yang menentukan pemakaian
+        # benar-benar sampai ke penyedia atau tidak.
+        "provider_aktif": PROVIDER,
+        # Petunjuk panjang API key OpenRouter (0 = kosong). Membantu
+        # memastikan key benar-benar terbaca, tanpa menampilkan isinya.
+        "panjang_key_openrouter": len(OPENROUTER_API_KEY),
+        "panjang_key_groq": len(GROQ_API_KEY),
+        # Model default yang dipakai provider aktif.
+        "model_default": MODEL_NAME,
     }
 
 
@@ -1689,15 +1871,21 @@ def susun_system_prompt(
     penelitian: bool = False,
     ada_lampiran: bool = False,
     ada_gambar: bool = False,
+    konteks_riset: Optional[str] = None,
 ) -> str:
     """
     Menggabungkan system prompt dasar dengan instruksi tambahan yang
     relevan. Tambahan ditaruh di AKHIR agar mudah dibaca model dan tidak
     menimpa kepribadian dasar GungDev.
+
+    `konteks_riset` adalah hasil pencarian web yang sudah dibaca server.
+    Bila ada, konteks itu yang menjadi dasar jawaban (lihat riset.py).
     """
     bagian = [(dasar or DEFAULT_SYSTEM_PROMPT).strip()]
     if penelitian:
         bagian.append(PROMPT_RISET)
+    if konteks_riset:
+        bagian.append(konteks_riset)
     if ada_lampiran:
         bagian.append(PROMPT_LAMPIRAN)
     if ada_gambar:
@@ -1705,13 +1893,61 @@ def susun_system_prompt(
     return "\n\n".join(b for b in bagian if b)
 
 
-def siapkan_permintaan(request: ChatRequest) -> tuple[List[dict], dict]:
+async def lakukan_riset_server(
+    permintaan: str,
+    opsi: dict,
+    messages: List[dict],
+) -> Optional[str]:
+    """
+    Menjalankan riset web DI SERVER, berlaku untuk semua model/penyedia.
+
+    Mengapa di server: sebelumnya riset hanya bisa dilakukan model yang
+    punya tool `browser_search` (keluarga GPT-OSS di Groq). Dengan cara
+    ini, model apa pun — termasuk semua model OpenRouter — bisa riset
+    dengan kualitas yang sama, tanpa pengguna perlu berganti model.
+
+    Alur:
+      1. Model merumuskan kata kunci pencarian yang tajam.
+      2. Server mencari & membaca sumber (lihat riset.py).
+      3. Hasil dikembalikan sebagai konteks untuk jawaban akhir.
+
+    Mengembalikan teks konteks, atau None bila tidak ada hasil. TIDAK
+    pernah melempar exception: kegagalan riset tidak boleh menggagalkan
+    chat — model tetap menjawab dari pengetahuannya sendiri.
+    """
+    if not opsi.get("penelitian"):
+        return None
+
+    try:
+        # Langkah 1: minta model merumuskan query. Kalau gagal (mis.
+        # model tidak tersedia), pakai pesan pengguna apa adanya.
+        query = None
+        try:
+            pesan_query = [{"role": "system", "content": riset.instruksi_query()}]
+            pesan_query += [
+                m for m in messages if m.get("role") in ("user", "assistant")
+            ][-4:]
+            mentah = await complete(pesan_query, {**opsi, "penelitian": False, "max_tokens": 64})
+            query = riset.bersihkan_query(mentah, permintaan)
+        except Exception as exc:  # noqa: BLE001
+            logger.info("Perumusan query riset gagal (%s); memakai pesan asli.", exc)
+            query = riset.bersihkan_query(None, permintaan)
+
+        hasil = await riset.cari_dan_baca(query or permintaan)
+        return riset.konteks_untuk_model(hasil)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Riset web gagal, chat tetap dilanjutkan: %s", exc)
+        return None
+
+
+async def siapkan_permintaan(request: ChatRequest) -> tuple[List[dict], dict]:
     """
     Mengerjakan semua persiapan yang sama untuk /chat dan /chat/stream:
 
       - memvalidasi pesan
       - mengekstrak lampiran (file -> teks, gambar -> divalidasi)
       - memilih model yang tepat (vision / browser / biasa)
+      - melakukan riset web bila diminta (untuk SEMUA model)
       - menyusun messages + opsi
 
     Dikumpulkan di satu tempat agar kedua endpoint tidak mungkin
@@ -1726,20 +1962,43 @@ def siapkan_permintaan(request: ChatRequest) -> tuple[List[dict], dict]:
     opsi["penelitian"] = bool(request.research)
     opsi["ada_gambar"] = bool(gambar)
 
-    prompt = susun_system_prompt(
+    # Susun messages dasar dulu: dipakai untuk merumuskan query riset.
+    prompt_awal = susun_system_prompt(
         request.system_prompt,
         penelitian=opsi["penelitian"],
         ada_lampiran=bool(blok_lampiran),
         ada_gambar=bool(gambar),
     )
-
-    messages = build_messages(
+    messages_awal = build_messages(
         user_message,
         history=request.history,
-        system_prompt=prompt,
+        system_prompt=prompt_awal,
         images=gambar,
         blok_lampiran=blok_lampiran,
     )
+
+    # Riset dijalankan SETELAH model dipilih: query dirumuskan model
+    # yang sama dengan yang akan menjawab, agar relevan.
+    konteks_riset = await lakukan_riset_server(user_message, opsi, messages_awal)
+
+    if konteks_riset:
+        prompt = susun_system_prompt(
+            request.system_prompt,
+            penelitian=opsi["penelitian"],
+            ada_lampiran=bool(blok_lampiran),
+            ada_gambar=bool(gambar),
+            konteks_riset=konteks_riset,
+        )
+        messages = build_messages(
+            user_message,
+            history=request.history,
+            system_prompt=prompt,
+            images=gambar,
+            blok_lampiran=blok_lampiran,
+        )
+    else:
+        messages = messages_awal
+
     return messages, opsi
 
 
@@ -1749,9 +2008,14 @@ def siapkan_permintaan(request: ChatRequest) -> tuple[List[dict], dict]:
 @app.get("/capabilities")
 async def capabilities():
     """
-    Memberi tahu UI model mana yang bisa membaca gambar dan mana yang
-    bisa riset web, supaya pilihan bisa ditandai di menu dan pengguna
-    tidak kaget ketika modelnya berganti otomatis.
+    Memberi tahu UI kemampuan tiap model.
+
+    CATATAN PENTING: riset web TIDAK lagi ditandai per model, karena
+    riset kini dikerjakan di server (lihat riset.py). Artinya SEMUA model
+    bisa riset dengan kualitas yang sama — pengguna tidak perlu berganti
+    model. Yang masih benar-benar berbeda per model hanyalah kemampuan
+    membaca gambar (`vision`), karena itu batasan nyata dari modelnya
+    sendiri.
 
     Yang dikirim hanya hal yang MEMANG terlihat pengguna (nama model
     sudah tampil di UI sejak awal): tidak ada URL, key, atau detail
@@ -1762,7 +2026,9 @@ async def capabilities():
             {
                 "id": m,
                 "vision": m in MODEL_VISION,
-                "browser": m in MODEL_BROWSER,
+                # Riset selalu tersedia untuk semua model (dikerjakan
+                # server), jadi nilainya selalu true.
+                "browser": True,
             }
             for m in MODEL_DIIZINKAN
         ],
@@ -1796,7 +2062,7 @@ async def chat(request: ChatRequest, authorization: Optional[str] = Header(None)
     menampilkan angka miliknya sendiri. Tanpa header, chat tetap jalan
     seperti biasa (mode tamu) — kontrak tidak berubah.
     """
-    messages, opsi = siapkan_permintaan(request)
+    messages, opsi = await siapkan_permintaan(request)
 
     # Identitas diverifikasi SEBELUM memanggil AI, agar jatah harian akun
     # bisa ditegakkan. Bila jatah habis, permintaan ditolak dengan pesan
@@ -1841,7 +2107,7 @@ async def chat_stream(request: ChatRequest, authorization: Optional[str] = Heade
     Header `Authorization` opsional seperti pada /chat: bila sah,
     pemakaian dicatat atas nama akun itu.
     """
-    messages, opsi = siapkan_permintaan(request)
+    messages, opsi = await siapkan_permintaan(request)
 
     # Identitas diverifikasi SEKALI di awal (bukan di dalam generator)
     # agar hasil cache Google dipakai bersama oleh pencatatan usage.

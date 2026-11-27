@@ -24,7 +24,7 @@ import { useToasts } from './hooks/useToasts.js'
 import { useAuth } from './hooks/useAuth.js'
 import { checkHealth, streamChat, fetchUsage, fetchCapabilities } from './lib/api.js'
 import { getTokenRiwayat } from './lib/riwayat.js'
-import { gabungKemampuan, modelUntukGambar, modelUntukRiset, cariModel } from './lib/models.js'
+import { gabungKemampuan, modelUntukGambar, cariModel } from './lib/models.js'
 import {
   catatPesanTamu,
   bacaPemakaianTamu,
@@ -610,25 +610,16 @@ export default function App() {
   /**
    * Mengaktifkan/mematikan riset web.
    *
-   * Sama seperti gambar: model yang tidak punya browser_search diganti
-   * otomatis, supaya "riset" benar-benar mencari di internet dan bukan
-   * jawaban dari ingatan yang terlihat seperti riset.
+   * Riset TIDAK mengganti model. Riset dikerjakan di server (lihat
+   * backend/riset.py), jadi semua model bisa riset dengan kualitas yang
+   * sama — pengguna tidak perlu berpindah model hanya untuk mencari
+   * informasi di web.
    */
   const handleResearchChange = useCallback(
     (aktif) => {
       setResearch(aktif)
-      if (!aktif) return
-
-      const target = modelUntukRiset(capabilities)
-      if (modelAktif?.browser || settings.model === target) return
-
-      updateSettings({ model: target })
-      toast(
-        `Model diganti ke ${target} karena hanya model itu yang bisa riset web.`,
-        'info',
-      )
     },
-    [capabilities, modelAktif, settings.model, updateSettings, toast],
+    [],
   )
 
   const handleFeedback = useCallback(

@@ -19,16 +19,23 @@
  *   Rujukan: console.groq.com/docs/deprecations
  *
  * =====================================================================
- *  KEMAMPUAN (vision / browser)
+ *  SEMUA MODEL PUNYA KEMAMPUAN YANG SAMA
  * =====================================================================
- * Semua model yang tampil di UI diperlakukan sebagai model serbaguna oleh
- * aplikasi: gambar, riset web, dan file dapat dikirim melalui alur chat yang
- * sama. Backend tetap menjadi sumber kebenaran dan dapat memilih rute yang
- * kompatibel bila penyedia memiliki batas teknis.
- * Bila backend dan file ini berbeda, yang dipakai adalah data server.
+ * Setiap model di sini bisa melakukan hal yang sama tanpa pengguna perlu
+ * berganti model:
  *
- * Kemampuan tersebut tidak ditampilkan sebagai badge per model agar
- * pemilihan model tetap sederhana dan konsisten.
+ *   - riset web   -> dikerjakan SERVER (lihat backend/riset.py), jadi
+ *                    berlaku untuk semua model & penyedia.
+ *   - baca file   -> file diekstrak menjadi teks sebelum dikirim.
+ *   - baca gambar -> bergantung pada modelnya sendiri.
+ *
+ * Karena itu TIDAK ADA penanda khusus "bisa riset" per model: semua bisa.
+ * Satu-satunya perbedaan nyata adalah `vision` (membaca gambar), karena
+ * itu batasan modelnya sendiri. Bila gambar dikirim ke model non-vision,
+ * backend otomatis mengalihkan ke model vision dan memberi tahu pengguna.
+ *
+ * Backend tetap sumber kebenaran: `gabungKemampuan()` menimpa nilai di
+ * bawah dengan data dari GET /capabilities bila tersedia.
  */
 
 export const MODEL_PILIHAN = [
@@ -53,10 +60,10 @@ export const MODEL_PILIHAN = [
   {
     id: 'qwen/qwen3.8-27b',
     singkat: 'Qwen3.8 27B',
-    ket: 'Model vision lokal provider lama',
+    ket: 'Seimbang untuk chat dan gambar',
     Icon: 'Brain',
     vision: true,
-    browser: false,
+    browser: true,
   },
   {
     id: 'google/gemini-2.5-flash-tts',
@@ -64,7 +71,7 @@ export const MODEL_PILIHAN = [
     ket: 'Cepat untuk percakapan multimodal',
     Icon: 'Sparkles',
     vision: true,
-    browser: false,
+    browser: true,
   },
   {
     id: 'google/gemini-3.1-flash-lite',
@@ -72,7 +79,7 @@ export const MODEL_PILIHAN = [
     ket: 'Ringan untuk chat cepat',
     Icon: 'Zap',
     vision: true,
-    browser: false,
+    browser: true,
   },
   {
     id: 'deepseek/deepseek-v4.1-flash',
@@ -80,7 +87,32 @@ export const MODEL_PILIHAN = [
     ket: 'Cepat untuk analisis dan chat',
     Icon: 'Brain',
     vision: false,
-    browser: false,
+    browser: true,
+  },
+  // --- Model gratis: tetap bisa dipakai bila kredit utama habis ---
+  {
+    id: 'google/gemma-4-31b-it:free',
+    singkat: 'Gemma 4 31B',
+    ket: 'Gratis, bisa membaca gambar',
+    Icon: 'Sparkles',
+    vision: true,
+    browser: true,
+  },
+  {
+    id: 'nvidia/nemotron-3.5-super-vl:free',
+    singkat: 'Nemotron 3.5 VL',
+    ket: 'Gratis, konteks sangat panjang',
+    Icon: 'Brain',
+    vision: true,
+    browser: true,
+  },
+  {
+    id: 'inclusionai/ling-3.2-flash:free',
+    singkat: 'Ling 3.2 Flash',
+    ket: 'Gratis dan cepat',
+    Icon: 'Zap',
+    vision: true,
+    browser: true,
   },
 ]
 
@@ -116,7 +148,9 @@ export function gabungKemampuan(capabilities) {
     return {
       ...m,
       vision: Boolean(dari.vision),
-      browser: Boolean(dari.browser),
+      // Riset kini kemampuan server, jadi selalu tersedia. Nilai dari
+      // server dipakai apa adanya agar tetap sinkron bila berubah.
+      browser: dari.browser === undefined ? true : Boolean(dari.browser),
     }
   })
 }
@@ -127,12 +161,4 @@ export function gabungKemampuan(capabilities) {
  */
 export function modelUntukGambar(capabilities) {
   return capabilities?.vision_default || MODEL_PILIHAN.find((m) => m.vision)?.id || MODEL_DEFAULT
-}
-
-/**
- * Model yang dipakai otomatis bila pengguna meminta riset web tetapi
- * model pilihannya tidak mendukung browser.
- */
-export function modelUntukRiset(capabilities) {
-  return capabilities?.browser_default || MODEL_PILIHAN.find((m) => m.browser)?.id || MODEL_DEFAULT
 }
