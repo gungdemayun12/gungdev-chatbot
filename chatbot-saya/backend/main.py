@@ -238,32 +238,57 @@ NVIDIA_API_KEY = _env("NVIDIA_API_KEY")
 NVIDIA_BASE_URL = _env(
     "NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1"
 ).rstrip("/")
-NVIDIA_MODEL_DEFAULT = _env("NVIDIA_MODEL", "openai/gpt-oss-120b")
+NVIDIA_MODEL_DEFAULT = _env("NVIDIA_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b")
 
-# Model NVIDIA yang boleh dipilih. Nama harus PERSIS seperti di katalog
-# build.nvidia.com — nama yang salah akan dibalas 404, dan server
-# melewatinya otomatis ke cadangan.
+# Model NVIDIA yang boleh dipilih.
 #
-# PENTING: id model harus UNIK terhadap penyedia lain. NVIDIA juga punya
-# "openai/gpt-oss-120b", PERSIS sama dengan id Groq. Kalau dimasukkan apa
-# adanya, router akan menganggap model itu milik NVIDIA padahal selama ini
-# dilayani Groq — pengguna yang memilih GPT-OSS 120B tiba-tiba pindah
-# penyedia. Karena itu model yang id-nya sudah dipakai penyedia lain
-# diberi awalan "nvidia/" di sisi kita (lihat _nvidia_nama_asli).
+# CARA DAFTAR INI DISUSUN (penting, jangan dikira tebakan)
+# -------------------------------------------------------
+# NVIDIA mematikan model lama tanpa pemberitahuan panjang. Saat daftar ini
+# pertama dibuat, lima model yang dipakai ternyata SUDAH MATI:
+#
+#   openai/gpt-oss-120b          -> 410, end of life 3 Sep 2026
+#   openai/gpt-oss-20b           -> 410, end of life Nov 2026
+#   deepseek-ai/deepseek-v4.1-flash -> 410
+#   moonshotai/kimi-2.5          -> 404 (tidak ada)
+#   zai-org/glm-5                -> 404 (sudah diganti z-ai/glm-5.3-flash)
+#
+# Karena itu daftar sekarang diambil dari GET /v1/models milik NVIDIA
+# (bisa dilihat tanpa key), lalu tiap kandidat diuji satu per satu:
+# 403/401 = model hidup dan bisa dipanggil, 410 = mati, 404 = bukan chat.
+# Hasilnya 8 model di bawah, semuanya hidup per 27 Nov 2026.
+#
+# Bila suatu saat ada yang 410 lagi, server otomatis melewatinya ke
+# cadangan (lihat _kandidat_nvidia). Untuk memeriksa ulang daftar model
+# yang masih hidup: python cek_key.py nvidia
+#
+# CATATAN: id di sini sudah unik terhadap penyedia lain. NVIDIA dulu punya
+# "openai/gpt-oss-120b" yang sama persis dengan id Groq, dan itu berbahaya
+# karena router akan menganggap model Groq milik NVIDIA. Model seperti itu
+# kini tidak dipakai lagi (sudah mati), tetapi aturannya tetap: SETIAP id
+# harus menunjuk tepat satu penyedia. Dijaga oleh uji_unik_model.py.
 NVIDIA_MODELS = [
-    "nvidia/gpt-oss-120b",
-    "nvidia/deepseek-v4.1-flash",
-    "zai-org/glm-5",
-    "moonshotai/kimi-2.5",
+    # Model penalaran besar; kualitas terbaik, paling lambat.
+    "nvidia/nemotron-3-ultra-550b-a55b",
+    # Cepat & ringan: cocok jadi default dan cadangan.
+    "nvidia/nemotron-3.5-lightning-30b-a3b",
+    "nvidia/nemotron-3.5-bolt-e4b",
+    # Penalaran + bisa membaca gambar.
+    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
     "nvidia/nemotron-3.5-super-vl-120b-a12b",
+    # Model pihak ketiga yang tersedia di katalog NVIDIA.
+    "moonshotai/kimi-k3.1-pro",
+    "z-ai/glm-5.3-flash",
+    "minimaxai/minimax-m3.1-flash",
 ]
 
 # Pemetaan id pilihan-pengguna -> nama model asli di katalog NVIDIA.
-# Yang tidak ada di sini dikirim apa adanya.
-_NVIDIA_NAMA_ASLI = {
-    "nvidia/gpt-oss-120b": "openai/gpt-oss-120b",
-    "nvidia/deepseek-v4.1-flash": "deepseek-ai/deepseek-v4.1-flash",
-}
+#
+# Saat ini SEMUA id di atas sudah memakai nama katalog yang benar, jadi
+# peta ini kosong. Dibiarkan ada karena masih diperlukan bila nanti ada
+# model NVIDIA yang id-nya bentrok dengan penyedia lain: masukkan id
+# berawalan "nvidia/" di NVIDIA_MODELS, lalu petakan di sini.
+_NVIDIA_NAMA_ASLI: dict = {}
 
 
 def _nvidia_nama_asli(model: str) -> str:
@@ -1903,6 +1928,11 @@ def _pesan_nvidia_error(kode: int, badan: str) -> str:
         )
     if kode == 404:
         return "Model NVIDIA yang dipilih tidak tersedia. Silakan pilih model lain."
+    if kode == 410:
+        return (
+            "Model NVIDIA yang dipilih sudah tidak dipakai lagi. "
+            "Silakan pilih model lain."
+        )
     if kode in (402, 429):
         return (
             "Kuota layanan AI sedang penuh. Silakan coba lagi beberapa saat lagi."
@@ -1941,7 +1971,13 @@ async def nvidia_complete(messages: List[dict], opsi: dict) -> str:
                         status_code=res.status_code,
                         detail=_pesan_nvidia_error(res.status_code, sebab),
                     )
-                if res.status_code in (402, 404, 429) and model != kandidat[-1]:
+                # 410 = model sudah dimatikan NVIDIA ("end of life").
+                # Ini bukan salah pengguna dan bukan salah kunci, jadi
+                # jangan tampilkan error: lewati ke model cadangan.
+                if (
+                    res.status_code in (402, 404, 410, 429)
+                    and model != kandidat[-1]
+                ):
                     continue
                 raise error_terakhir
 
@@ -1995,10 +2031,16 @@ async def nvidia_stream(messages: List[dict], opsi: dict) -> AsyncIterator[str]:
             )
             kandidat_res = await http.send(permintaan, stream=True)
 
-            if kandidat_res.status_code == 404 and model != kandidat[-1]:
+            if (
+                kandidat_res.status_code in (404, 410)
+                and model != kandidat[-1]
+            ):
                 await kandidat_res.aread()
                 logger.warning(
-                    "Model NVIDIA '%s' tidak tersedia; mencoba cadangan.", model
+                    "Model NVIDIA '%s' tidak tersedia/dimatikan (HTTP %s); "
+                    "mencoba cadangan.",
+                    model,
+                    kandidat_res.status_code,
                 )
                 await kandidat_res.aclose()
                 continue

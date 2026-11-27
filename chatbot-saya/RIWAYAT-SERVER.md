@@ -508,36 +508,69 @@ ditampilkan di UI — nama penyedia tidak pernah muncul ke pengguna.
 Cukup pasang **satu** Environment Variable tambahan di Vercel:
 
 ```
-NVIDIA_API_KEY = (ambil gratis di https://build.nvidia.com)
+NVIDIA_API_KEY = (ambil gratis di https://build.nvidia.com/settings/api-keys)
 ```
 
-Butuh akun NVIDIA Developer Program (gratis, tanpa kartu kredit). Endpoint
-`https://integrate.api.nvidia.com/v1` kompatibel OpenAI, jadi format pesan,
-streaming, dan gambar sama persis dengan penyedia lain — **tidak ada
-kontrak API yang berubah**. Bila variabel ini kosong, seluruh bagian
-NVIDIA dilewati dan model NVIDIA otomatis dialihkan ke penyedia lain
-(pengguna melihat chat tetap berjalan, bukan error).
+Butuh akun NVIDIA Developer Program (gratis, tanpa kartu kredit). Key
+berbentuk `nvapi-...` dan **hanya ditampilkan sekali** saat dibuat.
+
+Sebelum dipasang ke Vercel, periksa dulu di komputer sendiri:
+
+```powershell
+cd chatbot-saya\backend
+$env:NVIDIA_API_KEY="nvapi-..."
+python cek_key.py nvidia
+```
+
+Muncul `OK` berarti key hidup. Muncul `GAGAL : HTTP 401` berarti salah
+salin. Skrip ini memanggil NVIDIA langsung dan **tidak mencetak key utuh**
+(hanya panjang dan 6 huruf awal), jadi aman bila layar Anda terlihat orang
+lain atau Anda bertanya di forum.
+
+Endpoint `https://integrate.api.nvidia.com/v1` kompatibel OpenAI, jadi
+format pesan, streaming, dan gambar sama persis dengan penyedia lain —
+**tidak ada kontrak API yang berubah**. Bila variabel ini kosong, seluruh
+bagian NVIDIA dilewati dan model NVIDIA otomatis dialihkan ke penyedia
+lain (pengguna melihat chat tetap berjalan, bukan error).
 
 ### Model tambahan yang dibuka
 
-| Id yang dikirim ke browser | Model katalog NVIDIA |
+Model NVIDIA berubah cukup sering: NVIDIA **mematikan model lama tanpa
+pemberitahuan panjang**, dibalas `HTTP 410 "end of life"`. Saat daftar ini
+pertama dibuat, kelima model yang dipakai ternyata sudah mati
+(`openai/gpt-oss-120b`, `openai/gpt-oss-20b`,
+`deepseek-ai/deepseek-v4.1-flash`, `moonshotai/kimi-2.5`, `zai-org/glm-5`).
+
+Sekarang daftar diambil dari `GET https://integrate.api.nvidia.com/v1/models`
+(bisa dilihat tanpa key) lalu diuji satu per satu: `403`/`401` = hidup,
+`410` = mati, `404` = bukan model chat. Hasil per 27 Nov 2026 — 8 model,
+semuanya hidup:
+
+| Id model | Keterangan |
 |---|---|
-| `nvidia/gpt-oss-120b` | `openai/gpt-oss-120b` |
-| `nvidia/deepseek-v4.1-flash` | `deepseek-ai/deepseek-v4.1-flash` |
-| `zai-org/glm-5` | `zai-org/glm-5` |
-| `moonshotai/kimi-2.5` | `moonshotai/kimi-2.5` |
-| `nvidia/nemotron-3.5-super-vl-120b-a12b` | sama |
+| `nvidia/nemotron-3.5-lightning-30b-a3b` | default, cepat & ringan |
+| `nvidia/nemotron-3-ultra-550b-a55b` | paling kuat, paling lambat |
+| `nvidia/nemotron-3.5-bolt-e4b` | sangat cepat |
+| `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` | penalaran, bisa gambar |
+| `nvidia/nemotron-3.5-super-vl-120b-a12b` | bisa gambar & dokumen |
+| `moonshotai/kimi-k3.1-pro` | konteks sangat panjang |
+| `z-ai/glm-5.3-flash` | cepat untuk analisis |
+| `minimaxai/minimax-m3.1-flash` | ringan & responsif |
 
-### Mengapa dua id diberi awalan `nvidia/`
+Bila suatu saat ada yang dibalas `410`, server **otomatis melewatinya ke
+model cadangan** — pengguna tidak melihat error. Untuk memeriksa ulang
+daftar yang masih hidup: `python cek_key.py nvidia`.
 
-NVIDIA juga punya model bernama **persis** `openai/gpt-oss-120b` — sama
+### Mengapa id model dijaga unik
+
+NVIDIA dulu punya model bernama **persis** `openai/gpt-oss-120b` — sama
 dengan id Groq. Kalau dimasukkan apa adanya, router akan menganggap model
 itu milik NVIDIA, padahal selama ini dilayani Groq: pengguna GPT-OSS 120B
-diam-diam pindah penyedia, dan kuota Groq tidak terpakai sementara trial
-credit NVIDIA ikut terbakar. Karena itu id-nya diberi awalan `nvidia/` di
-sisi kita, lalu diterjemahkan kembali ke nama katalog saat memanggil API
-(`_NVIDIA_NAMA_ASLI` / `_nvidia_nama_asli`). `uji_unik_model.py` mengunci
-aturan ini: setiap id harus menunjuk tepat satu penyedia.
+diam-diam pindah penyedia, kuota Groq tidak terpakai, dan trial credit
+NVIDIA ikut terbakar. Model itu sekarang sudah mati dan tidak dipakai lagi,
+tetapi aturannya tetap: **setiap id harus menunjuk tepat satu penyedia**
+(dijaga `uji_unik_model.py`). Bila nanti ada id yang bentrok, beri awalan
+`nvidia/` di `NVIDIA_MODELS` lalu petakan di `_NVIDIA_NAMA_ASLI`.
 
 ### Jujur: NVIDIA TIDAK menaikkan jatah harian
 
@@ -580,11 +613,13 @@ python uji_server_riwayat.py      # 55 pemeriksaan penyimpanan riwayat
 python uji_jatah.py               # 78 pemeriksaan jatah, reset & kerahasiaan
 python uji_routing_penyedia.py    # 14 pemeriksaan routing model -> penyedia
 python uji_gemini.py              # 40 pemeriksaan Gemini & failover antar penyedia
-python uji_nvidia.py              # 47 pemeriksaan penyedia keempat (NVIDIA NIM)
+python uji_nvidia.py              # 60 pemeriksaan penyedia keempat (NVIDIA NIM)
 python uji_unik_model.py          # 6 pemeriksaan id model tidak bentrok antar penyedia
 python uji_terpotong.py           # 29 pemeriksaan deteksi & sambung jawaban terpotong
 python uji_model_gemini.py        # cek model Gemini mana yang hidup untuk key Anda
 python uji_model_baru.py          # cari model Gemini TAMBAHAN yang hidup (jujur, tanpa pengalihan)
+python cek_key.py nvidia          # cek API key baru hidup atau tidak, sebelum ke Vercel
+python cek_key.py gemini          # idem untuk Gemini
 python server_uji.py              # jalankan server uji di port 8000
 python uji_api.py                 # 25 pemeriksaan endpoint lama
 python uji_jatah_api.py           # 44 pemeriksaan jatah/reset via HTTP

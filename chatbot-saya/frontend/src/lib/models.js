@@ -143,40 +143,65 @@ export const MODEL_PILIHAN = [
     browser: true,
   },
   // --- NVIDIA NIM (penyedia keempat, gratis tanpa kartu kredit) ---
-  // Id di sini SENGAJA diawali "nvidia/" untuk dua model yang nama
-  // aslinya bentrok dengan penyedia lain (Groq juga punya
-  // "openai/gpt-oss-120b"). Backend menerjemahkannya kembali ke nama
-  // katalog NVIDIA saat memanggil API.
+  // Id ini SENGAJA sama persis dengan katalog NVIDIA. Daftar NVIDIA
+  // berubah cukup sering: model lama bisa dimatikan (HTTP 410) tanpa
+  // pemberitahuan. Daftar di bawah sudah diuji hidup per 27 Nov 2026
+  // lewat GET /v1/models milik NVIDIA. Bila model hilang, backend
+  // otomatis melewatinya ke cadangan.
   {
-    id: 'nvidia/gpt-oss-120b',
-    singkat: 'GPT-OSS 120B (NVIDIA)',
-    ket: 'Versi NVIDIA dari GPT-OSS 120B',
+    id: 'nvidia/nemotron-3.5-lightning-30b-a3b',
+    singkat: 'Nemotron 3.5 Lightning',
+    ket: 'Cepat dan ringan, pilihan aman',
+    Icon: 'Zap',
+    vision: false,
+    browser: true,
+  },
+  {
+    id: 'nvidia/nemotron-3-ultra-550b-a55b',
+    singkat: 'Nemotron 3 Ultra',
+    ket: 'Paling kuat untuk soal rumit',
     Icon: 'Sparkles',
     vision: false,
     browser: true,
   },
   {
-    id: 'zai-org/glm-5',
-    singkat: 'GLM-5',
-    ket: 'Kuat untuk penalaran panjang',
-    Icon: 'Brain',
-    vision: true,
-    browser: true,
-  },
-  {
-    id: 'moonshotai/kimi-2.5',
-    singkat: 'Kimi 2.5',
+    id: 'moonshotai/kimi-k3.1-pro',
+    singkat: 'Kimi K3.1 Pro',
     ket: 'Konteks sangat panjang',
     Icon: 'Brain',
     vision: false,
     browser: true,
   },
   {
-    id: 'nvidia/deepseek-v4.1-flash',
-    singkat: 'DeepSeek V4.1 (NVIDIA)',
-    ket: 'Analisis cepat lewat NVIDIA',
+    id: 'z-ai/glm-5.3-flash',
+    singkat: 'GLM-5.3 Flash',
+    ket: 'Cepat untuk chat dan analisis',
     Icon: 'Zap',
     vision: false,
+    browser: true,
+  },
+  {
+    id: 'minimaxai/minimax-m3.1-flash',
+    singkat: 'MiniMax M3.1 Flash',
+    ket: 'Ringan dan responsif',
+    Icon: 'Zap',
+    vision: false,
+    browser: true,
+  },
+  {
+    id: 'nvidia/nemotron-3.5-bolt-e4b',
+    singkat: 'Nemotron 3.5 Bolt',
+    ket: 'Sangat cepat untuk chat harian',
+    Icon: 'Zap',
+    vision: false,
+    browser: true,
+  },
+  {
+    id: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning',
+    singkat: 'Nemotron 3 Nano',
+    ket: 'Penalaran ringan, bisa gambar',
+    Icon: 'Brain',
+    vision: true,
     browser: true,
   },
   {
@@ -253,10 +278,33 @@ const NAMA_CADANGAN = {
   },
   // NVIDIA NIM — dijaga tetap ada agar bila MODEL_PILIHAN di atas
   // diubah, model dari server tidak muncul sebagai id mentah.
-  'nvidia/gpt-oss-120b': { singkat: 'GPT-OSS 120B (NVIDIA)', ket: 'Versi NVIDIA dari GPT-OSS 120B', Icon: 'Sparkles' },
-  'zai-org/glm-5': { singkat: 'GLM-5', ket: 'Kuat untuk penalaran panjang', Icon: 'Brain' },
-  'moonshotai/kimi-2.5': { singkat: 'Kimi 2.5', ket: 'Konteks sangat panjang', Icon: 'Brain' },
-  'nvidia/deepseek-v4.1-flash': { singkat: 'DeepSeek V4.1 (NVIDIA)', ket: 'Analisis cepat lewat NVIDIA', Icon: 'Zap' },
+  'nvidia/nemotron-3.5-lightning-30b-a3b': {
+    singkat: 'Nemotron 3.5 Lightning',
+    ket: 'Cepat dan ringan, pilihan aman',
+    Icon: 'Zap',
+  },
+  'nvidia/nemotron-3-ultra-550b-a55b': {
+    singkat: 'Nemotron 3 Ultra',
+    ket: 'Paling kuat untuk soal rumit',
+    Icon: 'Sparkles',
+  },
+  'moonshotai/kimi-k3.1-pro': { singkat: 'Kimi K3.1 Pro', ket: 'Konteks sangat panjang', Icon: 'Brain' },
+  'z-ai/glm-5.3-flash': { singkat: 'GLM-5.3 Flash', ket: 'Cepat untuk chat dan analisis', Icon: 'Zap' },
+  'minimaxai/minimax-m3.1-flash': {
+    singkat: 'MiniMax M3.1 Flash',
+    ket: 'Ringan dan responsif',
+    Icon: 'Zap',
+  },
+  'nvidia/nemotron-3.5-bolt-e4b': {
+    singkat: 'Nemotron 3.5 Bolt',
+    ket: 'Sangat cepat untuk chat harian',
+    Icon: 'Zap',
+  },
+  'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning': {
+    singkat: 'Nemotron 3 Nano',
+    ket: 'Penalaran ringan, bisa gambar',
+    Icon: 'Brain',
+  },
   'nvidia/nemotron-3.5-super-vl-120b-a12b': {
     singkat: 'Nemotron 3.5 VL (NVIDIA)',
     ket: 'Bisa membaca gambar dan dokumen',

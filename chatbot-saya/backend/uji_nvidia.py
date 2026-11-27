@@ -80,6 +80,31 @@ cek(
     f"{len(set(main.MODEL_DIIZINKAN))} unik dari {len(main.MODEL_DIIZINKAN)}",
 )
 
+# NVIDIA mematikan model lama tanpa pemberitahuan panjang: saat daftar
+# pertama dibuat, kelima model yang dipakai ternyata SUDAH MATI (HTTP 410
+# "end of life"). Dua uji di bawah mengunci agar kesalahan seperti itu
+# tidak lolos lagi.
+cek(
+    "Model default NVIDIA ada di dalam daftar yang boleh dipilih",
+    main.NVIDIA_MODEL_DEFAULT in main.NVIDIA_MODELS,
+    main.NVIDIA_MODEL_DEFAULT,
+)
+cek(
+    "Tidak ada model NVIDIA yang sudah dimatikan masih terdaftar",
+    not (
+        set(main.NVIDIA_MODELS)
+        & {
+            "openai/gpt-oss-120b",
+            "openai/gpt-oss-20b",
+            "deepseek-ai/deepseek-v4.1-flash",
+            "moonshotai/kimi-2.5",
+            "zai-org/glm-5",
+            "meta/llama-3.3-70b-instruct",
+        }
+    ),
+    "semua model mati sudah dibuang",
+)
+
 # ---------------------------------------------------------------------
 print("\n=== 2. ROUTING MODEL -> PENYEDIA ===")
 # ---------------------------------------------------------------------
@@ -189,7 +214,8 @@ cek(
 print("\n=== 5. BENTUK PAYLOAD SESUAI STANDAR OPENAI ===")
 # ---------------------------------------------------------------------
 opsi = {"temperature": 0.4, "max_tokens": 4096}
-payload = main._nvidia_payload("zai-org/glm-5", [{"role": "user", "content": "hai"}], opsi, False)
+MODEL_UJI = main.NVIDIA_MODELS[0]
+payload = main._nvidia_payload(MODEL_UJI, [{"role": "user", "content": "hai"}], opsi, False)
 
 cek("Payload memakai 'max_tokens'", "max_tokens" in payload)
 cek(
@@ -198,31 +224,28 @@ cek(
 )
 cek(
     "Payload memuat nama model ASLI katalog NVIDIA",
-    payload.get("model") == "zai-org/glm-5",
+    payload.get("model") == MODEL_UJI,
     str(payload.get("model")),
 )
 cek(
-    "Id pilihan pengguna diterjemahkan ke nama katalog",
-    main._nvidia_payload(
-        "nvidia/gpt-oss-120b", [], opsi, False
-    ).get("model")
-    == "openai/gpt-oss-120b",
+    "Model tanpa pemetaan dikirim apa adanya (tidak diubah)",
+    main._nvidia_nama_asli(MODEL_UJI) == MODEL_UJI,
 )
 cek(
-    "Nama katalog yang sudah benar tidak diubah",
-    main._nvidia_nama_asli("moonshotai/kimi-2.5") == "moonshotai/kimi-2.5",
+    "_NVIDIA_NAMA_ASLI masih berupa dict yang bisa diisi",
+    isinstance(main._NVIDIA_NAMA_ASLI, dict),
 )
 cek("Payload tidak streaming saat complete", payload.get("stream") is False)
 
 # temperature 0 digeser: sebagian model NIM menolaknya.
-payload0 = main._nvidia_payload("zai-org/glm-5", [], {"temperature": 0, "max_tokens": 100}, False)
+payload0 = main._nvidia_payload(MODEL_UJI, [], {"temperature": 0, "max_tokens": 100}, False)
 cek(
     "temperature 0 digeser (tidak dikirim sebagai 0)",
     payload0["temperature"] > 0,
     str(payload0["temperature"]),
 )
 
-payload_stream = main._nvidia_payload("zai-org/glm-5", [], opsi, True)
+payload_stream = main._nvidia_payload(MODEL_UJI, [], opsi, True)
 cek("Payload streaming memakai stream=True", payload_stream.get("stream") is True)
 
 # Kandidat cadangan: model tak dikenal -> jatuh ke default.
@@ -306,9 +329,86 @@ cek(
 )
 
 # ---------------------------------------------------------------------
-print("\n=== 7. PESAN KESALAHAN TIDAK MEMBOCORKAN DETAIL TEKNIS ===")
+print("\n=== 7. MODEL YANG SUDAH DIMATIKAN (HTTP 410) DILEWATI ===")
 # ---------------------------------------------------------------------
-for kode in (401, 403, 404, 429, 500):
+# NVIDIA membalas 410 "end of life" untuk model yang sudah dimatikan.
+# Ini pernah terjadi pada SEMUA model yang kita daftarkan pertama kali.
+# Perilaku yang benar: lewati ke model berikutnya, JANGAN tampilkan error
+# kepada pengguna yang tidak melakukan kesalahan apa pun.
+class _ResGone:
+    status_code = 410
+    headers = {}
+
+    def __init__(self):
+        self.text = '{"detail":"model has reached its end of life"}'
+
+    async def aread(self):
+        return self.text.encode()
+
+    async def aclose(self):
+        return None
+
+    async def aiter_lines(self):
+        yield 'data: {"choices":[{"delta":{"content":"dari cadangan"}}]}'
+
+
+class _HTTPGoneLaluHidup:
+    """Model pertama dibalas 410, model kedua berhasil."""
+
+    def __init__(self):
+        self.dipanggil = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    def build_request(self, *a, **k):
+        return object()
+
+    async def send(self, *a, **k):
+        if not self.dipanggil:
+            self.dipanggil.append("mati")
+            return _ResGone()
+        self.dipanggil.append("hidup")
+        return _ResTiruan(ALIRAN_SSE)
+
+
+async def _jalankan_410():
+    tiruan = _HTTPGoneLaluHidup()
+    with patch.object(main.httpx, "AsyncClient", lambda **k: tiruan):
+        potongan = []
+        async for d in main.nvidia_stream(
+            [{"role": "user", "content": "halo"}], opsi
+        ):
+            potongan.append(d)
+    return "".join(potongan), tiruan.dipanggil
+
+
+teks410, urutan_panggil = asyncio.run(_jalankan_410())
+cek(
+    "Model 410 dilewati, bukan menggagalkan permintaan",
+    teks410 == "Halo dunia",
+    repr(teks410),
+)
+cek(
+    "Setelah 410 server benar-benar mencoba model lain",
+    len(urutan_panggil) == 2,
+    str(urutan_panggil),
+)
+
+cek(
+    "Pesan untuk 410 tidak menyalahkan pengguna dan tanpa bocoran",
+    "rahasia-internal-xyz" not in main._pesan_nvidia_error(410, "rahasia-internal-xyz")
+    and "tidak dipakai lagi" in main._pesan_nvidia_error(410, "x"),
+    main._pesan_nvidia_error(410, "x")[:70],
+)
+
+# ---------------------------------------------------------------------
+print("\n=== 8. PESAN KESALAHAN TIDAK MEMBOCORKAN DETAIL TEKNIS ===")
+# ---------------------------------------------------------------------
+for kode in (401, 403, 404, 410, 429, 500):
     pesan = main._pesan_nvidia_error(kode, "rahasia-internal-xyz")
     cek(
         f"Kode {kode} memberi pesan Bahasa Indonesia tanpa bocoran",
