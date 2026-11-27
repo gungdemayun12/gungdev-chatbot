@@ -464,6 +464,30 @@ TIMEOUT_OLLAMA = _env_float("TIMEOUT_OLLAMA", 300)
 # tetap di bawah batas fungsi Vercel agar tidak menggantung.
 TIMEOUT_GEMINI = _env_float("TIMEOUT_GEMINI", 90)
 
+# ---------------------------------------------------------------------
+# TIMEOUT KHUSUS STREAMING (PENTING: PENYEBAB JAWABAN TERPOTONG)
+# ---------------------------------------------------------------------
+# `httpx.AsyncClient(timeout=60)` memberi batas 60 detik untuk SETIAP
+# operasi baca. Pada respons streaming, itu berarti: bila model butuh
+# lebih dari 60 detik untuk menyelesaikan jawaban, koneksi DIPUTUS di
+# tengah kalimat — padahal teks sudah mulai mengalir ke pengguna.
+#
+# Jawaban panjang (riset, penjelasan rinci) sangat mudah melewati 60
+# detik. Akibatnya pengguna melihat jawaban "setengah" lalu harus
+# mengetik "lanjut", yang memakan satu jatah pesan lagi. Inilah sumber
+# keluhan "jawaban kepotong" selain batas max_tokens.
+#
+# Perbaikannya: saat streaming, batas WAKTUNGGU (connect/pool) tetap
+# ketat, tetapi batas BACA dibuat longgar. Yang penting bukan "seluruh
+# jawaban selesai dalam N detik", melainkan "tidak ada jeda mati lebih
+# dari N detik". Jawaban boleh berjalan selama tokennya masih mengalir.
+TIMEOUT_STREAM = httpx.Timeout(
+    connect=15.0,      # menyambung ke penyedia
+    read=120.0,        # jeda maksimum antar-potongan (BUKAN total durasi)
+    write=30.0,        # mengirim permintaan
+    pool=15.0,         # menunggu koneksi bebas
+)
+
 # ---- CORS ----
 # Daftar origin tambahan dipisah koma, mis:
 #   ALLOWED_ORIGINS=https://gungdev.vercel.app,https://gungdev.com
@@ -1250,7 +1274,7 @@ async def openrouter_stream(messages: List[dict], opsi: dict) -> AsyncIterator[s
     kandidat = _kandidat_openrouter(utama, bool(opsi.get("ada_gambar")))
     error_terakhir: Optional[HTTPException] = None
 
-    async with httpx.AsyncClient(timeout=TIMEOUT_GROQ) as http:
+    async with httpx.AsyncClient(timeout=TIMEOUT_STREAM) as http:
         res = None
         model_terpakai = utama
         for model in kandidat:
@@ -1422,7 +1446,7 @@ async def groq_stream(messages: List[dict], opsi: dict) -> AsyncIterator[str]:
     else:
         kandidat = [utama] + [m for m in _MODEL_GROQ_CADANGAN if m != utama]
 
-    async with httpx.AsyncClient(timeout=TIMEOUT_GROQ) as http:
+    async with httpx.AsyncClient(timeout=TIMEOUT_STREAM) as http:
         res = None
         for model in kandidat:
             payload = _groq_payload(model, messages, opsi, streaming=True)
@@ -1657,7 +1681,7 @@ async def gemini_stream(messages: List[dict], opsi: dict) -> AsyncIterator[str]:
         opsi.get("model") or GEMINI_MODEL_DEFAULT, bool(opsi.get("ada_gambar"))
     )
 
-    async with httpx.AsyncClient(timeout=TIMEOUT_GEMINI) as http:
+    async with httpx.AsyncClient(timeout=TIMEOUT_STREAM) as http:
         res = None
         for model in kandidat:
             payload = _gemini_payload(model, messages, opsi, streaming=True)
@@ -1990,6 +2014,39 @@ def _terpotong_dari_finish(finish_reason: Optional[str]) -> bool:
     if not finish_reason:
         return False
     return str(finish_reason).lower() in {"length", "max_tokens", "max_output_tokens"}
+
+
+# Berapa kali jawaban boleh disambung otomatis dalam SATU kirim pesan.
+#
+# 3 dipilih dengan sengaja: dengan max_tokens 4096, tiga sambungan
+# berarti hingga ±16.000 token — jauh lebih panjang daripada jawaban
+# paling panjang yang wajar. Bila masih terpotong setelah itu, biasanya
+# penyebabnya bukan panjang jawaban melainkan model yang berhenti
+# aneh, dan mengulang terus hanya membuang kuota.
+MAKS_SAMBUNG = 3
+
+
+def _pesan_untuk_sambungan(messages: List[dict], sudah_ditulis: str) -> List[dict]:
+    """
+    Menyusun pesan untuk meminta LANJUTAN jawaban yang terpotong.
+
+    Riwayat asli + jawaban yang sudah terkirim + instruksi melanjutkan.
+    Instruksi dibuat tegas supaya model tidak mengulang dari awal
+    (mengulang berarti pengguna membaca hal yang sama dua kali) dan
+    tidak membuka dengan basa-basi seperti "Tentu, lanjut:".
+    """
+    return list(messages) + [
+        {"role": "assistant", "content": sudah_ditulis},
+        {
+            "role": "user",
+            "content": (
+                "Jawabanmu di atas terputus di tengah. Lanjutkan TEPAT dari "
+                "kata terakhir — jangan mengulang dari awal, jangan "
+                "mengulang kalimat yang sudah tertulis, dan tanpa pembuka "
+                "seperti 'lanjut' atau 'tentu'. Tulis sisanya sampai selesai."
+            ),
+        },
+    ]
 
 
 # Penanda jawaban terpotong. Disimpan per-task (contextvars) supaya
@@ -2847,14 +2904,66 @@ async def chat_stream(request: ChatRequest, authorization: Optional[str] = Heade
                 )
                 return
 
-            # Catat pemakaian setelah jawaban selesai terkumpul.
+            # ---------------------------------------------------------
+            # SAMBUNG OTOMATIS (PENTING: MENGHEMAT JATAH PENGGUNA)
+            # ---------------------------------------------------------
+            # Bila model berhenti karena kehabisan token, jawabannya
+            # belum selesai. Dulu pengguna harus mengetik "lanjut" —
+            # dan itu MEMAKAN SATU JATAH PESAN LAGI padahal satu
+            # pertanyaan belum selesai dijawab.
+            #
+            # Sekarang server melanjutkannya sendiri: minta lanjutan ke
+            # model yang sama, lalu sambungkan hasilnya ke jawaban yang
+            # sudah terkirim. Pengguna melihat satu jawaban utuh dari
+            # satu kali kirim pesan, dan hanya dihitung satu jatah.
+            #
+            # Batasnya `MAKS_SAMBUNG`: cukup untuk merampungkan jawaban
+            # panjang, tetapi tidak berputar tanpa akhir bila model
+            # ternyata selalu kehabisan token.
+            for putaran in range(MAKS_SAMBUNG):
+                if not _apakah_terpotong():
+                    break
+
+                logger.info(
+                    "Jawaban terpotong; menyambung otomatis (%s/%s).",
+                    putaran + 1,
+                    MAKS_SAMBUNG,
+                )
+                # Penanda direset supaya sambungan ini dinilai sendiri:
+                # bila lanjutannya juga terpotong, kita sambung lagi.
+                _mulai_pantau_terpotong()
+
+                lanjutan_messages = _pesan_untuk_sambungan(
+                    messages, "".join(jawaban)
+                )
+                dapat_lanjutan = False
+                try:
+                    async for delta in stream(lanjutan_messages, opsi):
+                        dapat_lanjutan = True
+                        jawaban.append(delta)
+                        yield sse({"delta": delta})
+                except Exception as exc:  # noqa: BLE001
+                    # Sambungan gagal (mis. kuota penyedia habis di
+                    # tengah). Yang sudah terkirim tetap utuh; hentikan
+                    # saja sambungannya daripada menampilkan error.
+                    logger.warning("Sambungan otomatis gagal: %s", exc)
+                    break
+
+                # Tidak ada tambahan teks -> tidak ada gunanya
+                # menyambung lagi; hentikan agar tidak mengulang.
+                if not dapat_lanjutan:
+                    break
+
+            # Catat pemakaian SEKALI setelah seluruh jawaban (termasuk
+            # sambungannya) selesai terkumpul. Satu pertanyaan = satu
+            # jatah, meskipun butuh beberapa putaran penyedia.
             await usage.catat_request(
                 tokens=_token_untuk_catatan(messages, "".join(jawaban)),
                 model=opsi["model"],
                 sub=sub_akun,
             )
 
-            # Bila model berhenti karena kehabisan token, beri tahu UI
+            # Bila setelah semua sambungan masih terpotong, beri tahu UI
             # supaya pengguna tidak perlu menebak. `done` tetap dikirim
             # agar klien lama tidak menunggu selamanya.
             if _apakah_terpotong():

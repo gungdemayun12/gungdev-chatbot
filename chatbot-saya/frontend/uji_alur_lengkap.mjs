@@ -90,15 +90,28 @@ if (adaTombolModel) {
   )
   cek('menu model terbuka', modelTersedia.length > 0, `jumlah=${modelTersedia.length}`)
 
-  const teksMenu = modelTersedia.join(' | ')
+  /* Sejak menu diringkas, model di luar daftar utama ada di balik
+     tombol "Model lainnya". Semua id model tetap dibaca dari atribut
+     title agar uji ini tidak bergantung pada nama tampilan. */
+  const tombolLainnya = page.locator('.mpicker__more')
+  if ((await tombolLainnya.count()) > 0 && (await page.locator('.mpicker__lainnya').count()) === 0) {
+    await tombolLainnya.first().click()
+    await page.waitForTimeout(400)
+  }
+
+  const idModel = await page.$$eval('.mpicker__item', (els) =>
+    els.map((e) => e.getAttribute('title') || '').filter(Boolean),
+  )
+  const teksMenu = idModel.join(' | ')
+
   cek(
     'model google/gemini-3.1-flash-lite terdaftar',
-    modelTersedia.includes('google/gemini-3.1-flash-lite'),
+    idModel.includes('google/gemini-3.1-flash-lite'),
     teksMenu,
   )
   cek(
     'model deepseek/deepseek-v4.1-flash terdaftar',
-    modelTersedia.includes('deepseek/deepseek-v4.1-flash'),
+    idModel.includes('deepseek/deepseek-v4.1-flash'),
     teksMenu,
   )
 
@@ -106,8 +119,8 @@ if (adaTombolModel) {
   const labelMenu = await page.$$eval('.mpicker__menu', (els) => els.map((e) => e.innerText).join('\n'))
   cek('TIDAK ada badge "Gambar"/"Web" di menu', !/\b(Gambar|Web)\b/.test(labelMenu), labelMenu.slice(0, 150))
 
-  /* Pilih model DeepSeek. */
-  const pilihanDeepseek = page.locator('.mpicker__item[role="option"]:has-text("deepseek/deepseek-v4.1-flash")').first()
+  /* Pilih model DeepSeek (dicari lewat id, bukan teks tampilan). */
+  const pilihanDeepseek = page.locator('.mpicker__item[title="deepseek/deepseek-v4.1-flash"]').first()
   if ((await pilihanDeepseek.count()) > 0) {
     await pilihanDeepseek.click()
     await page.waitForTimeout(500)

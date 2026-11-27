@@ -75,7 +75,7 @@ export const MODEL_PILIHAN = [
   },
   {
     id: 'google/gemini-3.1-flash-lite',
-    singkat: 'Gemini 3.1 Lite',
+    singkat: 'Gemini 3.1 Lite (OpenRouter)',
     ket: 'Ringan untuk chat cepat',
     Icon: 'Zap',
     vision: true,
@@ -137,7 +137,7 @@ export const MODEL_PILIHAN = [
   },
   {
     id: 'gemini-3.1-flash-lite',
-    singkat: 'Gemini 3.1 Lite',
+    singkat: 'Gemini 3.1 Lite (Gemini)',
     ket: 'Cadangan hemat kuota',
     Icon: 'Brain',
     vision: true,
@@ -147,6 +147,36 @@ export const MODEL_PILIHAN = [
 
 /** Pilihan bawaan (juga dipakai bila pilihan tersimpan tidak dikenal). */
 export const MODEL_DEFAULT = 'openai/gpt-oss-120b'
+
+/**
+ * MODEL UTAMA — yang ditampilkan lebih dulu di menu.
+ *
+ * MENGAPA DIBATASI
+ * ----------------
+ * Daftar lengkap berisi 12 model. Di ponsel, menu itu jadi sangat panjang
+ * dan mendorong kotak ketik keluar layar. Padahal sebagian besar pengguna
+ * hanya perlu beberapa pilihan yang jelas.
+ *
+ * Yang ditampilkan lengkap dengan keterangan hanyalah model yang
+ * mewakili tiap keluarga: GPT, Qwen, DeepSeek, Gemini 4 Argon, dan
+ * Gemini 3.5. Sisanya tetap BISA DIPILIH — hanya diletakkan di balik
+ * tombol "Model lainnya" agar tampilan tetap ringkas.
+ *
+ * Ini murni soal tampilan: SEMUA model di MODEL_PILIHAN tetap bisa
+ * dipakai, dan tidak ada kemampuan yang hilang.
+ */
+export const MODEL_UTAMA = [
+  'openai/gpt-oss-120b',
+  'qwen/qwen3.8-27b',
+  'deepseek/deepseek-v4.1-flash',
+  'gemini-4-argon',
+  'gemini-3.5-flash-lite',
+]
+
+/** True bila model ini ditampilkan di bagian utama menu. */
+export function apakahModelUtama(id) {
+  return MODEL_UTAMA.includes(id)
+}
 
 /** Mencari definisi model dari id; selalu mengembalikan objek yang valid. */
 export function cariModel(id) {
@@ -159,6 +189,25 @@ export function cariModel(id) {
 
 /** Daftar id semua model yang bisa dipilih (untuk validasi pengaturan). */
 export const MODEL_ID = MODEL_PILIHAN.map((m) => m.id)
+
+/**
+ * Nama pendek untuk model yang BELUM terdaftar di MODEL_PILIHAN.
+ *
+ * Tanpa ini, model baru tampil sebagai id mentah (mis.
+ * "gemini-3.1-flash-lite") dan bisa TERLIHAT SAMA dengan model lain
+ * yang namanya kebetulan mirip. Itu membingungkan: dua baris berbeda
+ * dengan tulisan hampir identik.
+ *
+ * Kunci peta ini adalah id persis seperti yang dikirim server.
+ */
+const NAMA_CADANGAN = {
+  'gemini-3.1-flash-lite': { singkat: 'Gemini 3.1 Lite (Gemini)', ket: 'Cadangan hemat kuota', Icon: 'Brain' },
+  'google/gemini-3.1-flash-lite': {
+    singkat: 'Gemini 3.1 Lite (OpenRouter)',
+    ket: 'Ringan untuk chat cepat',
+    Icon: 'Zap',
+  },
+}
 
 /**
  * Menggabungkan kemampuan dari server ke daftar model.
@@ -197,13 +246,14 @@ export function gabungKemampuan(capabilities) {
   const sudahAda = new Set(MODEL_PILIHAN.map((m) => m.id))
   for (const dari of capabilities.models) {
     if (sudahAda.has(dari.id)) continue
+    const cadangan = NAMA_CADANGAN[dari.id]
     hasil.push({
       id: dari.id,
-      // Tanpa nama pendek, tampilkan id apa adanya. Lebih baik daripada
-      // modelnya tidak bisa dipilih sama sekali.
-      singkat: dari.id,
-      ket: 'Tersedia',
-      Icon: 'Sparkles',
+      // Nama yang jelas lebih baik daripada id mentah; model tanpa nama
+      // pendek tetap bisa dipilih memakai id-nya.
+      singkat: cadangan?.singkat || dari.id,
+      ket: cadangan?.ket || 'Tersedia',
+      Icon: cadangan?.Icon || 'Sparkles',
       vision: Boolean(dari.vision),
       browser: dari.browser === undefined ? true : Boolean(dari.browser),
     })

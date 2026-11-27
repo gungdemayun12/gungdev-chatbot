@@ -1248,7 +1248,13 @@
   right: 0;
   bottom: calc(100% + 8px);
   z-index: 60;
-  min-width: 268px;
+  width: 300px;
+  max-width: calc(100vw - 24px);
+  /* Batasi tinggi agar menu TIDAK pernah memanjang sampai menutupi
+     kotak ketik. Bagian dalam digulir bila isinya lebih banyak. */
+  max-height: min(70vh, 460px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 6px;
   background-color: var(--surface);
   border: 1px solid var(--border-strong);
@@ -1324,18 +1330,101 @@
   font-size: 0.875rem;
   font-weight: 600;
   line-height: 1.25;
-  word-break: break-all;
+  /* Nama model bisa panjang ("openai/gpt-oss-120b"). Potong dengan
+     elipsis alih-alih memecah kata — daftar jadi jauh lebih rapi. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .mpicker__item-hint {
   font-size: 0.75rem;
   line-height: 1.3;
   color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mpicker__item.is-ringkas {
+  padding: 7px 8px;
+}
+
+.mpicker__item.is-ringkas .mpicker__item-label {
+  font-size: 0.8125rem;
+  font-weight: 550;
 }
 
 .mpicker__item-check {
   flex: 0 0 auto;
   color: var(--accent);
+}
+
+/* --- Tombol "Model lainnya" --- */
+.mpicker__more {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  margin-top: 4px;
+  padding: 9px 10px;
+  border-top: 1px solid var(--border);
+  border-radius: var(--r-md);
+  font-size: 0.8125rem;
+  font-weight: 550;
+  color: var(--text-secondary);
+  transition: background-color var(--t-fast), color var(--t-fast);
+}
+
+.mpicker__more:hover {
+  background-color: var(--bg-hover);
+  color: var(--text);
+}
+
+.mpicker__more-kanan {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mpicker__more-jumlah {
+  min-width: 18px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background-color: var(--bg-elevated);
+  font-size: 0.6875rem;
+  font-weight: 650;
+  line-height: 1.5;
+  text-align: center;
+  color: var(--text-tertiary);
+}
+
+.mpicker__more svg {
+  transition: transform var(--t-fast);
+}
+
+.mpicker__more.is-open svg {
+  transform: rotate(90deg);
+}
+
+/* Daftar "Model lainnya": sedikit menyusut agar terlihat sebagai
+   sub-bagian, bukan daftar baru. */
+.mpicker__lainnya {
+  margin: 2px 0 4px;
+  padding: 4px;
+  border-radius: var(--r-md);
+  background-color: var(--bg-subtle);
+  animation: mpickerIn var(--t-fast) both;
+}
+
+.mpicker__catatan {
+  margin: 6px 6px 2px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  font-size: 0.6875rem;
+  line-height: 1.4;
+  color: var(--text-tertiary);
 }
 
 /* --- Penanda kemampuan model (Gambar / Web) --- */
@@ -1396,12 +1485,21 @@
     bottom: auto;
     top: 50%;
     transform: translateY(-50%);
+    width: auto;
     min-width: 0;
+    /* Di ponsel tetap dibatasi: tidak boleh lebih tinggi dari 80% layar,
+       sisanya digulir. Dengan begitu menu tidak pernah menutupi seluruh
+       layar dan tombol tutup selalu terjangkau. */
+    max-height: 80vh;
     animation: mpickerSheet var(--t-med) both;
   }
 
   .mpicker__item {
     padding: 11px 10px;
+  }
+
+  .mpicker__item.is-ringkas {
+    padding: 10px;
   }
 }
 

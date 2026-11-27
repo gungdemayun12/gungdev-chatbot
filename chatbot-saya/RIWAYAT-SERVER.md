@@ -14,7 +14,7 @@ masih tersimpan di perangkat masing-masing.
 |---|---|
 | Riwayat hanya di browser | Riwayat di server, **sama di semua perangkat** |
 | Hapus data browser = riwayat hilang | Riwayat aman di server |
-| Semua pengunjung berbagi satu angka usage | Tiap akun punya **jatah 40 pesan/24 jam** sendiri |
+| Semua pengunjung berbagi satu angka usage | Tiap akun punya **jatah 48 pesan/24 jam** sendiri |
 | Tidak ada pembatas per akun | Satu akun habis jatah **tidak** memengaruhi akun lain |
 | — | Bila server tak bisa dipakai, salinan perangkat dipakai otomatis |
 | Satu penyedia AI habis kuota = situs berhenti | **Failover otomatis** ke penyedia lain saat kuota habis (429/402) |
@@ -28,16 +28,16 @@ Kontrak API lama **tidak berubah**: `/chat`, `/chat/stream`, `/health`,
 
 | Hal | Nilai |
 |---|---|
-| Jatah pesan per akun | **40 pesan per jendela 24 jam** |
+| Jatah pesan per akun | **48 pesan per jendela 24 jam** |
 | Saat layanan ramai | Sementara 8 pesan (otomatis, kembali normal sendiri) |
 | Jatah tamu | 3 pesan/hari (per IP, tidak berubah) |
-| Akun baru per hari | Maksimal 25 (agar 25 × 40 tidak melampaui kapasitas 400/hari) |
+| Akun baru per hari | Maksimal 25 (agar akun baru tidak melampaui kapasitas 566/hari) |
 | Kapan jendela dimulai | **Saat pesan pertama akun itu** |
 | Kapan reset | Saat jendela 24 jamnya berakhir — **berbeda tiap akun** |
 | Token | **Dicatat & ditampilkan**, tetapi **tidak membatasi** |
 | Yang dilihat pengguna | **Hanya jatahnya sendiri** — kapasitas layanan hanya untuk pemilik situs |
 
-### Dari mana angka 40 berasal
+### Dari mana angka 48 berasal
 
 Kuota gratis dipakai bergantian menurut model yang dipilih, dan
 **otomatis saling menyelamatkan** saat salah satu kehabisan kuota:
@@ -56,35 +56,78 @@ kapasitas gabungannya tiga kali lipat dari hitungan lama:
 kendala request : 3.000 + 200 + 50      = 3.250 request/hari
 kendala token   : 600.000 + 250.000     = 850.000 token/hari
                   850.000 / 1.500       = 566 pesan/hari  <- yang lebih dulu habis
-                  566 / 10 akun aktif   = 56 pesan per akun (dibatasi 40)
+                  566 / 10 akun aktif   = 56 pesan per akun (dipakai 48)
 ```
 
 Angka 1.500 token/pesan adalah rata-rata nyata (pesan pendek ±700 token,
 pesan panjang/riset ±3.000 token). Kendala yang menentukan adalah **token**,
 bukan request — request masih sangat longgar (3.250 untuk 566 pesan).
 
-Jatah tetap **40** (bukan 56) karena angka Gemini di atas sengaja dibuat
+Jatah dipakai **48** (bukan 56) karena angka Gemini di atas sengaja dibuat
 konservatif: Google tidak lagi mempublikasikan RPD pasti untuk free tier.
 Bila kuota Gemini ternyata lebih besar, tidak ada yang rusak — kita hanya
 tidak memanfaatkannya. Yang berbahaya adalah sebaliknya: menetapkan jatah
 lebih tinggi dari kuota nyata.
 
-Kenapa 40 dan bukan angka lain:
+48 dipilih dari 56 dikurangi ±15% sebagai bantalan, karena rata-rata
+1.500 token/pesan bisa **2x lipat** saat riset web. Dengan 48, kapasitas
+masih menampung **11 akun aktif penuh** (566 / 48).
+
+### Jawaban tidak lagi terpotong
+
+Keluhan nyata: jawaban berhenti di tengah, pengguna harus mengetik
+"lanjut" — dan itu **memakan satu jatah pesan lagi** padahal satu
+pertanyaan belum selesai dijawab.
+
+Tiga penyebab, semuanya diperbaiki:
+
+| Penyebab | Perbaikan |
+|---|---|
+| `DEFAULT_MAX_TOKENS` hanya 2.048 — terlalu pendek untuk riset | Dinaikkan ke **4.096** (bawaan & riset) |
+| `httpx` timeout 60 dtk berlaku juga untuk **membaca** stream, jadi jawaban panjang diputus di detik ke-60 | `TIMEOUT_STREAM`: connect 15 dtk, **read 120 dtk** (jeda antar-potongan, bukan total durasi) |
+| Model kehabisan token → jawaban berhenti, pengguna harus "lanjut" | **Sambung otomatis**: server meminta lanjutan ke model yang sama dan menyambungkannya ke jawaban yang sama |
+
+Sambung otomatis (`MAKS_SAMBUNG = 3`) berjalan **di dalam satu
+permintaan**, jadi pemakaian dicatat **sekali** — satu pertanyaan tetap
+satu jatah. Bila setelah tiga sambungan masih terpotong, server mengirim
+sinyal `{"terpotong": true}` sebelum `{"done": true}` agar UI memberi
+tahu dengan tenang.
+
+### Menu model diringkas
+
+Daftar 12 model dulu ditampilkan sekaligus; di ponsel menu itu mendorong
+kotak ketik keluar layar. Sekarang:
+
+- **Tampil lebih dulu** (`MODEL_UTAMA` di `frontend/src/lib/models.js`):
+  GPT-OSS 120B, Qwen3.8 27B, DeepSeek V4.1 Flash, Gemini 4 Argon,
+  Gemini 3.5 Lite.
+- **Sisanya** di balik tombol **"Model lainnya"** (dengan jumlahnya).
+- Model yang sedang aktif **selalu ditampilkan** walau ia bukan model
+  utama, supaya pengguna tidak kehilangan jejak pilihannya.
+- Tidak ada model yang dihapus — semua tetap bisa dipilih.
+
+Kenapa 48 dan bukan angka lain:
 
 - **16** (hitungan lama) terlalu pesimis: hanya memakai satu model Sumber B.
-- **80** aman hanya bila ≤ 5 akun aktif/hari; satu pengguna yang suka riset
+- **80** aman hanya bila ≤ 7 akun aktif/hari; satu pengguna yang suka riset
   web memakai ±3.000 token/pesan (2× rata-rata), sehingga kuota bisa habis
   sebelum hari berakhir.
-- **40** aman untuk ±10 akun aktif/hari dan masih menyisakan ruang untuk
-  pesan panjang/riset.
+- **56** adalah batas teoretis (566 pesan/hari ÷ 10 akun aktif).
+- **48** = 56 dikurangi bantalan ±15%. Aman untuk ±11 akun aktif/hari dan
+  masih menyisakan ruang untuk pesan panjang/riset.
+
+Bantalan itu penting karena 1.500 token/pesan adalah **rata-rata**: pesan
+riset bisa dua kali lipat. Bila jatah dipasang 56 dan kuota Gemini ternyata
+lebih kecil dari perkiraan, kuota situs habis sebelum hari berakhir dan
+**semua** pengunjung kena.
 
 Dua penjaga supaya kuota tidak habis di tengah hari:
 
 1. **Jatah dipangkas otomatis** — bila sisa pesan situs < 15% dari kapasitas
-   harian (400), akun mendapat 8 pesan/24 jam. Akun yang datang belakangan
+   harian (566), akun mendapat 8 pesan/24 jam. Akun yang datang belakangan
    tetap kebagian.
 2. **Batas akun baru per hari** — maksimal 25 akun baru. Tanpa ini, 25 akun
-   baru x 40 pesan sehari sudah melampaui kapasitas 400 pesan/hari.
+   baru x 48 pesan sehari sudah hampir melampaui kapasitas 566 pesan/hari.
 
 ### Jendela bergulir, bukan jam dinding
 
@@ -464,7 +507,8 @@ cd chatbot-saya/backend
 python uji_server_riwayat.py      # 55 pemeriksaan penyimpanan riwayat
 python uji_jatah.py               # 78 pemeriksaan jatah, reset & kerahasiaan
 python uji_routing_penyedia.py    # 14 pemeriksaan routing model -> penyedia
-python uji_gemini.py              # 43 pemeriksaan Gemini & failover antar penyedia
+python uji_gemini.py              # 40 pemeriksaan Gemini & failover antar penyedia
+python uji_terpotong.py           # 29 pemeriksaan deteksi & sambung jawaban terpotong
 python uji_model_gemini.py        # cek model Gemini mana yang hidup untuk key Anda
 python server_uji.py              # jalankan server uji di port 8000
 python uji_api.py                 # 25 pemeriksaan endpoint lama
@@ -477,6 +521,7 @@ node uji_jatah_browser.mjs        # 23 pemeriksaan jatah/hitung mundur di UI
 node uji_pengaturan_keluar.mjs    # 29 pemeriksaan konfirmasi keluar & pengaturan
 node uji_berpikir.mjs             # 20 pemeriksaan animasi "berpikir"
 node uji_alur_lengkap.mjs         # 26 pemeriksaan alur ujung-ke-ujung
+node uji_menu_model.mjs           # 17 pemeriksaan menu model ringkas & rapi
 ```
 
 > **Penting:** `server_uji.py` menyimpan state di memori proses. Restart

@@ -233,6 +233,141 @@ finally:
     main.identitas_pemanggil = lama_identitas
 
 # ---------------------------------------------------------------------
+print("\n=== 4b. SAMBUNG OTOMATIS (TANPA MEMAKAN JATAH LAGI) ===")
+# ---------------------------------------------------------------------
+# Inti keluhan pengguna: jawaban berhenti di tengah, lalu harus mengetik
+# "lanjut" — dan itu memakan satu jatah pesan lagi. Server sekarang
+# menyambungnya sendiri dalam satu permintaan yang sama.
+
+
+def sambung_otomatis():
+    """Menjalankan /chat/stream dengan model yang terpotong di putaran 1."""
+    lama_siapkan2 = main.siapkan_permintaan
+    lama_identitas2 = main.identitas_pemanggil
+    lama_stream2 = main.stream
+    lama_catat2 = usage.catat_request
+    lama_jatah2 = usage.periksa_jatah
+    lama_daftar2 = usage.daftarkan_akun
+
+    jumlah_catat = {"n": 0}
+    pesan_terkirim = []
+
+    async def catat_tiruan(*a, **k):
+        jumlah_catat["n"] += 1
+        return True
+
+    async def jatah_tiruan(sub):
+        return {"boleh": True, "sisa": 99, "batas": 48, "sub": "uji"}
+
+    async def daftar_tiruan(sub):
+        return {"diterima": True}
+
+    async def siapkan2(request):
+        return (
+            [{"role": "user", "content": "Jelaskan panjang"}],
+            {
+                "model": "gemini-3.5-flash-lite",
+                "temperature": 0.4,
+                "max_tokens": 4096,
+                "penyesuaian": None,
+            },
+        )
+
+    async def identitas2(auth):
+        return {"sub": "uji-sambung"}
+
+    async def stream_bersambung(pesan, opsi):
+        """Putaran 1 terpotong; putaran 2 selesai."""
+        pesan_terkirim.append(pesan)
+        if len(pesan_terkirim) == 1:
+            yield "Bagian pertama jawaban"
+            main._tandai_terpotong()
+        else:
+            yield ", bagian kedua yang merampungkan."
+
+    main.siapkan_permintaan = siapkan2
+    main.identitas_pemanggil = identitas2
+    main.stream = stream_bersambung
+    usage.catat_request = catat_tiruan
+    usage.periksa_jatah = jatah_tiruan
+    usage.daftarkan_akun = daftar_tiruan
+
+    try:
+        r = asyncio.run(main.chat_stream(req, authorization=None))
+
+        async def kumpulkan():
+            potongan = []
+            async for p in r.body_iterator:
+                potongan.append(p)
+            return "".join(potongan)
+
+        keluaran = asyncio.run(kumpulkan())
+    finally:
+        main.siapkan_permintaan = lama_siapkan2
+        main.identitas_pemanggil = lama_identitas2
+        main.stream = lama_stream2
+        usage.catat_request = lama_catat2
+        usage.periksa_jatah = lama_jatah2
+        usage.daftarkan_akun = lama_daftar2
+
+    return keluaran, jumlah_catat["n"], pesan_terkirim
+
+
+keluaran_s, jumlah_catat_s, pesan_s = sambung_otomatis()
+
+cek(
+    "Server memanggil penyedia DUA kali (putaran awal + sambungan)",
+    len(pesan_s) == 2,
+    f"{len(pesan_s)} panggilan",
+)
+cek(
+    "Kedua bagian jawaban tergabung dalam satu aliran",
+    "Bagian pertama jawaban" in keluaran_s
+    and "bagian kedua yang merampungkan." in keluaran_s,
+    keluaran_s[:160].replace("\n", " "),
+)
+cek(
+    "Pengguna TIDAK menerima sinyal 'terpotong' (jawaban sudah utuh)",
+    '"terpotong"' not in keluaran_s,
+    keluaran_s[:160].replace("\n", " "),
+)
+cek(
+    "Pemakaian dicatat SEKALI saja (satu jatah untuk satu pertanyaan)",
+    jumlah_catat_s == 1,
+    f"tercatat {jumlah_catat_s}x",
+)
+cek(
+    "'done' tetap dikirim di akhir",
+    '"done": true' in keluaran_s,
+)
+
+# Pesan sambungan harus memuat jawaban sebelumnya + instruksi melanjutkan.
+if len(pesan_s) > 1:
+    pesan_lanjut = pesan_s[1]
+    peran = [m.get("role") for m in pesan_lanjut]
+    cek(
+        "Pesan sambungan berbentuk [.. user, assistant, user]",
+        peran[-2:] == ["assistant", "user"],
+        str(peran),
+    )
+    cek(
+        "Jawaban sebelumnya ikut dikirim agar model tidak mengulang",
+        "Bagian pertama jawaban" in str(pesan_lanjut[-2].get("content", "")),
+    )
+    cek(
+        "Instruksi melarang mengulang dari awal",
+        "jangan mengulang" in str(pesan_lanjut[-1].get("content", "")).lower(),
+    )
+else:
+    cek("Pesan sambungan terbentuk", False, "sambungan tidak terjadi")
+
+cek(
+    "Batas sambungan wajar (tidak berputar tanpa akhir)",
+    1 <= main.MAKS_SAMBUNG <= 5,
+    str(main.MAKS_SAMBUNG),
+)
+
+# ---------------------------------------------------------------------
 print("\n=== 5. JATAH 48 AMAN TERHADAP KAPASITAS ===")
 # ---------------------------------------------------------------------
 cek(
