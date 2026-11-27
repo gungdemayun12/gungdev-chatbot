@@ -41,6 +41,7 @@ CATATAN DEPLOY VERCEL:
 # 1. IMPORT LIBRARY
 # ---------------------------------------------------------------------
 import base64               # decode file biner yang dikirim klien
+import contextvars         # penanda jawaban terpotong per-permintaan
 import json                 # payload SSE (streaming)
 import logging              # log rapi di terminal
 import os                   # membaca environment variable
@@ -678,7 +679,27 @@ DEFAULT_SYSTEM_PROMPT = (
 )
 
 DEFAULT_TEMPERATURE = 0.4
-DEFAULT_MAX_TOKENS = 2048
+
+# Batas panjang jawaban.
+#
+# MENGAPA DINAIKKAN DARI 2048
+# ---------------------------
+# 2048 token terlalu pendek untuk permintaan riset / penjelasan panjang.
+# Model berhenti di tengah kalimat ("kepotong"), dan pengguna harus
+# mengirim prompt "lanjut" — yang MEMAKAN SATU JATAH PESAN LAGI padahal
+# jawabannya belum selesai. Jadi batas kecil bukan penghematan, justru
+# pemborosan jatah.
+#
+# 4096 cukup untuk jawaban panjang tanpa menabrak batas penyedia:
+#   - Groq gratis : 8.000 token/menit. Jawaban 4096 masih muat.
+#   - Gemini      : output maksimum jauh di atas 4096.
+#   - OpenRouter  : menyesuaikan modelnya sendiri.
+# Masih di bawah batas `le=8192` di ChatRequest, jadi UI tetap sah.
+DEFAULT_MAX_TOKENS = 4096
+
+# Saat riset web, jawaban biasanya lebih panjang (rangkuman + sumber).
+# Beri ruang lebih lega supaya tidak terpotong.
+MAX_TOKENS_RISET = 4096
 
 
 def build_messages(
@@ -1036,8 +1057,10 @@ def _groq_payload(model: str, messages: List[dict], opsi: dict, streaming: bool)
         payload["tools"] = [{"type": "browser_search"}]
         payload["tool_choice"] = "required"
         # Riset butuh waktu; beri ruang token lebih besar agar jawaban
-        # tidak terpotong di tengah. Tetap di bawah batas 8.000 TPM.
-        payload["max_completion_tokens"] = max(opsi["max_tokens"], 2048)
+        # tidak terpotong di tengah.
+        payload["max_completion_tokens"] = max(
+            opsi["max_tokens"], MAX_TOKENS_RISET
+        )
 
     return payload
 
@@ -1291,9 +1314,15 @@ async def openrouter_stream(messages: List[dict], opsi: dict) -> AsyncIterator[s
                         pakai.get("completion_tokens") or 0,
                     )
                 try:
-                    delta = obj["choices"][0]["delta"].get("content") or ""
+                    pilihan = obj["choices"][0]
                 except (KeyError, IndexError, TypeError):
+                    pilihan = {}
+                try:
+                    delta = (pilihan.get("delta") or {}).get("content") or ""
+                except AttributeError:
                     delta = ""
+                if _terpotong_dari_finish(pilihan.get("finish_reason")):
+                    _tandai_terpotong()
                 if isinstance(delta, str) and delta:
                     yield delta
         finally:
@@ -1467,9 +1496,16 @@ async def groq_stream(messages: List[dict], opsi: dict) -> AsyncIterator[str]:
                         pass
 
                 try:
-                    delta = obj["choices"][0]["delta"].get("content") or ""
+                    pilihan = obj["choices"][0]
                 except (KeyError, IndexError, TypeError):
+                    pilihan = {}
+                try:
+                    delta = (pilihan.get("delta") or {}).get("content") or ""
+                except AttributeError:
                     delta = ""
+                # Catat bila model berhenti karena kehabisan token.
+                if _terpotong_dari_finish(pilihan.get("finish_reason")):
+                    _tandai_terpotong()
                 # Sebagian respons mengirim content berupa list bagian.
                 if isinstance(delta, list):
                     delta = "".join(
@@ -1699,9 +1735,15 @@ async def gemini_stream(messages: List[dict], opsi: dict) -> AsyncIterator[str]:
                         pass
 
                 try:
-                    delta = obj["choices"][0]["delta"].get("content") or ""
+                    pilihan = obj["choices"][0]
                 except (KeyError, IndexError, TypeError):
+                    pilihan = {}
+                try:
+                    delta = (pilihan.get("delta") or {}).get("content") or ""
+                except AttributeError:
                     delta = ""
+                if _terpotong_dari_finish(pilihan.get("finish_reason")):
+                    _tandai_terpotong()
                 if isinstance(delta, list):
                     delta = "".join(
                         b.get("text", "")
@@ -1928,6 +1970,54 @@ def _urutan_penyedia(penyedia_utama: str) -> List[str]:
 # penyedia lain. 401/403 TIDAK termasuk: itu masalah kunci, bukan kuota,
 # dan berpindah penyedia justru menyembunyikan kesalahan konfigurasi.
 _STATUS_KUOTA = {429, 402}
+
+# ---------------------------------------------------------------------
+# DETEKSI JAWABAN TERPOTONG
+# ---------------------------------------------------------------------
+# Penyebab jawaban berhenti di tengah ("kepotong"):
+#   1. Model mencapai batas `max_tokens`          -> finish_reason = "length"
+#   2. Batas token per menit penyedia tercapai    -> finish_reason berhenti
+#      mendadak / koneksi ditutup
+#   3. Waktu habis (timeout)                      -> tidak ada finish_reason
+#
+# Dulu hal ini tidak terdeteksi: server mengirim `done: true` seolah
+# jawaban sudah lengkap. Pengguna pun harus mengetik "lanjut" — dan itu
+# MEMAKAN SATU JATAH PESAN LAGI. Sekarang server mengirim sinyal
+# `terpotong` supaya UI bisa memberi tahu dan menawarkan melanjutkan
+# tanpa memotong jatah lagi.
+def _terpotong_dari_finish(finish_reason: Optional[str]) -> bool:
+    """True bila model berhenti karena kehabisan jatah token sendiri."""
+    if not finish_reason:
+        return False
+    return str(finish_reason).lower() in {"length", "max_tokens", "max_output_tokens"}
+
+
+# Penanda jawaban terpotong. Disimpan per-task (contextvars) supaya
+# permintaan yang berjalan bersamaan tidak saling menimpa — satu pengguna
+# yang jawabannya terpotong tidak boleh membuat pengguna lain ikut
+# ditandai terpotong.
+_TERPOTONG: "contextvars.ContextVar[List[str]]" = contextvars.ContextVar(
+    "gungdev_terpotong", default=None
+)
+
+
+def _mulai_pantau_terpotong() -> None:
+    """Menyiapkan penanda baru untuk satu permintaan."""
+    _TERPOTONG.set([])
+
+
+def _tandai_terpotong(alasan: str = "") -> None:
+    """Menandai bahwa jawaban berhenti sebelum selesai."""
+    daftar = _TERPOTONG.get()
+    if daftar is not None:
+        daftar.append(alasan or "token")
+
+
+def _apakah_terpotong() -> bool:
+    """True bila jawaban pada permintaan ini berhenti di tengah."""
+    daftar = _TERPOTONG.get()
+    return bool(daftar)
+
 
 
 async def complete(messages: List[dict], opsi: dict) -> str:
@@ -2728,6 +2818,10 @@ async def chat_stream(request: ChatRequest, authorization: Optional[str] = Heade
 
     async def event_stream() -> AsyncIterator[str]:
         try:
+            # Siapkan penanda baru: setiap permintaan punya status
+            # "terpotong" sendiri.
+            _mulai_pantau_terpotong()
+
             # Beri tahu lebih dulu bila model berbeda dari pilihan
             # pengguna, supaya UI bisa menjelaskannya dengan jujur.
             if opsi.get("penyesuaian"):
@@ -2759,6 +2853,12 @@ async def chat_stream(request: ChatRequest, authorization: Optional[str] = Heade
                 model=opsi["model"],
                 sub=sub_akun,
             )
+
+            # Bila model berhenti karena kehabisan token, beri tahu UI
+            # supaya pengguna tidak perlu menebak. `done` tetap dikirim
+            # agar klien lama tidak menunggu selamanya.
+            if _apakah_terpotong():
+                yield sse({"terpotong": True})
 
             yield sse({"done": True})
 

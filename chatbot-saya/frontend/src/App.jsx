@@ -203,6 +203,7 @@ export default function App() {
 
       let buffer = ''
       let catatanModel = null
+      let terpotong = false
 
       try {
         await streamChat({
@@ -234,9 +235,20 @@ export default function App() {
             setStreamingId(id)
             setStreamingText(buffer)
           },
+          // Model kehabisan token sebelum selesai. Jangan diamkan:
+          // beri tahu pengguna dengan tenang dan jelas.
+          onTerpotong: () => {
+            terpotong = true
+          },
           onDone: () => {
             const id = ensureAssistantSlot()
-            const akhir = catatanModel ? `${buffer}\n\n> ℹ️ ${catatanModel}` : buffer
+            let akhir = buffer
+            if (terpotong) {
+              akhir +=
+                '\n\n---\n\n_Jawaban ini belum selesai — batas panjang tercapai. ' +
+                'Ketik **lanjut** untuk melanjutkan._'
+            }
+            if (catatanModel) akhir += `\n\n> ℹ️ ${catatanModel}`
             setMessageContent(session.id, id, akhir)
             buffer = akhir
           },

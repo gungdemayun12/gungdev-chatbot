@@ -145,6 +145,8 @@ export async function fetchCapabilities(baseUrl, { signal } = {}) {
  * @param {AbortSignal} params.signal  Untuk tombol "Stop"
  * @param {(delta: string) => void} params.onDelta
  * @param {(meta: object) => void} params.onMeta  Info model yang dipakai
+ * @param {() => void} params.onTerpotong  Jawaban berhenti karena
+ *                                     kehabisan token (belum selesai).
  * @param {() => void} params.onDone
  */
 export async function streamChat({
@@ -162,6 +164,7 @@ export async function streamChat({
   signal,
   onDelta,
   onMeta,
+  onTerpotong,
   onDone,
 }) {
   const res = await fetch(`${normalizeUrl(baseUrl)}/chat/stream`, {
@@ -243,6 +246,10 @@ export async function streamChat({
           // untuk memberi tahu pengguna dengan jujur.
           if (obj.meta && typeof onMeta === 'function') onMeta(obj.meta)
           if (typeof obj.delta === 'string' && obj.delta.length > 0) onDelta(obj.delta)
+          // Model berhenti karena kehabisan token: jawabannya belum
+          // lengkap. Beri tahu UI agar pengguna tidak bingung dan bisa
+          // memilih melanjutkan, tanpa menebak-nebak.
+          if (obj.terpotong && typeof onTerpotong === 'function') onTerpotong()
           if (obj.done) {
             onDone()
             return

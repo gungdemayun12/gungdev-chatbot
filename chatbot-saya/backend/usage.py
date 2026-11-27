@@ -162,23 +162,34 @@ PESAN_PER_HARI = KAPASITAS_HARIAN["token"] // max(
 #     850.000 token / 1.500 token per pesan = 566 pesan/hari
 #   Dibagi ke ~10 akun aktif:
 #     566 / 10 = 56 pesan per akun
-#   => jatah TEORITIS 56, tetapi dipakai 40 (JATAH_AKUN_DASAR).
+#   => jatah TEORITIS 56, dipakai 48 (JATAH_AKUN_DASAR).
 #
-# KENAPA TIDAK LANGSUNG 56
-# ------------------------
-# Angka Gemini sengaja dibuat konservatif: Google tidak lagi
-# mempublikasikan RPD pasti untuk free tier, dan sebagian model dibatasi
-# untuk akun lama. Bila kuota Gemini ternyata lebih kecil dari perkiraan,
-# jatah 56 akan membuat kuota situs habis sebelum hari berakhir — dan
-# SEMUA pengunjung terkena. Jatah 40 menyisakan ±30% ruang aman.
+# KENAPA 48, BUKAN 56
+# -------------------
+# 48 diambil dari 56 dikurangi ±15% sebagai bantalan:
+#   - Angka Gemini sengaja konservatif (Google tidak lagi mempublikasikan
+#     RPD pasti; sebagian model dibatasi untuk akun lama).
+#   - Rata-rata 1.500 token/pesan adalah RATA-RATA. Pesan riset/file bisa
+#     3.000 token (2x lipat).
+#   - Bila kuota ternyata lebih kecil dari perkiraan, jatah 56 membuat
+#     kuota situs habis sebelum hari berakhir dan SEMUA pengunjung kena.
+# 48 masih naik 20% dari 40, dan bantalannya cukup.
 #
-# Kenapa 40 dan bukan 16 atau 80:
+# CATATAN PEMAKAIAN NYATA
+# -----------------------
+# Batas ini hanya mengikat bila jumlah akun aktif x jatah melebihi
+# kapasitas 566 pesan/hari. Dengan 48: 566/48 = 11 akun aktif penuh.
+# Bila akun aktif lebih dari itu, penjaga otomatis di bawah
+# (JATAH_SAAT_KUOTA_TIPIS) yang menurunkan jatah sementara — jadi situs
+# tidak mati, hanya lebih ketat saat ramai.
+#
+# Kenapa 48 dan bukan 16 atau 80:
 #   - 16  : hanya memakai 1 model Groq + OpenRouter (terlalu pesimis,
 #           kapasitas sebenarnya 3x lebih besar karena kuota per model).
-#   - 80  : aman hanya bila <= 5 akun aktif/hari; satu pengguna yang suka
+#   - 80  : hanya aman bila <= 7 akun aktif/hari; satu pengguna yang suka
 #           riset web memakai ~3.000 token/pesan (2x rata-rata), jadi
 #           kuota bisa habis sebelum hari berakhir.
-#   - 40  : aman untuk ~10 akun aktif/hari dan masih menyisakan ruang
+#   - 48  : aman untuk ~11 akun aktif/hari dan masih menyisakan ruang
 #           untuk pesan panjang/riset.
 #
 # Bila pemakaian nyata menunjukkan kuota masih lega (cek panel
@@ -190,12 +201,12 @@ PESAN_PER_HARI = KAPASITAS_HARIAN["token"] // max(
 #     dipangkas ke 8 pesan/24 jam (JATAH_SAAT_KUOTA_TIPIS). Akun yang
 #     datang belakangan tetap bisa memakai layanan.
 #   - Total akun baru per hari dibatasi MAX_AKUN_BARU_PER_HARI. Tanpa
-#     ini, 40 akun baru sehari langsung menghabiskan kuota.
-JATAH_AKUN_DASAR = int(os.getenv("JATAH_REQUEST_PER_AKUN", "40") or 40)
+#     ini, 25 akun baru sehari (x 48 pesan) langsung menghabiskan kuota.
+JATAH_AKUN_DASAR = int(os.getenv("JATAH_REQUEST_PER_AKUN", "48") or 48)
 JATAH_SAAT_KUOTA_TIPIS = int(os.getenv("JATAH_KUOTA_TIPIS", "8") or 8)
-# Akun baru per hari: 40 akun x 40 pesan = 1.600 pesan, jauh di atas
-# kapasitas 400 pesan/hari. Karena itu batasnya diturunkan ke 25 agar
-# jumlah akun baru tidak melampaui kapasitas token harian.
+# Akun baru per hari: 25 akun x 48 pesan = 1.200 pesan, jauh di atas
+# kapasitas 566 pesan/hari. Karena itu batasnya tetap 25 agar jumlah
+# akun baru tidak melampaui kapasitas token harian.
 MAX_AKUN_BARU_PER_HARI = int(os.getenv("MAKS_AKUN_BARU", "25") or 25)
 
 # Persentase sisa kuota bersama yang dianggap "tipis".
