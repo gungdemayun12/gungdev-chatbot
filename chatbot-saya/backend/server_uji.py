@@ -306,7 +306,18 @@ async def chat_stream_uji(request: main.ChatRequest, authorization: str | None =
         # produksi, supaya kartu sumber di UI bisa diuji tanpa jaringan.
         if _SUMBER_UJI["sumber"]:
             yield sse({"meta": {"model": "openai/gpt-oss-120b", "sumber": _SUMBER_UJI["sumber"]}})
-            teks = "Harga mulai Rp400.000 [1] dan Rp350.000 [2]."
+            # Bentuk jawaban bisa dipilih agar daftar berbutir ikut teruji
+            # (penanda [2] di akhir setiap butir pernah memutus daftar).
+            if _SUMBER_UJI["bentuk"] == "daftar":
+                teks = (
+                    "**2. Bali Top Holiday**\n\n"
+                    "- Paket Ekonomis 3H2M: start Rp 1.440.000/pax [2]\n"
+                    "- Paket Simple Group 3H2M: start Rp 1.490.000/pax [2]\n"
+                    "- Paket Ekonomis 4H3M: start Rp 2.070.000/pax [2]\n"
+                    "- Bulan Madu 3H2M: Rp 5.400.000/couple [2]\n"
+                )
+            else:
+                teks = "Harga mulai Rp400.000 [1] dan Rp350.000 [2]."
         # Jeda buatan agar animasi "berpikir" bisa diamati/diuji.
         if _JEDA_UJI["detik"] > 0:
             await asyncio.sleep(_JEDA_UJI["detik"])
@@ -325,14 +336,15 @@ async def chat_stream_uji(request: main.ChatRequest, authorization: str | None =
 # Sumber riset tiruan untuk uji kartu sumber di UI.
 # Bawaannya kosong, jadi semua uji lain tidak terpengaruh.
 # ---------------------------------------------------------------------
-_SUMBER_UJI = {"sumber": []}
+_SUMBER_UJI = {"sumber": [], "bentuk": "ringkas"}
 
 
 @main.app.post("/__uji/sumber")
 async def atur_sumber(payload: dict):
     """Mengisi/mengosongkan daftar sumber tiruan untuk uji UI."""
     _SUMBER_UJI["sumber"] = payload.get("sumber") or []
-    return {"ok": True, "jumlah": len(_SUMBER_UJI["sumber"])}
+    _SUMBER_UJI["bentuk"] = payload.get("bentuk") or "ringkas"
+    return {"ok": True, "jumlah": len(_SUMBER_UJI["sumber"]), "bentuk": _SUMBER_UJI["bentuk"]}
 
 
 @main.app.get("/__uji/db")

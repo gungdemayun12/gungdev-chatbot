@@ -32,11 +32,11 @@ async function resetAkun(sub) {
   })
 }
 
-async function aturSumber(sumber) {
+async function aturSumber(sumber, bentuk = 'ringkas') {
   await fetch(`${API}/__uji/sumber`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sumber }),
+    body: JSON.stringify({ sumber, bentuk }),
   })
 }
 
@@ -158,6 +158,38 @@ if (jumlahChip > 0) {
   )
 }
 
+/* ---------- 4c. DAFTAR BERBUTIR tidak boleh rusak (kasus nyata) ---------- */
+/* Ini kasus yang lolos dari uji sebelumnya: penanda [2] di akhir setiap
+   butir sempat memutus daftar sehingga angkanya tampil mentah. */
+console.log('\n=== 4c. DAFTAR BERBUTIR TETAP RAPI ===')
+await aturSumber(SUMBER_UJI, 'daftar')
+await kirim(page, 'carikan paket tour bali beserta harganya')
+await page.waitForFunction(
+  () => document.querySelectorAll('.msg--assistant').length >= 2,
+  null,
+  { timeout: 20000 },
+)
+await page.waitForTimeout(1000)
+
+const butir = await page.evaluate(() => {
+  const semua = document.querySelectorAll('.msg--assistant .msg__content')
+  const isi = semua[semua.length - 1]
+  if (!isi) return null
+  const li = isi.querySelectorAll('li')
+  return {
+    jumlahLi: li.length,
+    teksMentah: (isi.innerText || '').includes('[2]'),
+    berChip: Array.from(li).filter((n) => n.querySelector('.sitasi')).length,
+    adaUl: isi.querySelectorAll('ul, ol').length,
+  }
+})
+cek('daftar dirender sebagai <li> (bukan paragraf terpotong)', Boolean(butir && butir.jumlahLi === 4), JSON.stringify(butir && butir.jumlahLi))
+cek('daftar memakai <ul>/<ol> asli', Boolean(butir && butir.adaUl >= 1), JSON.stringify(butir && butir.adaUl))
+cek('tidak ada angka mentah [2] di layar', Boolean(butir && !butir.teksMentah), String(butir && butir.teksMentah))
+cek('setiap butir membawa chip sumbernya', Boolean(butir && butir.berChip === butir.jumlahLi), `${butir && butir.berChip}/${butir && butir.jumlahLi}`)
+
+await aturSumber(SUMBER_UJI, 'ringkas')
+
 /* ---------- 5. Kartu sumber tetap ada setelah refresh ---------- */
 console.log('\n=== 5. SETELAH REFRESH ===')
 await page.waitForTimeout(600)
@@ -178,14 +210,17 @@ await page.waitForFunction(
   { timeout: 20000 },
 )
 await page.waitForTimeout(900)
-const jumlahKartu = await page.locator('.msg--assistant .sumber').count()
-cek('chat biasa tidak menampilkan kartu sumber', jumlahKartu <= 1, `${jumlahKartu} kartu (hanya dari pesan riset)`)
-const chipChatBiasa = await page.evaluate(() => {
+const cekChatBiasa = await page.evaluate(() => {
   const pesan = document.querySelectorAll('.msg--assistant')
   const terakhir = pesan[pesan.length - 1]
-  return terakhir ? terakhir.querySelectorAll('.sitasi').length : -1
+  if (!terakhir) return null
+  return {
+    kartu: terakhir.querySelectorAll('.sumber').length,
+    chip: terakhir.querySelectorAll('.sitasi').length,
+  }
 })
-cek('chat biasa tidak menampilkan chip sitasi', chipChatBiasa === 0, `${chipChatBiasa} chip`)
+cek('chat biasa tidak menampilkan kartu sumber', Boolean(cekChatBiasa && cekChatBiasa.kartu === 0), JSON.stringify(cekChatBiasa && cekChatBiasa.kartu))
+cek('chat biasa tidak menampilkan chip sitasi', Boolean(cekChatBiasa && cekChatBiasa.chip === 0), JSON.stringify(cekChatBiasa && cekChatBiasa.chip))
 
 /* ---------- 7. Tidak ada error JS ---------- */
 console.log('\n=== 7. TIDAK ADA ERROR JS ===')

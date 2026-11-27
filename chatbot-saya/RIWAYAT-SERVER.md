@@ -795,9 +795,19 @@ Harga awal: Rp200.000–Rp250.000/orang. [Batur Tours +1]
 ```
 
 - Chip dibangun dari penanda `[1]`, `[2]` yang ditulis model, lalu diubah
-  di sisi tampilan (`pecahSitasi` + `ringkasSitasi` di `lib/text.js`,
-  komponen `Sitasi.jsx`). Model **tidak** diminta menghafal format khusus,
-  karena angka `[1]` adalah hal paling sederhana dan paling sering benar.
+  di sisi tampilan (`sisipkanSitasi` di `lib/text.js`, komponen
+  `Sitasi.jsx`). Model **tidak** diminta menghafal format khusus, karena
+  angka `[1]` adalah hal paling sederhana dan paling sering benar.
+- **Penanda diganti DI TEMPAT, bukan dengan memecah jawaban.** Ini penting:
+  versi pertama memecah jawaban menjadi beberapa blok Markdown, dan itu
+  merusak daftar berbutir — satu butir yang penandanya di tengah terbelah,
+  penanda bullet-nya hilang, dan `[2]` tampil sebagai angka mentah. Sekarang
+  seluruh jawaban tetap dirender sebagai SATU dokumen, sehingga daftar,
+  tabel, dan blok kode tetap rapi.
+- Penanda diubah menjadi tautan `https://sumber.gungdev.invalid/sitasi/2`,
+  lalu ditangkap renderer dan digambar sebagai chip. Domain `.invalid`
+  dipakai karena skema buatan (`sitasi:2`) **dikosongkan** oleh
+  react-markdown, sehingga chip gagal dikenali. URL ini tidak pernah dibuka.
 - Nomor pertama menjadi nama chip; sisanya diringkas menjadi `+N`, dengan
   daftar judul lengkap saat kursor diarahkan (`title`).
 - Chip membuka **situs asli** di tab baru (`target="_blank"`,
@@ -857,7 +867,7 @@ node uji_pengaturan_keluar.mjs    # 29 pemeriksaan konfirmasi keluar & pengatura
 node uji_berpikir.mjs             # 20 pemeriksaan animasi "berpikir"
 node uji_alur_lengkap.mjs         # 26 pemeriksaan alur ujung-ke-ujung
 node uji_menu_model.mjs           # 17 pemeriksaan menu model ringkas & rapi
-node uji_sumber_ui.mjs            # 23 pemeriksaan kartu + chip sumber riset (gaya ChatGPT)
+node uji_sumber_ui.mjs            # 27 pemeriksaan kartu + chip sumber riset (gaya ChatGPT)
 ```
 
 > **Penting:** `server_uji.py` menyimpan state di memori proses. Restart

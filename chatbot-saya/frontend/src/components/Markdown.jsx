@@ -17,8 +17,7 @@ import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
 import DOMPurify from 'dompurify'
 import { Check, Copy } from './icons.jsx'
-import { copyToClipboard } from '../lib/text.js'
-import { pecahSitasi } from '../lib/text.js'
+import { copyToClipboard, nomorSitasi, sisipkanSitasi } from '../lib/text.js'
 import ChipSitasi from './Sitasi.jsx'
 
 /** Tombol "Salin" untuk satu blok kode. */
@@ -90,64 +89,54 @@ function Markdown({ content, sumber }) {
     })
   }, [content])
 
-  /* Sitasi sebaris: penanda [1] diubah menjadi chip nama situs yang bisa
-     diklik, persis setelah kalimat yang memakainya. Bila tidak ada daftar
-     sumber, teks dirender apa adanya (satu segmen utuh). */
-  const segmen = useMemo(() => pecahSitasi(safeContent, sumber), [safeContent, sumber])
-  const adaSitasi = segmen.some((s) => s.jenis === 'sitasi')
-
-  const renderer = (teks, kunci) => (
-    <ReactMarkdown
-      key={kunci}
-      remarkPlugins={[remarkGfm]}
-      rehypePlugins={[[rehypeHighlight, { detect: true, ignoreMissing: true }]]}
-      components={{
-        /* Blok kode: bungkus dengan header bahasa + tombol Salin. */
-        pre({ children }) {
-          const child = Array.isArray(children) ? children[0] : children
-          const className = child?.props?.className || ''
-          return <CodeBlock className={className}>{child?.props?.children}</CodeBlock>
-        },
-        /* Link eksternal: aman + buka tab baru. */
-        a({ href, children, ...props }) {
-          const isExternal = /^https?:\/\//i.test(href || '')
-          return (
-            <a
-              href={href}
-              {...props}
-              {...(isExternal ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
-            >
-              {children}
-            </a>
-          )
-        },
-        /* Tabel dibungkus agar bisa di-scroll horizontal di mobile. */
-        table({ children }) {
-          return (
-            <div className="md-table-wrap">
-              <table>{children}</table>
-            </div>
-          )
-        },
-      }}
-    >
-      {teks}
-    </ReactMarkdown>
-  )
-
-  if (!adaSitasi) {
-    return <div className="markdown">{renderer(safeContent, 'utuh')}</div>
-  }
+  /* Sitasi sebaris: penanda [1] diganti DI TEMPAT menjadi tautan
+     `sitasi:1` sehingga seluruh jawaban tetap dirender sebagai SATU
+     dokumen Markdown (daftar berbutir, tabel, dan blok kode tidak
+     terputus). Tautan itu ditangkap renderer `a` di bawah dan digambar
+     sebagai chip nama situs. */
+  const teksSitasi = useMemo(() => sisipkanSitasi(safeContent, sumber), [safeContent, sumber])
 
   return (
     <div className="markdown">
-      {segmen.map((s, i) =>
-        s.jenis === 'sitasi' ? (
-          <ChipSitasi key={`s${i}`} nomor={s.nomor} daftar={sumber} />
-        ) : (
-          renderer(s.isi, `t${i}`)
-        ),
-      )}
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={[[rehypeHighlight, { detect: true, ignoreMissing: true }]]}
+        components={{
+          /* Blok kode: bungkus dengan header bahasa + tombol Salin. */
+          pre({ children }) {
+            const child = Array.isArray(children) ? children[0] : children
+            const className = child?.props?.className || ''
+            return <CodeBlock className={className}>{child?.props?.children}</CodeBlock>
+          },
+          /* Link: chip sitasi, atau tautan biasa (aman + tab baru). */
+          a({ href, children, ...props }) {
+            /* Tautan hasil sisipkanSitasi -> gambar sebagai chip sumber.
+               URL-nya berdomain .invalid dan tidak pernah dibuka. */
+            const nomor = nomorSitasi(href)
+            if (nomor) return <ChipSitasi nomor={nomor} daftar={sumber} />
+            const isExternal = /^https?:\/\//i.test(href || '')
+            return (
+              <a
+                href={href}
+                {...props}
+                {...(isExternal ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+              >
+                {children}
+              </a>
+            )
+          },
+          /* Tabel dibungkus agar bisa di-scroll horizontal di mobile. */
+          table({ children }) {
+            return (
+              <div className="md-table-wrap">
+                <table>{children}</table>
+              </div>
+            )
+          },
+        }}
+      >
+        {teksSitasi}
+      </ReactMarkdown>
     </div>
   )
 }

@@ -189,7 +189,82 @@ function namaSumber(s) {
 }
 
 /**
+ * Menyisipkan penanda sitasi ke dalam teks Markdown sebagai tautan khusus.
+ *
+ * MASALAH YANG DIPERBAIKI: sebelumnya jawaban dipecah menjadi beberapa
+ * blok Markdown terpisah, lalu chip diletakkan di antaranya. Itu merusak
+ * struktur daftar berbutir — satu butir yang penandanya berada di tengah
+ * akan terbelah menjadi dua blok, sehingga penanda bullet-nya hilang dan
+ * penanda `[2]` tampil sebagai angka mentah.
+ *
+ * SEKARANG: teks TIDAK dipecah. Penanda `[2]` diganti di tempatnya menjadi
+ * tautan Markdown biasa dengan skema khusus `sitasi:<nomor>`, sehingga
+ * react-markdown tetap memproses seluruh jawaban sebagai SATU dokumen utuh
+ * (daftar, tabel, dan blok kode tetap rapi). Tautan itu kemudian ditangkap
+ * oleh renderer `a` dan digambar sebagai chip.
+ *
+ * Skema `sitasi:` sengaja dipakai agar tidak bisa dijadikan tautan jahat:
+ * tidak ada URL luar yang ikut terbentuk, dan renderer hanya menerima angka.
+ *
+ * @param {string} teks    jawaban model (Markdown)
+ * @param {Array}  daftar  daftar sumber dari server ({nomor, judul, url, situs})
+ * @returns {string} Markdown dengan penanda sitasi berbentuk `[label](sitasi:1,2)`
+ */
+export function sisipkanSitasi(teks, daftar) {
+  const isi = String(teks || '')
+  if (!isi) return ''
+
+  const peta = new Map(
+    (Array.isArray(daftar) ? daftar : []).map((s) => [Number(s?.nomor), s]),
+  )
+  if (peta.size === 0) return isi
+
+  // Satu grup kurung berisi angka & pemisah, mis. "[1]", "[1][2]", "[1, 3]", "[2-4]".
+  const pola = /\[(\d+(?:\s*[,–-]\s*\d+)*)\](?:\[(\d+(?:\s*[,–-]\s*\d+)*)\])*/g
+
+  const nomorDari = (teksAngka) => {
+    const hasil = []
+    for (const bagian of teksAngka.split(',')) {
+      const rentang = bagian.trim().match(/^(\d+)\s*[–-]\s*(\d+)$/)
+      if (rentang) {
+        const a = Number(rentang[1])
+        const b = Number(rentang[2])
+        for (let n = a; n <= b && n - a < 20; n += 1) hasil.push(n)
+      } else if (/^\d+$/.test(bagian.trim())) {
+        hasil.push(Number(bagian.trim()))
+      }
+    }
+    return hasil
+  }
+
+  return isi.replace(pola, (mentah) => {
+    // Kumpulkan SEMUA grup angka pada kecocokan ini ([1][2] -> 1 dan 2).
+    const semua = []
+    for (const grup of mentah.matchAll(/\[([^\]]+)\]/g)) {
+      semua.push(...nomorDari(grup[1]))
+    }
+    const valid = [...new Set(semua.filter((n) => peta.has(n)))]
+    // Nomor yang tidak dikenal DIBIARKAN apa adanya (informasi tidak hilang).
+    if (valid.length === 0) return mentah
+
+    const utama = peta.get(valid[0])
+    const label = namaSumber(utama).replace(/[[\]]/g, '')
+    const sisa = valid.length > 1 ? ` +${valid.length - 1}` : ''
+    // Skema khusus (`sitasi:1`) TIDAK dipakai: react-markdown mengosongkan
+    // href untuk skema yang tidak dikenal, sehingga chip gagal dikenali.
+    // Karena itu dipakai URL sah berdomain .invalid (dijamin tidak nyata),
+    // lalu ditangkap renderer dan TIDAK pernah dibuka sebagai tautan.
+    return `[${label}${sisa}](https://sumber.gungdev.invalid/sitasi/${valid.join(',')})`
+  })
+}
+
+/**
  * Memecah teks menjadi potongan biasa dan potongan sitasi.
+ *
+ * @deprecated Dipertahankan untuk kompatibilitas dan pengujian logika
+ *   pengenalan nomor. TAMPILAN memakai `sisipkanSitasi` karena cara itu
+ *   tidak merusak struktur Markdown (daftar/tabel) — lihat catatan di
+ *   fungsi tersebut.
  *
  * @param {string} teks      jawaban model (Markdown)
  * @param {Array}  daftar    daftar sumber dari server ({nomor, judul, url, situs})
@@ -254,6 +329,22 @@ export function pecahSitasi(teks, daftar) {
 
   if (akhir < isi.length) potongan.push({ jenis: 'teks', isi: isi.slice(akhir) })
   return potongan
+}
+
+/**
+ * Mengenali URL penanda sitasi hasil `sisipkanSitasi`.
+ *
+ * @param {string} href
+ * @returns {number[]|null} daftar nomor sumber, atau null bila bukan sitasi
+ */
+export function nomorSitasi(href) {
+  const cocok = String(href || '').match(/sumber\.gungdev\.invalid\/sitasi\/([\d,]+)/i)
+  if (!cocok) return null
+  const nomor = cocok[1]
+    .split(',')
+    .map((n) => Number(n))
+    .filter((n) => Number.isFinite(n) && n > 0)
+  return nomor.length ? nomor : null
 }
 
 /**
