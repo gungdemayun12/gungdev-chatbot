@@ -14,7 +14,7 @@ masih tersimpan di perangkat masing-masing.
 |---|---|
 | Riwayat hanya di browser | Riwayat di server, **sama di semua perangkat** |
 | Hapus data browser = riwayat hilang | Riwayat aman di server |
-| Semua pengunjung berbagi satu angka usage | Tiap akun punya **jatah 100 pesan/hari** sendiri |
+| Semua pengunjung berbagi satu angka usage | Tiap akun punya **jatah 16 pesan/24 jam** sendiri |
 | Tidak ada pembatas per akun | Satu akun habis jatah **tidak** memengaruhi akun lain |
 | — | Bila server tak bisa dipakai, salinan perangkat dipakai otomatis |
 
@@ -23,16 +23,47 @@ Kontrak API lama **tidak berubah**: `/chat`, `/chat/stream`, `/health`,
 
 ---
 
-## Jatah chat per akun (baru)
+## Jatah chat per akun
 
 | Hal | Nilai |
 |---|---|
-| Jatah pesan per akun | **100 pesan per jendela 24 jam** |
+| Jatah pesan per akun | **16 pesan per jendela 24 jam** |
+| Saat layanan ramai | Sementara 5 pesan (otomatis, kembali normal sendiri) |
 | Jatah tamu | 3 pesan/hari (per IP, tidak berubah) |
+| Akun baru per hari | Maksimal 40 (agar kuota tidak dihabiskan akun baru) |
 | Kapan jendela dimulai | **Saat pesan pertama akun itu** |
 | Kapan reset | Saat jendela 24 jamnya berakhir — **berbeda tiap akun** |
 | Token | **Dicatat & ditampilkan**, tetapi **tidak membatasi** |
-| Kuota bersama situs | 1.000 permintaan/hari (dari penyedia, dipakai bersama) |
+| Yang dilihat pengguna | **Hanya jatahnya sendiri** — kapasitas layanan hanya untuk pemilik situs |
+
+### Dari mana angka 16 berasal
+
+Dua sumber kuota dipakai bergantian menurut model yang dipilih:
+
+| Sumber | Batas request/hari | Batas token/hari |
+|---|---|---|
+| Sumber A (model `:free`) | 50 | tanpa batas |
+| Sumber B (model lain) | 1.000 | 200.000 |
+
+Perhitungannya memakai pembagian **paling buruk** bagi sumber A:
+
+```
+kendala request : 50 request/hari      -> kalau 25 akun = 2 pesan (terlalu kecil)
+kendala token   : 200.000 / 1.500      = 133 pesan/hari
+                  -> 8 akun aktif      = 16 pesan per akun
+```
+
+Angka 1.500 token/pesan adalah rata-rata nyata (pesan pendek ±700 token,
+pesan panjang/riset ±3.000 token). Dengan 25 akun hasilnya hanya 2 pesan
+(pengguna kecewa), dengan 100 pesan hanya 2 akun yang kebagian (situs
+mati untuk sisanya). **16 pesan** adalah titik seimbangnya.
+
+Dua penjaga supaya kuota tidak habis di tengah hari:
+
+1. **Jatah dipangkas otomatis** — bila sisa kuota situs < 15%, akun
+   mendapat 5 pesan/24 jam. Akun yang datang belakangan tetap kebagian.
+2. **Batas akun baru per hari** — maksimal 40 akun baru. Tanpa ini, 40
+   akun baru sehari saja sudah memakai 37% kuota harian sumber A.
 
 ### Jendela bergulir, bukan jam dinding
 
@@ -190,16 +221,17 @@ Bila belum muncul, buka panel Usage dan lihat pesan di sidebar:
 ```powershell
 # Backend (tanpa perlu Upstash asli — Redis & Google dipalsukan)
 cd chatbot-saya/backend
-python uji_server_riwayat.py      # 54 pemeriksaan penyimpanan riwayat
-python uji_jatah.py               # 51 pemeriksaan jatah & reset bergulir
+python uji_server_riwayat.py      # 55 pemeriksaan penyimpanan riwayat
+python uji_jatah.py               # 71 pemeriksaan jatah, reset & kerahasiaan
 python server_uji.py              # jalankan server uji di port 8000
-python uji_api.py                 # 24 pemeriksaan endpoint lama
-python uji_jatah_api.py           # 37 pemeriksaan jatah/reset via HTTP
+python uji_api.py                 # 25 pemeriksaan endpoint lama
+python uji_jatah_api.py           # 44 pemeriksaan jatah/reset via HTTP
 
 # Frontend (butuh server_uji.py + npm run dev berjalan)
 cd chatbot-saya/frontend
-node uji_browser.mjs              # 16 pemeriksaan riwayat lintas "perangkat"
-node uji_jatah_browser.mjs        # 13 pemeriksaan jatah/reset di UI
+node uji_browser.mjs              # 18 pemeriksaan riwayat lintas "perangkat"
+node uji_jatah_browser.mjs        # 17 pemeriksaan jatah/reset di UI
+node uji_alur_lengkap.mjs         # 26 pemeriksaan alur ujung-ke-ujung
 ```
 
 > **Penting:** `server_uji.py` menyimpan state di memori proses. Restart

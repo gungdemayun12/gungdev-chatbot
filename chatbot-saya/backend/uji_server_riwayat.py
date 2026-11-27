@@ -373,6 +373,10 @@ async def jalankan():
     cek("Angka akun benar di panel", ringkas.get("akun", {}).get("requests", {}).get("terpakai") == 2, ringkas.get("akun", {}).get("requests"))
     cek("Nama penyedia tetap disamarkan", ringkas["provider"] == "gungdev")
     cek("Nama model tetap disamarkan", ringkas["model"] == "gungdev")
+    # Jatah per akun: kapasitas situs tidak lagi dikirim ke klien.
+    cek("Kapasitas situs TIDAK ikut ke klien",
+        "requests" not in ringkas and "tokens" not in ringkas,
+        str(list(ringkas.keys())))
 
     ringkas_tamu = await usage.ringkasan("groq", "openai/gpt-oss-120b")
     cek("Tamu tidak mendapat bagian akun", "akun" not in ringkas_tamu)

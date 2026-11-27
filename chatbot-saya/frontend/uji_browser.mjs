@@ -384,7 +384,7 @@ async function jalankan() {
   await p1.waitForTimeout(1200)
 
   // Buka panel usage lewat tombol di header.
-  const tombolUsage = await p1.$('[aria-label="Lihat pemakaian dan kuota AI"]')
+  const tombolUsage = await p1.$('[aria-label="Lihat jatah dan pemakaian saya"]')
   if (tombolUsage) {
     await tombolUsage.click()
     await p1.waitForTimeout(1800)

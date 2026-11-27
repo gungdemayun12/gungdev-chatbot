@@ -158,8 +158,9 @@ export default function ChatArea({
         </div>
 
         <div className="chat__header-actions">
-          {/* Indikator sisa kuota — hanya muncul bila data tersedia,
-              sehingga tidak mengganggu tampilan lama saat backend lama. */}
+          {/* Indikator jatah akun — hanya muncul bila data akun tersedia,
+              sehingga tidak mengganggu tampilan lama saat backend lama.
+              Angka ini jatah MILIK AKUN INI, bukan kapasitas layanan. */}
           {usageRingkas && (
             <button
               type="button"
@@ -171,11 +172,11 @@ export default function ChatArea({
                     : ''
               }`}
               onClick={onOpenUsage}
-              title={`Kuota AI: ${usageRingkas.persen}% terpakai hari ini. Klik untuk rincian.`}
-              aria-label="Lihat pemakaian dan kuota AI"
+              title={`Jatah Anda: ${usageRingkas.persen}% terpakai. Klik untuk rincian.`}
+              aria-label="Lihat jatah dan pemakaian saya"
             >
               <span className="chat__quota-dot" aria-hidden="true" />
-              <span>{usageRingkas.persen}% kuota</span>
+              <span>{usageRingkas.persen}% jatah</span>
             </button>
           )}
 

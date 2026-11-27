@@ -1,10 +1,11 @@
 /**
- * UsagePanel.jsx — panel pemakaian & sisa kuota AI.
+ * UsagePanel.jsx — panel pemakaian & jatah harian milik akun sendiri.
  *
  * Prinsip desain:
- *   1. JUJUR — angka yang ditampilkan berasal dari penyedia AI, dan
- *      bila masih perkiraan, hal itu ditulis terang-terangan.
- *   2. TENANG — kuota bukan hal yang perlu dicemaskan pengguna biasa.
+ *   1. HANYA JATAH AKUN — pengguna melihat bagiannya sendiri (berapa
+ *      pesan terpakai, sisa, kapan pulih). Kapasitas layanan secara
+ *      keseluruhan adalah urusan pemilik situs dan tidak ditampilkan.
+ *   2. TENANG — jatah bukan hal yang perlu dicemaskan pengguna biasa.
  *      Warna hanya berubah saat benar-benar mendekati batas.
  *   3. TIDAK MENGHABISKAN KUOTA — panel ini hanya membaca /usage,
  *      tidak memanggil model AI sama sekali.
@@ -51,38 +52,6 @@ function warnaBar(persen) {
   return ''
 }
 
-/* ---------------- Satu baris kuota ---------------- */
-function BarKuota({ label, terpakai, batas, sisa, persen, satuan }) {
-  return (
-    <div className="usage-bar">
-      <div className="usage-bar__head">
-        <span className="usage-bar__label">{label}</span>
-        <span className="usage-bar__value">
-          <strong>{angkaRingkas(terpakai)}</strong>
-          <span className="usage-bar__of"> / {angkaRingkas(batas)} {satuan}</span>
-        </span>
-      </div>
-      <div
-        className={`usage-bar__track ${warnaBar(persen)}`}
-        role="progressbar"
-        aria-valuenow={Math.round(persen)}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-label={`${label}: ${persen}% terpakai`}
-      >
-        <div
-          className="usage-bar__fill"
-          style={{ width: `${Math.max(persen, terpakai > 0 ? 1.5 : 0)}%` }}
-        />
-      </div>
-      <div className="usage-bar__foot">
-        <span>Sisa {angkaRingkas(sisa)} {satuan}</span>
-        <span>{persen}% terpakai</span>
-      </div>
-    </div>
-  )
-}
-
 /* ---------------- Isi panel (dipakai modal & Pengaturan) ---------------- */
 export function UsageContent({ apiUrl, apiOnline, aktif = true }) {
   const [data, setData] = useState(null)
@@ -127,10 +96,11 @@ export function UsageContent({ apiUrl, apiOnline, aktif = true }) {
     }
   }, [aktif, ambil])
 
-  const persenRequest = data?.requests?.persen ?? 0
-  const hampirHabis = persenRequest >= 90
   // Bagian "pemakaian saya" hanya ada bila backend mengenali akunnya.
   const akun = data?.akun || null
+  const persenAkun = akun?.requests?.persen ?? 0
+  const hampirHabis = persenAkun >= 90
+  const jatahPenuh = data?.jatah_penuh || akun?.requests?.jatah_penuh || 0
 
   return (
     <div className="usage">
@@ -155,37 +125,39 @@ export function UsageContent({ apiUrl, apiOnline, aktif = true }) {
 
       {data && (
         <>
-          {/* --- Ringkasan model aktif --- */}
+          {/* --- Ringkasan jatah akun --- */}
           <div className="usage__hero">
             <div className="usage__hero-icon">
               <Activity size={18} />
             </div>
             <div className="usage__hero-text">
-              <div className="usage__hero-title">
-                Kuota hari ini
-              </div>
+              <div className="usage__hero-title">Jatah saya</div>
               <div className="usage__hero-sub">
-                Reset dalam <strong>{durasi(data.reset?.detik)}</strong>
-                {data.reset?.waktu_utc && (
-                  <span className="usage__hero-time">
-                    <span className="usage__hero-sep">·</span>{' '}
-                    {new Date(data.reset.waktu_utc).toLocaleString('id-ID', {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                      day: 'numeric',
-                      month: 'short',
-                    })}
-                  </span>
+                {akun ? (
+                  <>
+                    {akun.habis ? (
+                      <>Pulih dalam <strong>{durasi(akun.reset?.detik)}</strong></>
+                    ) : (
+                      <>
+                        Sisa <strong>{angkaRingkas(akun.requests?.sisa || 0)}</strong>{' '}
+                        pesan
+                        {akun.reset?.detik > 0 && (
+                          <> · pulih dalam <strong>{durasi(akun.reset.detik)}</strong></>
+                        )}
+                      </>
+                    )}
+                  </>
+                ) : (
+                  <>Mode tamu</>
                 )}
               </div>
             </div>
           </div>
 
           {/* --- Pemakaian akun ini sendiri ---
-               Ini JATAH SUNGGUHAN milik akun ini (100 pesan per jendela 24 jam),
-               terpisah dari kuota bersama di bawah. Bila habis, chat
-               ditolak sampai reset — jadi angkanya harus terlihat
-               jelas, bukan tersembunyi di rincian. */}
+               Satu-satunya angka jatah yang perlu diketahui pengguna.
+               Bila habis, chat ditolak sampai jendelanya berakhir, jadi
+               angkanya harus terlihat jelas — bukan tersembunyi. */}
           {akun && (
             <div className="usage__akun">
               <div className="usage__akun-head">
@@ -242,6 +214,14 @@ export function UsageContent({ apiUrl, apiOnline, aktif = true }) {
                 </div>
               )}
 
+              {akun.requests?.dikurangi && (
+                <div className="usage__akun-jendela">
+                  Layanan sedang ramai, jadi jatah hari ini sementara lebih
+                  kecil ({angkaRingkas(akun.requests?.batas || 0)} dari biasanya{' '}
+                  {angkaRingkas(jatahPenuh)} pesan). Jatah kembali normal otomatis.
+                </div>
+              )}
+
               {akun.habis && (
                 <div className="usage__akun-habis">
                   Jatah Anda habis. Chat bisa dipakai lagi saat jendela ini
@@ -263,72 +243,32 @@ export function UsageContent({ apiUrl, apiOnline, aktif = true }) {
               </div>
               <div className="usage__akun-note">
                 Masuk dengan Google untuk mendapat jatah{' '}
-                <strong>100 pesan per jendela 24 jam</strong> milik akun Anda sendiri.
+                <strong>
+                  {angkaRingkas(data.tamu.jatah_akun || jatahPenuh)} pesan per
+                  jendela 24 jam
+                </strong>{' '}
+                milik akun Anda sendiri.
               </div>
             </div>
           )}
 
-          {hampirHabis && (
+          {hampirHabis && !akun?.habis && (
             <div className="usage__notice is-warning">
-              Kuota harian hampir habis. Pemakaian akan pulih otomatis
-              dalam {durasi(data.reset?.detik)}.
+              Jatah Anda hampir habis. Jatah pulih otomatis saat jendela
+              24 jam Anda berakhir.
             </div>
           )}
 
-          {/* --- Dua bar utama --- */}
-          <BarKuota
-            label="Permintaan (request)"
-            terpakai={data.requests?.terpakai}
-            batas={data.requests?.batas}
-            sisa={data.requests?.sisa}
-            persen={data.requests?.persen}
-            satuan="req"
-          />
-          <BarKuota
-            label="Token"
-            terpakai={data.tokens?.terpakai}
-            batas={data.tokens?.batas}
-            sisa={data.tokens?.sisa}
-            persen={data.tokens?.persen}
-            satuan="token"
-          />
-
-          {/* --- Rincian --- */}
-          <div className="usage__grid">
-            <div className="usage__cell">
-              <div className="usage__cell-label">Reset berikutnya</div>
-              <div className="usage__cell-value">{durasi(data.reset?.detik)}</div>
-            </div>
-            <div className="usage__cell">
-              <div className="usage__cell-label">Zona waktu</div>
-              <div className="usage__cell-value">{data.reset?.zona || 'UTC'}</div>
-            </div>
-            <div className="usage__cell">
-              <div className="usage__cell-label">Batas per menit</div>
-              <div className="usage__cell-value">
-                {data.per_menit?.request_batas} req ·{' '}
-                {angkaRingkas(data.per_menit?.token_batas)} token
-              </div>
-            </div>
-            <div className="usage__cell">
-              <div className="usage__cell-label">Akurasi permintaan</div>
-              <div className="usage__cell-value">
-                {data.requests?.akurat ? 'Langsung dari penyedia' : 'Perkiraan server'}
-              </div>
-            </div>
-          </div>
-
-          {/* --- Penjelasan jujur --- */}
+          {/* --- Penjelasan jujur, tanpa membuka kapasitas layanan --- */}
           <p className="usage__fineprint">
             Jatah <strong>Pemakaian saya</strong> adalah milik akun Anda sendiri
-            ({angkaRingkas(akun?.requests?.batas || 100)} pesan per jendela{' '}
+            ({angkaRingkas(akun?.requests?.batas || jatahPenuh)} pesan per jendela{' '}
             {Math.round(akun?.reset?.jendela_jam || 24)} jam) dan terpisah dari akun
             lain. Jendelanya dimulai saat pesan pertama Anda, dan jatah kembali
-            penuh saat jendela itu berakhir — jadi waktu reset tiap akun berbeda.
-            Bila tidak habis, Anda tidak pernah dibatasi. Bar{' '}
-            <strong>Permintaan</strong> dan <strong>Token</strong> di atas adalah
-            kuota bersama seluruh pengunjung situs, ditampilkan agar Anda tahu
-            kondisi layanan. Panel ini tidak memakai kuota saat dibuka.
+            penuh saat jendela itu berakhir — jadi waktu pulih tiap akun berbeda.
+            Bila jatah tidak habis, Anda tidak pernah dibatasi. Setiap pesan
+            dihitung sama, baik jawabannya pendek maupun panjang. Panel ini tidak
+            memakai jatah saat dibuka.
           </p>
 
           <button
@@ -349,7 +289,7 @@ export function UsageContent({ apiUrl, apiOnline, aktif = true }) {
 /* ---------------- Panel modal ---------------- */
 export default function UsagePanel({ open, onClose, apiUrl, apiOnline }) {
   return (
-    <Modal open={open} onClose={onClose} title="Pemakaian & Kuota" size="md">
+    <Modal open={open} onClose={onClose} title="Jatah Saya" size="md">
       <UsageContent apiUrl={apiUrl} apiOnline={apiOnline} aktif={open} />
     </Modal>
   )

@@ -82,28 +82,70 @@ BATAS_KUOTA: Dict[str, Dict[str, int]] = {
 BATAS_DEFAULT = {"rpm": 30, "rpd": 1000, "tpm": 8000, "tpd": 200000}
 
 # ---------------------------------------------------------------------
+# KUOTA PENYEDIA YANG DIPAKAI BERSAMA (dasar perhitungan jatah)
+# ---------------------------------------------------------------------
+# Dua penyedia dipakai bergantian menurut model yang dipilih pengguna:
+#
+#   Penyedia A (model:free) : 50 request/hari, tanpa batas token
+#   Penyedia B (model lain) : 1.000 request/hari, TAPI 200.000 token/hari
+#
+# Karena pembagiannya belum tentu 50:50, jatah dihitung dengan pembagian
+# PALING BURUK bagi penyedia A (yang request-nya langka): seluruh jatah
+# akun dianggap habis di penyedia A. Dengan begitu jatah tetap "pas"
+# dalam kondisi apa pun, dan penyedia B (yang 20x lebih lega untuk
+# request) tidak pernah kekurangan.
+KUOTA_BERSAMA = {
+    "rpd_penyedia_langka": 50,       # penyedia dengan request/hari paling sedikit
+    "rpd_penyedia_lega": 1000,       # penyedia dengan request/hari lega
+    "tpd_penyedia_lega": 200_000,    # batas token/hari penyedia lega
+    # Rata-rata token per pesan (prompt + riwayat + jawaban). Diukur dari
+    # pemakaian nyata: pesan pendek ~700 token, pesan panjang/riset
+    # ~3.000 token, sehingga rata-ratanya ~1.500.
+    "token_per_pesan": 1_500,
+}
+
+# ---------------------------------------------------------------------
 # JATAH HARIAN PER AKUN
 # ---------------------------------------------------------------------
-# Kuota penyedia (1000 request/hari) dipakai BERSAMA semua pengunjung dan
-# tidak bisa dibagi oleh kita — Groq yang memegangnya. Tanpa batas per
-# akun, satu pengguna yang sangat aktif bisa menghabiskan kuota seluruh
-# situs sehingga pengunjung lain tiba-tiba tidak bisa chat.
+# Kuota penyedia dipakai BERSAMA semua pengunjung dan tidak bisa dibagi
+# oleh kita. Tanpa batas per akun, satu pengguna yang sangat aktif bisa
+# menghabiskan kuota seluruh situs sehingga pengunjung lain tiba-tiba
+# tidak bisa chat. Karena itu tiap akun mendapat jatah sendiri yang
+# ditegakkan di server.
 #
-# Karena itu tiap akun mendapat jatah sendiri yang ditegakkan di server.
-# Angka dipilih agar kuota gratis cukup untuk sekitar 10 akun aktif:
-#     10 akun x 100 request = 1000 request/hari  (pas dengan batas Groq)
+# PERHITUNGAN ANGKA (dipakai JATAH_AKUN_DASAR di bawah):
+#   kendala 1 (request) : 50  request/hari  / 25 akun =  2  (terlalu kecil)
+#   kendala 2 (token)   : 200.000 token/hari / 1.500 token per pesan
+#                         = 133 pesan/hari -> / 8 akun = 16 pesan/akun
+#   => JATAH = 16 pesan / 24 jam
 #
+# 16 pesan bukan angka asal-asalan: itulah BANYAKNYA pesan yang benar-
+# benar "muat" di kuota gratis bila ada ~8 akun aktif per hari. Coba
+# dengan 25 akun hanya bertahan 2 pesan (pengguna kecewa), 100 pesan
+# hanya bertahan 2 akun (situs mati untuk yang lain).
+#
+# Penjaga agar kuota tidak habis:
+#   - Bila jatah situs tersisa < 15%, tiap akun yang masih punya jatah
+#     dipangkas ke 5 pesan/24 jam (JATAH_SAAT_KUOTA_TIPIS). Akun yang
+#     datang belakangan tetap bisa memakai layanan.
+#   - Total akun baru per hari dibatasi MAX_AKUN_BARU_PER_HARI. Tanpa
+#     ini, 40 akun baru sehari langsung menghabiskan penyedia A.
+JATAH_AKUN_DASAR = int(os.getenv("JATAH_REQUEST_PER_AKUN", "16") or 16)
+JATAH_SAAT_KUOTA_TIPIS = int(os.getenv("JATAH_KUOTA_TIPIS", "5") or 5)
+MAX_AKUN_BARU_PER_HARI = int(os.getenv("MAKS_AKUN_BARU", "40") or 40)
+
+# Persentase sisa kuota bersama yang dianggap "tipis".
+AMBANG_KUOTA_TIPIS = 0.15
+
 # PENTING — kenapa HANYA jumlah pesan yang membatasi:
-# Token tetap DICATAT dan DITAMPILKAN agar pengguna tahu pemakaiannya,
-# tetapi sengaja TIDAK dipakai sebagai pembatas. Panjang jawaban AI
-# sangat bervariasi (jawaban singkat 100 token, jawaban panjang 3.000
-# token), sehingga membatasi token akan membuat pengguna yang bertanya
-# hal sederhana mendapat jatah jauh lebih banyak daripada yang bertanya
-# hal rumit — padahal keduanya satu pesan. Jumlah pesan lebih adil dan
-# lebih mudah dipahami.
-JATAH_AKUN = {
-    "rpd": int(os.getenv("JATAH_REQUEST_PER_AKUN", "100") or 100),
-}
+# Token tetap DICATAT dan DITAMPILKAN agar pengguna (dan pemilik situs)
+# tahu pemakaiannya, tetapi sengaja TIDAK dipakai sebagai pembatas per
+# akun. Panjang jawaban AI sangat bervariasi (jawaban singkat 100 token,
+# jawaban panjang 3.000 token), sehingga membatasi token akan membuat
+# pengguna yang bertanya hal sederhana mendapat jatah jauh lebih banyak
+# daripada yang bertanya hal rumit — padahal keduanya satu pesan.
+# Jumlah pesan lebih adil dan lebih mudah dipahami.
+JATAH_AKUN = {"rpd": JATAH_AKUN_DASAR}
 
 # ---------------------------------------------------------------------
 # JENDELA JATAH: 24 JAM BERGULIR PER AKUN (bukan jam dinding)
@@ -373,6 +415,112 @@ async def baca_harian(sub: Optional[str] = None) -> Dict[str, int]:
 
 
 # ---------------------------------------------------------------------
+# JATAH BERJALAN: dasar per akun, dipangkas bila kuota bersama menipis
+# ---------------------------------------------------------------------
+async def jatah_berjalan() -> int:
+    """
+    Jatah pesan per akun yang BERLAKU SEKARANG (24 jam bergulir).
+
+    Kenapa tidak hanya memakai angka tetap?
+
+    Jatah dihitung untuk ~8 akun aktif. Bila kenyataannya datang 30 akun
+    sekaligus, kuota bersama akan habis di tengah hari dan semua orang
+    (termasuk yang baru masuk) ikut kecewa. Karena itu:
+
+      - kuota masih lega  -> jatah penuh (JATAH_AKUN_DASAR, mis. 16)
+      - kuota < 15% sisa  -> jatah dipangkas (JATAH_SAAT_KUOTA_TIPIS, 5)
+
+    Pemangkasan hanya MEMBATASI lebih awal, tidak pernah menambah dan
+    tidak pernah menghapus pemakaian yang sudah tercatat. Pengguna yang
+    sudah memakai lebih dari angka baru tetap melihat sisa 0 dan
+    mendapat pesan reset yang jelas — bukan error.
+
+    Angkanya tetap per akun; pengguna tidak pernah melihat kuota situs.
+    """
+    try:
+        harian = await baca_harian()
+    except Exception:  # noqa: BLE001
+        return JATAH_AKUN_DASAR
+
+    terpakai = max(0, int(harian.get("requests", 0)))
+    # Hitung dari kendala yang LEBIH DULU habis: request penyedia langka
+    # atau token penyedia lega.
+    sisa_request = KUOTA_BERSAMA["rpd_penyedia_langka"] - terpakai
+    token_terpakai = max(0, int(harian.get("tokens", 0)))
+    sisa_token = KUOTA_BERSAMA["tpd_penyedia_lega"] - token_terpakai
+    batas_token_pesan = sisa_token // max(1, KUOTA_BERSAMA["token_per_pesan"])
+
+    sisa_pesan = min(sisa_request, batas_token_pesan)
+    batas_tipis = int(
+        KUOTA_BERSAMA["rpd_penyedia_langka"] * AMBANG_KUOTA_TIPIS
+    )
+    if sisa_pesan <= batas_tipis:
+        return min(JATAH_AKUN_DASAR, JATAH_SAAT_KUOTA_TIPIS)
+    return JATAH_AKUN_DASAR
+
+
+async def daftarkan_akun(sub: Optional[str]) -> Dict[str, Any]:
+    """
+    Mencatat akun BARU yang pertama kali memakai layanan hari ini.
+
+    Tujuan: kuota penyedia dibagi ke sejumlah akun yang wajar. Tanpa
+    pendaftaran, siapa pun bisa membuat puluhan akun Google dalam sehari
+    dan menghabiskan kuota situs (kenyataannya sudah terjadi: 40 akun
+    baru sehari = 37% dari 1.000 request/hari).
+
+    Mengembalikan:
+        {"baru": bool, "diterima": bool, "akun_hari_ini": int, "batas": int}
+
+    ATURAN PENTING: bila penyimpanan tidak tersedia atau angkanya tidak
+    bisa dibaca, akun SELALU diterima. Lebih baik melonggar daripada
+    menolak pengguna sah karena masalah penyimpanan.
+    """
+    hasil = {
+        "baru": False,
+        "diterima": True,
+        "akun_hari_ini": 0,
+        "batas": MAX_AKUN_BARU_PER_HARI,
+    }
+    sub_sah = _sub_sah(sub)
+    if not sub_sah:
+        return hasil
+    if not (_UPSTASH_URL and _UPSTASH_TOKEN):
+        return hasil
+
+    kunci_daftar = f"{_PREFIX}:akun-baru:{_hari_ini()}"
+    kunci_anggota = f"{_PREFIX}:akun-terdaftar"
+
+    try:
+        sudah = await _redis_perintah("SISMEMBER", kunci_anggota, sub_sah)
+        if sudah in (1, "1", True):
+            # Akun lama: tidak menambah hitungan, tidak pernah ditolak.
+            jumlah = await _redis_perintah("SCARD", kunci_daftar)
+            hasil["akun_hari_ini"] = int(jumlah or 0)
+            return hasil
+
+        # Akun baru: catat keanggotaan dulu agar dua permintaan bersamaan
+        # tidak menghitung dua kali.
+        await _redis_perintah("SADD", kunci_anggota, sub_sah)
+        await _redis_perintah("EXPIRE", kunci_anggota, 90 * 24 * 3600)
+        await _redis_perintah("SADD", kunci_daftar, sub_sah)
+        await _redis_perintah("EXPIRE", kunci_daftar, 3 * 24 * 3600)
+
+        total = int(await _redis_perintah("SCARD", kunci_daftar) or 0)
+        hasil.update(
+            {
+                "baru": True,
+                # Akun ini ikut terhitung, jadi batasnya inklusif: kuota
+                # 40 berarti akun ke-40 masih diterima, ke-41 ditolak.
+                "diterima": total <= MAX_AKUN_BARU_PER_HARI,
+                "akun_hari_ini": total,
+            }
+        )
+        return hasil
+    except Exception:  # noqa: BLE001
+        return hasil
+
+
+# ---------------------------------------------------------------------
 # Token ASLI dari penyedia
 # ---------------------------------------------------------------------
 # Groq mengirim angka token sebenarnya di setiap respons (prompt_tokens +
@@ -597,12 +745,13 @@ async def periksa_jatah(sub: Optional[str]) -> Dict[str, Any]:
       (lihat _jendela_akun), bukan jam dinding yang sama untuk semua.
     """
     sub_sah = _sub_sah(sub)
+    batas = JATAH_AKUN_DASAR
     hasil: Dict[str, Any] = {
         "boleh": True,
         "sub": sub_sah,
         "terpakai": 0,
-        "batas": JATAH_AKUN["rpd"],
-        "sisa": JATAH_AKUN["rpd"],
+        "batas": batas,
+        "sisa": batas,
         "token_terpakai": 0,
         "reset_detik": _detik_sampai_reset_harian(),
         "alasan": None,
@@ -618,6 +767,13 @@ async def periksa_jatah(sub: Optional[str]) -> Dict[str, Any]:
     if not (_UPSTASH_URL and _UPSTASH_TOKEN):
         return hasil
 
+    # Jatah berjalan bisa lebih kecil dari dasar bila kuota situs menipis.
+    try:
+        batas = await jatah_berjalan()
+    except Exception:  # noqa: BLE001
+        batas = JATAH_AKUN_DASAR
+    hasil["batas"] = batas
+
     try:
         jendela = await _jendela_akun(sub_sah)
         catatan = await _baca_jendela(sub_sah)
@@ -629,11 +785,11 @@ async def periksa_jatah(sub: Optional[str]) -> Dict[str, Any]:
 
     hasil["terpakai"] = terpakai
     hasil["token_terpakai"] = token_terpakai
-    hasil["sisa"] = max(0, JATAH_AKUN["rpd"] - terpakai)
+    hasil["sisa"] = max(0, batas - terpakai)
     hasil["reset_detik"] = jendela["sisa_detik"]
 
     # Hanya jumlah pesan yang menentukan boleh/tidak.
-    if terpakai >= JATAH_AKUN["rpd"]:
+    if terpakai >= batas:
         hasil["boleh"] = False
         hasil["alasan"] = "request"
 
@@ -667,15 +823,19 @@ async def ringkasan(
     """
     Menyusun data untuk panel Usage di frontend.
 
-    `sisa_header` berisi nilai x-ratelimit-* dari respons Groq terakhir
-    (bila ada). Nilai dari penyedia SELALU diprioritaskan di atas
-    hitungan lokal, karena penyedia yang menentukan kebenaran.
+    ATURAN UTAMA (permintaan pemilik situs): pengguna HANYA melihat jatah
+    milik akunnya sendiri. Rincian kuota penyedia — berapa request/hari,
+    token/hari, dan batas per menit — adalah urusan pemilik situs dan
+    TIDAK dikirim ke klien. Yang dikirim hanyalah:
 
-    `sub` (opsional) = akun Google yang sudah Diverifikasi server. Bila
-    diisi, respons mendapat bagian "akun" berisi pemakaian MILIK AKUN ITU
-    SENDIRI. Bagian kuota penyedia tetap global karena memang dipakai
-    bersama semua pengguna — menampilkannya seolah milik satu akun akan
-    menyesatkan.
+      - bagian "akun"  : jatah akun itu (terpakai, batas, sisa, reset)
+      - indikator layanan: sehat / ramai / jatah dikurangi
+
+    Indikator dibuat dari perbandingan INTERNAL terhadap kuota penyedia,
+    lalu diringkas menjadi satu kata. Angka mentahnya tidak pernah ikut.
+
+    `sisa_header` berisi nilai x-ratelimit-* dari respons penyedia
+    terakhir (bila ada) dan hanya dipakai untuk indikator itu.
 
     CATATAN KEAMANAN: parameter `provider` & `model` tetap dipakai untuk
     menghitung batas kuota, tetapi NILAINYA TIDAK dikembalikan ke klien.
@@ -686,7 +846,7 @@ async def ringkasan(
 
     # Bila pemanggil tidak memberi header, pakai yang tersimpan dari
     # respons penyedia terakhir. Ini membuat /usage akurat tanpa perlu
-    # memanggil Groq lagi (hemat kuota!).
+    # memanggil penyedia lagi (hemat kuota!).
     if sisa_header is None:
         sisa_header = ambil_header_kuota()
 
@@ -696,9 +856,7 @@ async def ringkasan(
     #
     # Header token TIDAK mewakili kuota harian. Memakainya sebagai
     # kuota harian membuat panel melaporkan "96% habis" padahal itu
-    # hanya jendela 60 detik yang pulih segera. Karena itu:
-    #   - request : pakai header (benar-benar harian)
-    #   - token   : pakai hitungan server terhadap batas harian (TPD)
+    # hanya jendela 60 detik yang pulih segera.
     sisa_request_penyedia = (sisa_header or {}).get("remaining_requests")
 
     if isinstance(sisa_request_penyedia, int):
@@ -709,39 +867,55 @@ async def ringkasan(
     # Token harian selalu dari pencatatan server (perkiraan jujur).
     sisa_token = max(0, batas["tpd"] - harian["tokens"])
 
-    terpakai_request = batas["rpd"] - sisa_request
-    terpakai_token = batas["tpd"] - sisa_token
-
     reset_harian = _detik_sampai_reset_harian()
+
+    # ------------------------------------------------------------------
+    # Indikator layanan — RINGKASAN, bukan angka kuota penyedia.
+    #
+    # Perbandingan dilakukan di dalam server (memakai kuota yang lebih
+    # dulu habis), lalu hasilnya dipadatkan menjadi satu status. Tidak
+    # ada angka request/token penyedia yang keluar dari server.
+    # ------------------------------------------------------------------
+    jatah_kini = await jatah_berjalan()
+    sisa_pesan_situs = min(
+        max(0, KUOTA_BERSAMA["rpd_penyedia_langka"] - harian["requests"]),
+        max(
+            0,
+            (KUOTA_BERSAMA["tpd_penyedia_lega"] - harian["tokens"])
+            // max(1, KUOTA_BERSAMA["token_per_pesan"]),
+        ),
+    )
+    porsi_sisa = sisa_pesan_situs / max(1, KUOTA_BERSAMA["rpd_penyedia_langka"])
+    if porsi_sisa <= AMBANG_KUOTA_TIPIS:
+        status_layanan = "dikurangi"
+    elif porsi_sisa <= 0.4:
+        status_layanan = "ramai"
+    else:
+        status_layanan = "lancar"
 
     hasil: Dict[str, Any] = {
         # Nama penyedia & model SENGAJA diganti label publik: panel ini
         # dapat dibaca siapa saja, jadi detail teknis tidak boleh bocor.
         "provider": "gungdev",
         "model": "gungdev",
-        # Request (RPD) — angka penyedia bila tersedia
-        "requests": {
-            "terpakai": max(0, terpakai_request),
-            "batas": batas["rpd"],
-            "sisa": max(0, sisa_request),
-            "persen": _persen(terpakai_request, batas["rpd"]),
-            "akurat": isinstance(sisa_request_penyedia, int),
+        # Indikator (kata, bukan angka) agar pengguna tahu kondisi
+        # layanan tanpa perlu melihat kuota internal.
+        "layanan": {
+            "status": status_layanan,
+            "jatah_dikurangi": jatah_kini < JATAH_AKUN_DASAR,
+            "catatan": (
+                "Layanan sedang lancar."
+                if status_layanan == "lancar"
+                else (
+                    "Layanan sedang ramai, jadi jatah harian sementara "
+                    "dikurangi sedikit agar semua pengguna tetap dapat "
+                    "bagian. Jatah kembali normal otomatis."
+                    if status_layanan == "dikurangi"
+                    else "Layanan cukup ramai hari ini."
+                )
+            ),
         },
-        # Token (TPD) — dari pencatatan server
-        "tokens": {
-            "terpakai": max(0, terpakai_token),
-            "batas": batas["tpd"],
-            "sisa": max(0, sisa_token),
-            "persen": _persen(terpakai_token, batas["tpd"]),
-            "akurat": False,
-        },
-        # Kuota per menit (dipakai untuk peringatan "terlalu cepat")
-        "per_menit": {
-            "request_batas": batas["rpm"],
-            "token_batas": batas["tpm"],
-            "reset_detik": _detik_sampai_reset_menit(),
-        },
-        # Reset harian
+        # Reset harian layanan (00:00 UTC) — info umum, bukan kuota.
         "reset": {
             "detik": reset_harian,
             "jam": round(reset_harian / 3600, 1),
@@ -750,26 +924,17 @@ async def ringkasan(
             ).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "zona": "UTC",
         },
-        # Transparansi sumber angka, agar tidak menyesatkan pengguna.
-        "sumber": (
-            "penyedia" if isinstance(sisa_request_penyedia, int) else "perkiraan"
-        ),
-        "catatan": (
-            "Jumlah permintaan dibaca langsung dari penyedia AI sehingga akurat. "
-            "Jumlah token dicatat dari angka resmi penyedia; bila penyedia tidak "
-            "mengirimkannya, server memakai perkiraan sehingga angkanya bisa "
-            "sedikit berbeda."
-        ),
-        "token_per_menit_sisa": (sisa_header or {}).get("remaining_tokens"),
+        # Jatah yang berlaku sekarang (dipakai panel untuk menjelaskan
+        # bila jatah sedang dikurangi).
+        "jatah_penuh": JATAH_AKUN_DASAR,
     }
 
     # ------------------------------------------------------------------
     # Pemakaian MILIK AKUN INI SENDIRI.
     #
-    # Penting dibedakan dari angka di atas: kuota penyedia dipakai
-    # bersama semua pengunjung, sedangkan angka di bawah ini benar-benar
-    # milik satu akun. Bila `sub` kosong (tamu), bagian ini tidak
-    # dikirim sama sekali — tamu memang tidak punya akun.
+    # Ini satu-satunya angka jatah yang boleh dilihat pengguna. Bila
+    # `sub` kosong (tamu), bagian ini tidak dikirim sama sekali — tamu
+    # memang tidak punya akun.
     # ------------------------------------------------------------------
     sub_sah = _sub_sah(sub)
     if sub_sah:
@@ -783,7 +948,7 @@ async def ringkasan(
             }
             milik = {"requests": 0, "tokens": 0}
 
-        jatah_req = JATAH_AKUN["rpd"]
+        jatah_req = jatah_kini
         terpakai_req = max(0, int(milik["requests"]))
         terpakai_token = max(0, int(milik["tokens"]))
         sisa_akun = jendela["sisa_detik"]
@@ -797,6 +962,10 @@ async def ringkasan(
                 "batas": jatah_req,
                 "sisa": max(0, jatah_req - terpakai_req),
                 "persen": _persen(terpakai_req, jatah_req),
+                # True bila jatah hari ini lebih kecil dari biasanya,
+                # agar panel bisa menjelaskan tanpa membuka kuota situs.
+                "dikurangi": jatah_req < JATAH_AKUN_DASAR,
+                "jatah_penuh": JATAH_AKUN_DASAR,
             },
             # Token hanya INFORMASI: dicatat dan ditampilkan agar
             # pengguna tahu pemakaiannya, tetapi tidak membatasi chat.
@@ -827,12 +996,21 @@ async def ringkasan(
                 "dibatasi."
             ),
         }
+        if hasil["akun"]["requests"]["dikurangi"]:
+            hasil["akun"]["catatan"] += (
+                " Hari ini layanan sedang ramai, sehingga jatah harian "
+                "sementara dikurangi — jatah kembali normal otomatis."
+            )
     else:
         # Tamu: tidak punya akun, jadi tidak ada jatah per akun.
         # Batas 3 pesan/hari per IP ditegakkan di main.py.
         hasil["tamu"] = {
             "batas_pesan": JATAH_TAMU["rpd"],
-            "catatan": "Masuk dengan Google untuk mendapat jatah 100 pesan/hari.",
+            "jatah_akun": JATAH_AKUN_DASAR,
+            "catatan": (
+                "Masuk dengan Google untuk mendapat jatah "
+                f"{JATAH_AKUN_DASAR} pesan per jendela 24 jam."
+            ),
         }
 
     return hasil

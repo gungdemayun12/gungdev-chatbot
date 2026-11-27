@@ -2,6 +2,8 @@
 .env
 .env.local
 .env.*.local
+# Khusus pengujian lokal (berisi Client ID tiruan untuk uji browser).
+.env.uji
 
 # Dependensi
 node_modules/

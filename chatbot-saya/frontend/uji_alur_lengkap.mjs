@@ -185,8 +185,9 @@ const usage = await page.evaluate(async (api) => {
   })
   return res.json()
 }, API)
-/* Struktur /usage: bagian TINGKAT ATAS = kuota global penyedia,
-   sedangkan bagian "akun" = jatah milik akun ini (100 pesan/24 jam). */
+/* Struktur /usage: bagian TINGKAT ATAS kini HANYA indikator layanan.
+   Satu-satunya angka jatah adalah bagian "akun" milik akun ini
+   (jatah harian per akun, jendela 24 jam bergulir). */
 const akunUsage = usage?.akun || {}
 cek(
   'usage akun tercatat (>= 1 pesan)',
@@ -194,13 +195,14 @@ cek(
   JSON.stringify(akunUsage?.requests),
 )
 cek(
-  'jatah akun memakai batas 100 (bukan batas global)',
-  Number(akunUsage?.requests?.batas) === 100,
+  'jatah akun memakai jatah per akun (bukan batas global)',
+  Number(akunUsage?.requests?.batas) === Number(usage?.jatah_penuh),
   String(akunUsage?.requests?.batas),
 )
 cek(
-  'sisa jatah akun dihitung dari 100',
-  Number(akunUsage?.requests?.sisa) === 100 - Number(akunUsage?.requests?.terpakai),
+  'sisa jatah akun dihitung dari jatahnya',
+  Number(akunUsage?.requests?.sisa) ===
+    Number(akunUsage?.requests?.batas) - Number(akunUsage?.requests?.terpakai),
   JSON.stringify(akunUsage?.requests),
 )
 cek(
@@ -212,6 +214,21 @@ cek(
   'jendela jatah bergulir 24 jam',
   akunUsage?.reset?.bergulir === true && Number(akunUsage?.reset?.jendela_jam) === 24,
   JSON.stringify(akunUsage?.reset),
+)
+cek(
+  'kapasitas layanan TIDAK dikirim ke klien',
+  !('requests' in usage) && !('tokens' in usage) && !('per_menit' in usage),
+  JSON.stringify(Object.keys(usage || {})),
+)
+cek(
+  'ada indikator status layanan',
+  ['lancar', 'ramai', 'dikurangi'].includes(usage?.layanan?.status),
+  JSON.stringify(usage?.layanan),
+)
+cek(
+  'angka kuota penyedia tidak ikut terkirim',
+  !JSON.stringify(usage).includes('200000'),
+  JSON.stringify(usage).slice(0, 110),
 )
 
 const teksHalaman = await page.locator('body').innerText()

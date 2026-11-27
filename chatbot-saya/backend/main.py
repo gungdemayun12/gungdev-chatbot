@@ -1662,6 +1662,9 @@ def pesan_jatah_habis(jatah: dict) -> str:
     else:
         waktu = f"{int(jam)} detik lagi"
 
+    batas = jatah.get("batas")
+    jatah_teks = f" Jatah Anda {batas} pesan per jendela 24 jam." if batas else ""
+
     if jatah.get("alasan") == "token":
         # Tidak dipakai lagi (token bukan pembatas), tetapi dipertahankan
         # agar kode lama/pemanggil lain tidak menghasilkan pesan kosong.
@@ -1670,10 +1673,30 @@ def pesan_jatah_habis(jatah: dict) -> str:
         inti = "Jatah pesan Anda sudah habis."
 
     return (
-        f"{inti} Jatah pulih otomatis dalam {waktu} — yaitu saat jendela "
-        f"24 jam akun Anda berakhir (dihitung sejak pesan pertama Anda). "
-        f"Jatah ini hanya milik akun Anda, akun lain tidak terpengaruh. "
+        f"{inti}{jatah_teks} Jatah pulih otomatis dalam {waktu} — yaitu saat "
+        f"jendela 24 jam akun Anda berakhir (dihitung sejak pesan pertama "
+        f"Anda). Jatah ini hanya milik akun Anda, akun lain tidak terpengaruh. "
         f"Anda masih bisa membaca riwayat percakapan yang sudah ada."
+    )
+
+
+def pesan_akun_baru_penuh(daftar: dict) -> str:
+    """
+    Pesan saat kuota harian untuk AKUN BARU sudah habis.
+
+    Kenapa perlu dibatasi: kuota layanan dibagi rata ke sejumlah akun yang
+    wajar per hari. Tanpa aturan ini, puluhan akun baru dalam sehari bisa
+    menghabiskan seluruh kuota sehingga pengguna lain (dan pengguna setia
+    yang besok kembali) tidak kebagian.
+
+    Pesan sengaja tidak menyebut angka kuota internal, hanya menjelaskan
+    apa yang terjadi dan apa yang bisa dilakukan.
+    """
+    return (
+        "Layanan hari ini sudah menerima banyak akun baru, jadi akun baru "
+        "belum bisa dipakai sekarang. Akun yang sudah pernah memakai layanan "
+        "tetap bisa chat seperti biasa. Silakan coba lagi besok — jatah "
+        "akun baru dibuka kembali otomatis."
     )
 
 
@@ -1771,6 +1794,30 @@ async def diagnostik():
         # petunjuk ini, pemilik situs bisa bingung kenapa penggunaan
         # OpenRouter tetap nol walau kuncinya sudah diisi.
         "key_openrouter_dipakai": PROVIDER == "openrouter",
+        # -------------------------------------------------------------
+        # KAPASITAS & JATAH — HANYA untuk pemilik situs.
+        # Tidak ada satupun dari angka ini yang tampil ke pengguna;
+        # /usage hanya mengirim jatah akun masing-masing.
+        # -------------------------------------------------------------
+        "jatah": {
+            "per_akun_penuh": usage.JATAH_AKUN_DASAR,
+            "per_akun_saat_ramai": usage.JATAH_SAAT_KUOTA_TIPIS,
+            "jendela_jam": round(usage.JENDELA_JATAH_DETIK / 3600, 1),
+            "maks_akun_baru_per_hari": usage.MAX_AKUN_BARU_PER_HARI,
+            "tamu_pesan_per_hari": usage.JATAH_TAMU["rpd"],
+        },
+        "kuota_bersama": {
+            "request_per_hari_penyedia_langka": usage.KUOTA_BERSAMA[
+                "rpd_penyedia_langka"
+            ],
+            "request_per_hari_penyedia_lega": usage.KUOTA_BERSAMA[
+                "rpd_penyedia_lega"
+            ],
+            "token_per_hari_penyedia_lega": usage.KUOTA_BERSAMA[
+                "tpd_penyedia_lega"
+            ],
+            "token_per_pesan_rata2": usage.KUOTA_BERSAMA["token_per_pesan"],
+        },
     }
 
 
@@ -1780,28 +1827,31 @@ async def diagnostik():
 @app.get("/usage")
 async def usage_check(authorization: Optional[str] = Header(None)):
     """
-    Menampilkan pemakaian kuota AI hari ini.
+    Menampilkan JATAH pemakaian milik akun yang sedang login.
 
         {
           "provider": "gungdev",
           "model": "gungdev",
-          "requests": { "terpakai": 40, "batas": 1000, "sisa": 960, "persen": 4.0 },
-          "tokens":   { "terpakai": 17500, "batas": 200000, "sisa": 182500, "persen": 8.8 },
-          "per_menit": { "request_batas": 30, "token_batas": 8000, "reset_detik": 37 },
-          "reset": { "detik": 25200, "jam": 7.0, "waktu_utc": "...", "zona": "UTC" },
-          "sumber": "penyedia" | "perkiraan",
-          "akun": { ... }      // HANYA bila pemanggil login (terverifikasi)
+          "layanan": { "status": "lancar|ramai|dikurangi", ... },
+          "reset":  { "detik": 25200, "jam": 7.0, "waktu_utc": "...", "zona": "UTC" },
+          "akun": {
+             "requests": { "terpakai": 4, "batas": 16, "sisa": 12, "persen": 25 },
+             "tokens":   { "terpakai": 6200, "batas": null },   // hanya info
+             "habis": false,
+             "reset":    { "detik": 70000, "bergulir": true, ... }
+          },
+          "tamu": { "batas_pesan": 3 }   // HANYA bila tidak login
         }
 
-    Bagian "akun" berisi pemakaian MILIK AKUN ITU SENDIRI, sehingga tiap
-    pengguna punya angka masing-masing seperti layanan AI pada umumnya.
-    Angka kuota utama tetap global karena kuota penyedia memang dipakai
-    bersama.
+    PENTING: rincian kuota penyedia (request/hari, token/hari, batas per
+    menit) sengaja TIDAK dikirim. Pengguna hanya perlu tahu bagiannya
+    sendiri; detail kapasitas layanan adalah urusan pemilik situs dan
+    sudah tersedia di /diagnostik (dibatasi kunci).
 
     Endpoint ini TIDAK memanggil penyedia AI, jadi tidak menghabiskan
     kuota sama sekali. Token yang tidak sah hanya membuat bagian "akun"
     tidak dikirim — tidak membuat permintaan gagal, karena tamu pun
-    berhak melihat sisa kuota.
+    berhak melihat jatah tamu.
     """
     akun = await identitas_pemanggil(authorization)
     return await usage.ringkasan(
@@ -2176,6 +2226,11 @@ async def chat(request: ChatRequest, authorization: Optional[str] = Header(None)
     if not jatah["boleh"]:
         raise HTTPException(status_code=429, detail=pesan_jatah_habis(jatah))
 
+    # Batasi jumlah AKUN BARU per hari (lihat usage.daftarkan_akun).
+    daftar = await usage.daftarkan_akun(jatah.get("sub"))
+    if not daftar.get("diterima", True):
+        raise HTTPException(status_code=429, detail=pesan_akun_baru_penuh(daftar))
+
     try:
         isi = await complete(messages, opsi)
         # Catat pemakaian (tidak pernah menggagalkan percakapan).
@@ -2225,6 +2280,16 @@ async def chat_stream(request: ChatRequest, authorization: Optional[str] = Heade
     if not jatah["boleh"]:
         raise HTTPException(status_code=429, detail=pesan_jatah_habis(jatah))
     sub_akun = jatah.get("sub")
+
+    # Batasi jumlah AKUN BARU per hari agar kuota situs tidak dihabiskan
+    # akun-akun baru (lihat usage.daftarkan_akun). Akun yang sudah
+    # terdaftar tidak pernah terkena aturan ini.
+    daftar = await usage.daftarkan_akun(sub_akun)
+    if not daftar.get("diterima", True):
+        raise HTTPException(
+            status_code=429,
+            detail=pesan_akun_baru_penuh(daftar),
+        )
 
     def sse(obj: dict) -> str:
         return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"

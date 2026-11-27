@@ -2,8 +2,8 @@
  * uji_jatah_browser.mjs — memastikan jatah per akun terlihat & bekerja di UI.
  *
  * Yang diuji:
- *   1. Panel Usage menampilkan "Pemakaian saya" dengan jatah 100 pesan
- *      (bukan 1000 kuota bersama).
+ *   1. Panel Usage menampilkan "Pemakaian saya" dengan jatah akun sendiri,
+ *      dan TIDAK menampilkan kapasitas layanan situs (request/token global).
  *   2. Saat jatah habis, pesan penolakan TAMPIL di area chat dengan
  *      bahasa yang jelas.
  *   3. Akun lain tetap bisa chat.
@@ -18,6 +18,14 @@ const TOKEN_A = 'token-akun-a'
 const TOKEN_B = 'token-akun-b'
 const SUB_A = '100000000000000001'
 const SUB_B = '200000000000000002'
+
+// Jatah per akun dibaca dari backend uji agar uji tidak perlu diubah
+// lagi bila angka jatah disesuaikan.
+async function bacaJatah() {
+  const res = await fetch(`${API}/usage`)
+  const data = await res.json()
+  return Number(data?.jatah_penuh || data?.tamu?.jatah_akun || 16)
+}
 
 const HASIL = []
 function cek(nama, lulus, info = '') {
@@ -84,21 +92,28 @@ async function jalankan() {
   await resetAkun(SUB_A)
   await resetAkun(SUB_B)
 
+  const JATAH = await bacaJatah()
+  console.log(`Jatah per akun yang diuji: ${JATAH} pesan`)
+
   /* ================= 1. PANEL MENAMPILKAN JATAH AKUN ================= */
   console.log('\n=== 1. PANEL USAGE MENAMPILKAN JATAH AKUN ===')
-  await aturPemakaian(SUB_A, 37, 9999)
+  await aturPemakaian(SUB_A, 7, 9999)
   const d1 = await bukaSebagai(browser, { sub: SUB_A, name: 'Akun A', token: TOKEN_A })
   const p1 = d1.page
   await p1.waitForTimeout(1200)
 
-  await p1.click('[aria-label="Lihat pemakaian dan kuota AI"]')
+  await p1.click('[aria-label="Lihat jatah dan pemakaian saya"]')
   await p1.waitForSelector('.usage__akun', { timeout: 15000 })
   await p1.waitForTimeout(800)
 
   const teksAkun = (await p1.textContent('.usage__akun')) || ''
   cek('Blok "Pemakaian saya" tampil', /Pemakaian saya/i.test(teksAkun), teksAkun.slice(0, 60))
-  cek('Menampilkan 37 pesan terpakai', teksAkun.includes('37'), teksAkun.slice(0, 90))
-  cek('Menampilkan jatah 100 pesan', teksAkun.includes('100'), teksAkun.slice(0, 90))
+  cek('Menampilkan 7 pesan terpakai', teksAkun.includes('7'), teksAkun.slice(0, 90))
+  cek(
+    `Menampilkan jatah ${JATAH} pesan`,
+    teksAkun.includes(String(JATAH)),
+    teksAkun.slice(0, 90),
+  )
   cek('Menampilkan sisa pesan', /Sisa/i.test(teksAkun), teksAkun.slice(0, 120))
   cek('Menampilkan token terpakai', /token/i.test(teksAkun), teksAkun.slice(0, 140))
   cek(
@@ -117,13 +132,37 @@ async function jalankan() {
     teksAkun.slice(0, 160),
   )
 
+  /* Kapasitas layanan (request/token global, batas per menit) TIDAK
+     boleh tampil: itu urusan pemilik situs. */
+  const teksPanel = (await p1.textContent('.usage')) || ''
+  cek(
+    'Panel TIDAK menampilkan kuota situs (bar "Permintaan (request)")',
+    !/Permintaan \(request\)/i.test(teksPanel),
+    teksPanel.slice(0, 120),
+  )
+  cek(
+    'Panel TIDAK menampilkan batas per menit',
+    !/Batas per menit/i.test(teksPanel),
+    teksPanel.slice(0, 120),
+  )
+  cek(
+    'Panel TIDAK menampilkan token global 200 rb',
+    !/200\s*rb/i.test(teksPanel),
+    teksPanel.slice(0, 160),
+  )
+  cek(
+    'Panel TIDAK menyebut nama penyedia/model',
+    !/groq|openrouter|gpt-oss|qwen/i.test(teksPanel),
+    teksPanel.slice(0, 160),
+  )
+
   const tutup = await p1.$('[aria-label="Tutup dialog"]')
   if (tutup) await tutup.click()
   await p1.waitForTimeout(500)
 
   /* ================= 2. JATAH HABIS -> PESAN TAMPIL ================= */
   console.log('\n=== 2. JATAH HABIS: PESAN PENOLAKAN TAMPIL ===')
-  await aturPemakaian(SUB_A, 100, 0)
+  await aturPemakaian(SUB_A, JATAH, 0)
 
   await p1.fill('.composer__input', 'Pesan saat jatah habis')
   await p1.click('.composer__send')

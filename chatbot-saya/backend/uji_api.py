@@ -113,7 +113,12 @@ with httpx.Client(base_url=BASE, timeout=20) as c:
     cek("Usage akun A = 2 permintaan", ua.get("akun", {}).get("requests", {}).get("terpakai") == 2, ua.get("akun", {}).get("requests"))
     cek("Usage akun B = 1 permintaan", ub.get("akun", {}).get("requests", {}).get("terpakai") == 1, ub.get("akun", {}).get("requests"))
     cek("Tamu tidak punya bagian akun", "akun" not in ut)
-    cek("Total situs = 3 permintaan", ut["requests"]["terpakai"] >= 3, ut["requests"]["terpakai"])
+    # Sejak jatah per akun: pengguna HANYA melihat jatahnya sendiri.
+    # Total pemakaian seluruh situs tidak lagi dikirim ke klien.
+    cek("Kapasitas situs TIDAK dikirim ke klien",
+        "requests" not in ut and "tokens" not in ut, str(list(ut.keys())))
+    cek("Indikator layanan tersedia", (ut.get("layanan") or {}).get("status") in
+        ("lancar", "ramai", "dikurangi"), str(ut.get("layanan")))
     cek("Nama penyedia tetap disamarkan", ua["provider"] == "gungdev")
     cek("Nama model tetap disamarkan", ua["model"] == "gungdev")
 

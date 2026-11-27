@@ -717,8 +717,12 @@ export default function App() {
           onOpenSettings={() => setSettingsOpen(true)}
           onOpenUsage={() => setUsageOpen(true)}
           usageRingkas={
-            usage?.requests
-              ? { persen: usage.requests.persen, sisa: usage.requests.sisa }
+            usage?.akun?.requests
+              ? {
+                  persen: usage.akun.requests.persen,
+                  sisa: usage.akun.requests.sisa,
+                  batas: usage.akun.requests.batas,
+                }
               : null
           }
           onPickSuggestion={handlePickSuggestion}

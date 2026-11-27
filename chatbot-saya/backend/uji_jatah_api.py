@@ -8,7 +8,7 @@ di dalam modul:
   2. Akun yang jatahnya habis -> /chat ditolak HTTP 429 dengan pesan jelas
   3. /chat/stream ditolak SEBELUM streaming (bukan 200 kosong)
   4. Akun LAIN tetap bisa chat (isolasi jatah)
-  5. /usage menampilkan jatah akun yang benar
+  5. /usage menampilkan jatah akun yang benar, TANPA kapasitas situs
   6. Tamu tidak terkena jatah akun
   7. Kontrak lama tidak berubah: /chat tetap {"reply": ...},
      /chat/stream tetap SSE, /health tetap {"status":"ok"}
@@ -31,6 +31,12 @@ AKUN_A = "100000000000000001"
 AKUN_B = "200000000000000002"
 TOKEN_A = "token-akun-a"
 TOKEN_B = "token-akun-b"
+
+# Jatah per akun dibaca dari modul (satu sumber kebenaran) agar uji ini
+# tidak perlu diubah lagi bila angka jatah disesuaikan.
+import usage  # noqa: E402
+
+JATAH = usage.JATAH_AKUN_DASAR
 
 HASIL = []
 
@@ -95,7 +101,7 @@ def jalankan() -> None:
 
     # ================= 2. JATAH HABIS -> DITOLAK =================
     print("\n=== 2. JATAH HABIS: /chat DITOLAK ===")
-    atur_pemakaian(AKUN_A, 100)  # tepat di batas
+    atur_pemakaian(AKUN_A, JATAH)  # tepat di batas
     r = chat("Pesan saat jatah habis", TOKEN_A)
     cek("POST /chat ditolak 429", r.status_code == 429, str(r.status_code))
     detail = ""
@@ -106,18 +112,20 @@ def jalankan() -> None:
     cek("Pesan penolakan jelas bagi pengguna", "jatah" in detail.lower(),
         detail[:90])
     cek("Pesan menyebut jatah pulih otomatis", "pulih" in detail.lower())
+    cek("Pesan menyebut berapa jatah akun",
+        str(JATAH) in detail, detail[:110])
     cek("Pesan TIDAK membocorkan nama penyedia/model",
         "groq" not in detail.lower() and "gpt" not in detail.lower(),
         detail[:60])
 
     # Di atas batas juga ditolak (tidak ada celah).
-    atur_pemakaian(AKUN_A, 150)
+    atur_pemakaian(AKUN_A, JATAH + 50)
     cek("Di atas batas tetap ditolak",
         chat("Pesan lagi", TOKEN_A).status_code == 429)
 
     # ================= 3. STREAM DITOLAK SEBELUM MULAI =================
     print("\n=== 3. /chat/stream DITOLAK SEBELUM STREAMING ===")
-    atur_pemakaian(AKUN_A, 100)
+    atur_pemakaian(AKUN_A, JATAH)
     r = chat("Stream saat habis", TOKEN_A, stream=True)
     cek("Stream ditolak 429 (bukan 200 kosong)", r.status_code == 429,
         str(r.status_code))
@@ -134,7 +142,8 @@ def jalankan() -> None:
 
     # ================= 5. /usage MENAMPILKAN JATAH AKUN =================
     print("\n=== 5. /usage MENAMPILKAN JATAH AKUN SENDIRI ===")
-    atur_pemakaian(AKUN_A, 37, tokens=9999)
+    terpakai_a = max(2, JATAH // 2)      # sebagian jatah sudah terpakai
+    atur_pemakaian(AKUN_A, terpakai_a, tokens=9999)
     atur_pemakaian(AKUN_B, 2, tokens=500)
 
     uA = httpx.get(f"{BASE}/usage", headers={"Authorization": f"Bearer {TOKEN_A}"},
@@ -144,12 +153,14 @@ def jalankan() -> None:
 
     akunA = uA.get("akun") or {}
     akunB = uB.get("akun") or {}
-    cek("Akun A terpakai 37", akunA.get("requests", {}).get("terpakai") == 37,
+    cek(f"Akun A terpakai {terpakai_a}",
+        akunA.get("requests", {}).get("terpakai") == terpakai_a,
         str(akunA.get("requests")))
-    cek("Akun A batas 100 (bukan 1000 global)",
-        akunA.get("requests", {}).get("batas") == 100,
+    cek("Akun A batas sesuai jatah akun (bukan kuota situs)",
+        akunA.get("requests", {}).get("batas") == JATAH,
         str(akunA.get("requests", {}).get("batas")))
-    cek("Akun A sisa 63", akunA.get("requests", {}).get("sisa") == 63,
+    cek("Akun A sisa sesuai jatah",
+        akunA.get("requests", {}).get("sisa") == JATAH - terpakai_a,
         str(akunA.get("requests", {}).get("sisa")))
     cek("Akun B terpakai 2 (terpisah)", akunB.get("requests", {}).get("terpakai") == 2,
         str(akunB.get("requests")))
@@ -161,10 +172,26 @@ def jalankan() -> None:
         str(akunA.get("reset", {}).get("waktu_utc")))
     cek("Nama penyedia tetap disamarkan", uA.get("provider") == "gungdev")
 
+    # ================= 5b. /usage TIDAK MEMBOCORKAN KAPASITAS SITUS ========
+    print("\n=== 5b. /usage HANYA JATAH AKUN (KAPASITAS SITUS TETAP RAHASIA) ===")
+    for nama, kunci in (("requests (situs)", "requests"),
+                        ("tokens (situs)", "tokens"),
+                        ("per_menit", "per_menit"),
+                        ("sumber", "sumber")):
+        cek(f"Tidak ada bagian '{nama}' di respons /usage",
+            kunci not in uA, str(list(uA.keys())))
+    teks = json.dumps(uA)
+    cek("Angka kuota penyedia tidak ikut terkirim",
+        "200000" not in teks and "1000" not in teks.replace(" ", ""),
+        teks[:110])
+    cek("Ada indikator status layanan",
+        (uA.get("layanan") or {}).get("status") in ("lancar", "ramai", "dikurangi"),
+        str(uA.get("layanan")))
+
     # ================= 6. RESET: JENDELA 24 JAM BERGULIR =================
     print("\n=== 6. RESET = JENDELA 24 JAM BERGULIR PER AKUN ===")
-    atur_pemakaian(AKUN_A, 100)          # A habis
-    atur_pemakaian(AKUN_B, 100)          # B juga habis
+    atur_pemakaian(AKUN_A, JATAH)          # A habis
+    atur_pemakaian(AKUN_B, JATAH)          # B juga habis
     r = chat("A saat habis", TOKEN_A)
     cek("A ditolak saat habis", r.status_code == 429, str(r.status_code))
 
@@ -192,11 +219,11 @@ def jalankan() -> None:
     uA2 = httpx.get(f"{BASE}/usage", headers={"Authorization": f"Bearer {TOKEN_A}"},
                     timeout=15).json()
     akunA2 = uA2.get("akun") or {}
-    cek("Setelah reset, A terpakai 1 (bukan 100)",
+    cek("Setelah reset, A terpakai 1 (bukan penuh)",
         akunA2.get("requests", {}).get("terpakai") == 1,
         str(akunA2.get("requests")))
-    cek("Setelah reset, A sisa 99",
-        akunA2.get("requests", {}).get("sisa") == 99,
+    cek("Setelah reset, A sisa jatah - 1",
+        akunA2.get("requests", {}).get("sisa") == JATAH - 1,
         str(akunA2.get("requests")))
     cek("Reset akun ditandai bergulir",
         akunA2.get("reset", {}).get("bergulir") is True,

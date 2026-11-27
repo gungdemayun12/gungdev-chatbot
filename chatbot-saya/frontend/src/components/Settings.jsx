@@ -298,8 +298,8 @@ export default function Settings({
           {tab === 'lanjutan' && (
             <>
               <Field
-                label="Pemakaian & kuota"
-                hint="Berapa banyak kuota AI yang sudah terpakai hari ini dan kapan kuota pulih. Panel ini tidak memakai kuota saat dibuka."
+                label="Pemakaian & jatah saya"
+                hint="Berapa jatah pesan Anda hari ini, sisa berapa, dan kapan jatah pulih. Panel ini tidak memakai jatah saat dibuka."
               >
                 <div className="settings-usage">
                   <UsageContent apiUrl={apiUrl} apiOnline={apiOnline} aktif={open} />
