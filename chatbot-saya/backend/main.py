@@ -1512,25 +1512,70 @@ async def ollama_stream(messages: List[dict], opsi: dict) -> AsyncIterator[str]:
 
 
 # ---------------------------------------------------------------------
-# 11. DISPATCHER: satu pintu untuk kedua provider
+# 11. DISPATCHER: satu pintu untuk semua penyedia
 # ---------------------------------------------------------------------
+def _penyedia_untuk_model(model: str) -> str:
+    """
+    Menentukan penyedia yang tepat untuk satu model.
+
+    MENGAPA INI PERLU
+    -----------------
+    Dulu penyedia dipilih SEKALI saat server mulai (dari AI_PROVIDER),
+    lalu semua model dikirim ke penyedia itu. Akibatnya memilih model
+    OpenRouter tetap dijawab Groq — nama model hanya menjadi label,
+    penggunaan OpenRouter tetap nol, dan kuota gratis Groq cepat habis
+    walau pengguna memilih model lain.
+
+    Sekarang setiap model dirutekan ke penyedia yang MEMANG punya model
+    itu:
+      - model terdaftar di OPENROUTER_MODELS -> OpenRouter
+      - selain itu                            -> penyedia utama
+
+    Bila penyedia tujuan tidak punya kunci, model dialihkan ke penyedia
+    yang kuncinya tersedia, supaya chat tetap berjalan (bukan error).
+    """
+    di_openrouter = model in OPENROUTER_MODELS
+    di_groq = model in MODEL_GROQ_DIIZINKAN
+
+    if di_openrouter:
+        if OPENROUTER_API_KEY:
+            return "openrouter"
+        # Kunci OpenRouter tidak ada: jangan biarkan chat mati. Groq
+        # dipakai sebagai penyelamat bila kuncinya tersedia.
+        if GROQ_API_KEY:
+            return "groq"
+        return PROVIDER
+    if di_groq:
+        if GROQ_API_KEY:
+            return "groq"
+        if OPENROUTER_API_KEY:
+            return "openrouter"
+        return PROVIDER
+    # Model tidak dikenali penyedianya: pakai penyedia aktif.
+    return PROVIDER
+
+
 async def complete(messages: List[dict], opsi: dict) -> str:
-    """Menghasilkan jawaban lengkap dari provider aktif."""
-    if PROVIDER == "groq":
-        return await groq_complete(messages, opsi)
-    if PROVIDER == "openrouter":
+    """Menghasilkan jawaban lengkap dari penyedia yang tepat."""
+    model = opsi.get("model") or MODEL_NAME
+    penyedia = _penyedia_untuk_model(model)
+    if penyedia == "openrouter":
         return await openrouter_complete(messages, opsi)
+    if penyedia == "groq":
+        return await groq_complete(messages, opsi)
     return await ollama_complete(messages, opsi)
 
 
 async def stream(messages: List[dict], opsi: dict) -> AsyncIterator[str]:
-    """Menghasilkan jawaban bertahap dari provider aktif."""
-    if PROVIDER == "groq":
-        async for delta in groq_stream(messages, opsi):
+    """Menghasilkan jawaban bertahap dari penyedia yang tepat."""
+    model = opsi.get("model") or MODEL_NAME
+    penyedia = _penyedia_untuk_model(model)
+    if penyedia == "openrouter":
+        async for delta in openrouter_stream(messages, opsi):
             yield delta
         return
-    if PROVIDER == "openrouter":
-        async for delta in openrouter_stream(messages, opsi):
+    if penyedia == "groq":
+        async for delta in groq_stream(messages, opsi):
             yield delta
         return
     async for delta in ollama_stream(messages, opsi):
