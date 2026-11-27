@@ -132,6 +132,75 @@ async function jalankan() {
     await ctxBersih.close()
   }
 
+  /* BERSIHKAN ULANG RIWAYAT SESUDAH reset jatah, lalu PASTIKAN kosong.
+     Mengapa perlu: langkah `hapusRiwayatServer` di atas dijalankan
+     sebelum reset, dan reset sengaja tidak menyentuh riwayat akun lain.
+     Bila uji lain (mis. uji_login_bertahan) baru saja menulis riwayat
+     untuk akun yang sama, sisa itu akan muncul di perangkat 2 dan
+     membuat hasil uji bergantung urutan — persis kegagalan palsu yang
+     pernah terjadi. Pemeriksaan di bawah menegaskan server benar-benar
+     bersih, sehingga bila nanti gagal lagi, penyebabnya BUKAN sisa
+     data. */
+  {
+    const ctx = await browser.newContext()
+    const page = await ctx.newPage()
+    await page.goto(URL_APP, { waitUntil: 'domcontentloaded' })
+    const sisa = await page.evaluate(
+      async ({ api, toks }) => {
+        const mod = await import('/src/lib/riwayat.js')
+        const hasil = []
+        for (const t of toks) {
+          mod.setTokenRiwayat(t)
+          /* Hapus berulang: hapusRiwayatServer mengembalikan hasil
+             penghapusan, dan satu putaran sudah cukup untuk server uji. */
+          for (let i = 0; i < 2; i += 1) await mod.hapusRiwayatServer(api, null)
+          const res = await fetch(api + '/api/sessions', {
+            headers: { Authorization: `Bearer ${t}` },
+          })
+          const j = await res.json()
+          hasil.push((j.sesi || []).length)
+        }
+        mod.lupakanToken()
+        return hasil
+      },
+      { api: API, toks: [TOKEN_A, TOKEN_B] },
+    )
+    await ctx.close()
+    cek(
+      'Server benar-benar bersih SEBELUM uji dimulai (tidak ada sisa uji lain)',
+      sisa.every((n) => n === 0),
+      `sesi tersisa per akun = ${JSON.stringify(sisa)}`,
+    )
+  }
+
+  /* Bersihkan JATAH kedua akun. Uji sebelumnya (mis. uji jatah) bisa
+     meninggalkan akun di 100/100 sehingga chat ditolak — itu perilaku
+     yang benar, tetapi membuat uji riwayat ini gagal karena sebab yang
+     salah. Uji riwayat tidak sedang menguji jatah.
+
+     Reset TOTAL (jatah + jendela + riwayat), bukan hanya angka
+     pemakaian: bila hanya angkanya dinolkan, jendela lama bisa saja
+     sudah berakhir sehingga akun memakai jendela baru — hasil uji
+     menjadi bergantung urutan. Reset total membuat uji ini selalu
+     mulai dari keadaan yang sama. */
+  {
+    const ctxBersih = await browser.newContext()
+    const pBersih = await ctxBersih.newPage()
+    try {
+      for (const sub of ['100000000000000001', '200000000000000002']) {
+        const res = await pBersih.request.post(`${API}/__uji/reset`, {
+          data: { sub },
+        })
+        if (!res.ok()) {
+          throw new Error(`reset ${sub} gagal: HTTP ${res.status()}`)
+        }
+      }
+    } catch (e) {
+      console.warn(`  (pembersihan uji: ${e.message})`)
+    }
+    await ctxBersih.close()
+  }
+
   /* ================= PERANGKAT 1 — AKUN A ================= */
   console.log('\n=== PERANGKAT 1 (akun A) ===')
   const d1 = await bukaSebagai(browser, {
