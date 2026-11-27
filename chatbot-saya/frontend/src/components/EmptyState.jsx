@@ -1,5 +1,5 @@
 ﻿/**
- * EmptyState.jsx â€” tampilan saat percakapan masih kosong.
+ * EmptyState.jsx — tampilan saat percakapan masih kosong.
  * Sapaan besar bergaya serif sesuai waktu + kartu saran prompt.
  */
 import { Bug, Lightbulb, AlignLeft, BookOpen } from './icons.jsx'
@@ -37,7 +37,7 @@ const SUGGESTIONS = [
     icon: AlignLeft,
     title: 'Ringkas teks ini',
     prompt:
-      'Ringkas teks berikut menjadi 3 poin utama. Pertahankan angka dan nama penting:\n\nTempel teks kamu di siniâ€¦',
+      'Ringkas teks berikut menjadi 3 poin utama. Pertahankan angka dan nama penting:\n\nTempel teks kamu di sini…',
   },
 ]
 
@@ -48,7 +48,7 @@ export default function EmptyState({ nickname, onPick }) {
     <div className="empty">
       <div className="empty__hero">
         <span className="empty__spark" aria-hidden="true">
-          <LogoGungDev ukuran={54} />
+          <LogoGungDev ukuran={76} />
         </span>
         <h1 className="empty__greeting">
           {greeting()}

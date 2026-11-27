@@ -1,5 +1,5 @@
 ﻿/**
- * Message.jsx â€” satu pesan dalam percakapan.
+ * Message.jsx — satu pesan dalam percakapan.
  *
  * - Pesan pengguna: bubble membulat rata kanan + menu Edit / Salin.
  * - Pesan GungDev: teks langsung di kanvas (tanpa bubble berat), avatar "G",
@@ -38,7 +38,7 @@ function ThinkingPanel({ text, streaming }) {
         <ChevronRight size={14} className="thinking__chevron" aria-hidden="true" />
         <Brain size={14} aria-hidden="true" />
         <span>Proses berpikir</span>
-        {streaming && <span className="thinking__live">sedang berpikirâ€¦</span>}
+        {streaming && <span className="thinking__live">sedang berpikir…</span>}
       </button>
       {open && <div className="thinking__body">{text}</div>}
     </div>
@@ -108,7 +108,7 @@ function Message({
   return (
     <article className="msg msg--assistant" aria-label="Jawaban GungDev">
       <div className="msg__avatar" aria-hidden="true">
-        <LogoGungDev ukuran={22} />
+        <LogoGungDev ukuran={26} />
       </div>
       <div className="msg__body">
         <ThinkingPanel text={thinking} streaming={isStreaming} />

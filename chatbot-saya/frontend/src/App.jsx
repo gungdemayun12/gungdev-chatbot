@@ -1,5 +1,5 @@
 ﻿/**
- * App.jsx â€” komponen utama GungDev.
+ * App.jsx — komponen utama GungDev.
  *
  * Tanggung jawab:
  *   - menyatukan state (sesi, pengaturan, tema, toast, modal)
@@ -891,7 +891,7 @@ export default function App() {
         }
       >
         <p className="modal__text">
-          Percakapan <strong>â€œ{deleteTarget?.title}â€</strong> akan dihapus permanen. Tindakan ini
+          Percakapan <strong>“{deleteTarget?.title}”</strong> akan dihapus permanen. Tindakan ini
           tidak dapat dibatalkan.
         </p>
       </Modal>

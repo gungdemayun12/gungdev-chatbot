@@ -1,5 +1,5 @@
 ﻿/**
- * Settings.jsx â€” panel pengaturan dengan tab:
+ * Settings.jsx — panel pengaturan dengan tab:
  * Umum, Personalisasi, Percakapan, Akun, Lanjutan, Pintasan, Tentang.
  *
  * Semua nilai disimpan di localStorage lewat useSettings dan langsung
@@ -188,7 +188,7 @@ export default function Settings({
                   rows={5}
                   maxLength={2000}
                   value={settings.customInstructions}
-                  placeholder="Contoh: Saya frontend developer, lebih suka contoh kode TypeScriptâ€¦"
+                  placeholder="Contoh: Saya frontend developer, lebih suka contoh kode TypeScript…"
                   onChange={(e) => updateSettings({ customInstructions: e.target.value })}
                 />
               </Field>
@@ -495,7 +495,7 @@ export default function Settings({
 
               <Field
                 label={`Temperature: ${settings.temperature.toFixed(1)}`}
-                hint="Rendah (0.2â€“0.5) untuk jawaban faktual, tinggi untuk kreatif."
+                hint="Rendah (0.2–0.5) untuk jawaban faktual, tinggi untuk kreatif."
                 htmlFor="set-temp"
               >
                 <input
@@ -563,7 +563,7 @@ export default function Settings({
             <div className="about">
               <div className="about__brand">
                 <span className="about__mark" aria-hidden="true">
-                  <LogoGungDev ukuran={38} />
+                  <LogoGungDev ukuran={48} />
                 </span>
                 <div>
                   <h3 className="about__name">GungDev</h3>
@@ -578,7 +578,7 @@ export default function Settings({
               <ul className="about__list">
                 <li>Riwayat percakapan disimpan lokal di peramban Anda.</li>
                 <li>Anda bisa memilih model yang paling pas dari kotak pesan.</li>
-                <li>GungDev bisa membuat kesalahan â€” periksa kembali informasi penting.</li>
+                <li>GungDev bisa membuat kesalahan — periksa kembali informasi penting.</li>
               </ul>
               <p className="about__meta">Dibuat dan dikembangkan oleh GungDev.</p>
             </div>

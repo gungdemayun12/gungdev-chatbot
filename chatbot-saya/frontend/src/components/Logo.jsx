@@ -1,19 +1,14 @@
 /**
- * Logo.jsx — lambang GungDev (rubah) dalam dua bentuk pakai.
+ * Logo.jsx — lambang GungDev (rubah).
  *
- * Kenapa perlu pembungkus, bukan <img> langsung di tiap tempat:
- *   1. Logo asli berwarna oranye dengan garis hampir hitam. Di tema
- *      gelap garis itu bisa menyatu dengan latar, jadi di tempat kecil
- *      logo diberi "ubin" terang (bukan latar gelap) supaya tetap jelas.
- *   2. Ukuran dikunci lewat CSS (bukan atribut width/height saja), jadi
- *      logo tidak gepeng dan tata letak tidak bergeser saat gambar
- *      selesai dimuat.
- *
- * Berkas gambar dibuat dari logo asli oleh _buat_ikon.py — bentuk
- * rubahnya tidak digambar ulang.
+ * Kenapa memakai berkas 64px, bukan berkas besar:
+ *   Rubah pada logo ini tinggi dan sempit, sehingga di kotak kecil garis
+ *   tepinya hanya selebar 2-3 piksel. Bila gambar 512px diperkecil
+ *   langsung ke 26px oleh browser, garis lurus di sisi kiri berubah
+ *   menjadi kabur dan terlihat seperti bekas potongan. Berkas 64px sudah
+ *   disusutkan bertahap oleh _buat_ikon.py, jadi tepinya tetap lurus.
+ *   Berkas 512px hanya dipakai untuk layar beresolusi tinggi (2x).
  */
-
-/** Lambang rubah polos (latar transparan). */
 export function LogoGungDev({ ukuran = 28, className = '', alt = '' }) {
   return (
     <span
@@ -21,8 +16,8 @@ export function LogoGungDev({ ukuran = 28, className = '', alt = '' }) {
       style={{ '--logo-ukuran': `${ukuran}px` }}
     >
       <img
-        src="/logo-192.png"
-        srcSet="/logo-192.png 1x, /logo-512.png 2x"
+        src="/logo-64.png"
+        srcSet="/logo-64.png 1x, /logo-512.png 2x"
         width={ukuran}
         height={ukuran}
         alt={alt}

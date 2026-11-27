@@ -81,6 +81,26 @@ async function itemRiwayat(page) {
   return page.$$eval('.sb-item', (els) => els.map((e) => e.textContent.trim()))
 }
 
+/**
+ * Membaca riwayat akun langsung dari server, memakai pg.REQUEST (bukan
+ * fetch di dalam halaman).
+ *
+ * Mengapa tidak lewat `page.evaluate(fetch(...))` seperti sebelumnya:
+ * permintaan itu berjalan di dalam halaman aplikasi, sehingga ikut
+ * memakai keadaan halaman (token modul, urutan render, hook React).
+ * Bila pemeriksaan kebetulan berjalan saat halaman sedang menulis, hasil
+ * bacaan bisa kosong walaupun server sebenarnya sudah menerima data —
+ * uji lalu gagal karena sebab yang salah, dan hanya kadang-kadang.
+ * Permintaan lewat pg.REQUEST tidak menyentuh halaman sama sekali.
+ */
+async function riwayatDiServer(page, token) {
+  const res = await page.request.get(`${API}/api/sessions`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  const j = await res.json()
+  return (j.sesi || []).map((s) => s.title)
+}
+
 async function jalankan() {
   const browser = await chromium.launch()
 
@@ -249,6 +269,14 @@ async function jalankan() {
     await ctxBersih.close()
   }
 
+  /* Jeda singkat setelah reset jatah.
+     Endpoint /__uji/reset juga MENGHAPUS riwayat akun. Bila perangkat 1
+     mulai menyimpan tepat saat reset masih berjalan, simpanan itu bisa
+     terhapus lagi, lalu pemeriksaan "data sudah sampai di server" membaca
+     kosong dan uji gagal karena sebab yang salah. Jeda ini membuat
+     urutannya pasti, tanpa mengubah apa pun pada aplikasi. */
+  await new Promise((r) => setTimeout(r, 800))
+
   /* ================= PERANGKAT 1 — AKUN A ================= */
   console.log('\n=== PERANGKAT 1 (akun A) ===')
   const d1 = await bukaSebagai(browser, {
@@ -269,13 +297,16 @@ async function jalankan() {
 
   /* Pastikan server BENAR-BENAR sudah menerima data sebelum perangkat 2
      dibuka. Tanpa pemeriksaan ini, uji bisa gagal hanya karena balapan
-     waktu (perangkat 2 membaca sebelum debounce 900 ms selesai). */
-  const tersimpanDiServer = await p1.evaluate(async (api) => {
-    const res = await fetch(api + '/api/sessions', {
-      headers: { Authorization: 'Bearer token-akun-a' },
-    })
-    return (await res.json()).sesi.map((s) => s.title)
-  }, API)
+     waktu (perangkat 2 membaca sebelum debounce 900 ms selesai).
+
+     Dibaca lewat pg.REQUEST, bukan fetch di dalam halaman: pengguna yang
+     sedang mengetik dapat memicu tulis ulang dan membuat bacaan kosong.
+     Bila belum sampai, tunggu sebentar lalu ulangi (maks. 4 detik). */
+  let tersimpanDiServer = await riwayatDiServer(p1, TOKEN_A)
+  for (let i = 0; i < 4 && tersimpanDiServer.length === 0; i += 1) {
+    await p1.waitForTimeout(1000)
+    tersimpanDiServer = await riwayatDiServer(p1, TOKEN_A)
+  }
   cek(
     'Data perangkat 1 benar-benar sudah sampai di server',
     tersimpanDiServer.length === 1,
@@ -297,8 +328,17 @@ async function jalankan() {
     token: TOKEN_A,
   })
   const p2 = d2.page
-  await p2.waitForTimeout(3000) // beri waktu membaca dari server
 
+  /* Tunggu sampai perangkat 2 benar-benar menampilkan riwayat.
+     Sebelumnya hanya diberi jeda tetap 3 detik; bila pembacaan server
+     sedikit lebih lambat (server uji memakai Redis tiruan di memori),
+     daftar belum terisi saat diperiksa. Sekarang: tunggu sampai muncul,
+     dengan batas 12 detik, lalu periksa. */
+  await p2
+    .waitForFunction(() => document.querySelectorAll('.sb-item').length > 0, null, {
+      timeout: 12000,
+    })
+    .catch(() => {})
   const judul2 = await itemRiwayat(p2)
   cek(
     'PERANGKAT 2 MELIHAT RIWAYAT PERANGKAT 1 (inti permintaan)',

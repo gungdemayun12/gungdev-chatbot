@@ -1,5 +1,5 @@
 ﻿/**
- * Sidebar.jsx â€” panel kiri: logo, tombol percakapan baru, pencarian,
+ * Sidebar.jsx — panel kiri: logo, tombol percakapan baru, pencarian,
  * riwayat terkelompok, dan footer pengguna.
  *
  * Satu sesi = satu item riwayat. Item aktif diberi highlight lembut.
@@ -302,11 +302,11 @@ export default function Sidebar({
             type="button"
             className="sb-brand"
             onClick={onNewChat}
-            aria-label="GungDev â€” mulai percakapan baru"
+            aria-label="GungDev — mulai percakapan baru"
             title="GungDev"
           >
             <span className="sb-brand__mark" aria-hidden="true">
-              <LogoGungDev ukuran={28} />
+              <LogoGungDev ukuran={30} />
             </span>
             <span className="sb-brand__name">GungDev</span>
           </button>
@@ -349,7 +349,7 @@ export default function Sidebar({
             ref={searchRef}
             type="search"
             className="sb-search__input"
-            placeholder="Cari percakapanâ€¦"
+            placeholder="Cari percakapan…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
@@ -452,7 +452,7 @@ export default function Sidebar({
           </button>
         </div>
 
-        {/* Tombol masuk / status tamu â€” selalu di bawah, mudah ditemukan */}
+        {/* Tombol masuk / status tamu — selalu di bawah, mudah ditemukan */}
         {!user && (
           <div className="sb-login">
             <button

@@ -66,11 +66,33 @@ def _latar(ukuran: tuple[int, int], warna=PUTIH) -> Image.Image:
     return Image.new("RGBA", ukuran, warna + (255,))
 
 
+def _kecilkan(rubah: Image.Image, sisi: int) -> Image.Image:
+    """
+    Memperkecil rubah dengan mutu terbaik.
+
+    Mengapa perlu pra-penyusutan (prescale): tepi kiri logo adalah GARIS
+    TEGAK LURUS -- itu memang bentuk aslinya (badan rubah "dipotong"
+    rata di kiri seperti lambang). Bila gambar diperkecil terlalu banyak
+    dalam satu langkah (dari 675 px menjadi 26 px), garis lurus itu
+    bercampur dengan isi di sebelahnya dan berubah menjadi garis kabur
+    seperti bekas potongan. Dengan menyusutkan bertahap dan memakai
+    LANCZOS, garis tetap lurus dan rata.
+    """
+    hasil = rubah.copy()
+    # Susutkan bertahap: paling banyak setengah tiap langkah.
+    while min(hasil.width, hasil.height) > sisi * 2:
+        hasil = hasil.resize(
+            (max(1, hasil.width // 2), max(1, hasil.height // 2)),
+            Image.LANCZOS,
+        )
+    hasil.thumbnail((sisi, sisi), Image.LANCZOS)
+    return hasil
+
+
 def _tempel_tengah(latar: Image.Image, rubah: Image.Image, skala: float) -> None:
     lebar, tinggi = latar.size
     sisi = int(min(lebar, tinggi) * skala)
-    kecil = rubah.copy()
-    kecil.thumbnail((sisi, sisi), Image.LANCZOS)
+    kecil = _kecilkan(rubah, sisi)
     posisi = ((lebar - kecil.width) // 2, (tinggi - kecil.height) // 2)
     # Latar PUTIH di belakang logo, supaya rongga badan yang memang putih
     # terbaca sebagai bagian gambar -- bukan lubang yang menembus latar.
@@ -87,7 +109,15 @@ def main() -> None:
     #    Bila latarnya transparan, rongga itu menjadi lubang tembus dan
     #    rubah terlihat "terpotong". Dengan latar putih, bentuknya utuh
     #    persis seperti gambar aslinya.
-    for sisi, nama in ((512, "logo-512.png"), (192, "logo-192.png")):
+    #
+    #    logo-64.png dipakai di antarmuka (sidebar, avatar, layar kosong,
+    #    Tentang). Ukurannya 64 px karena rubah di gambar ini tinggi dan
+    #    sempit: kotak 26-64 px membuat garis tepinya hanya selebar 2-3
+    #    piksel, sehingga mudah berubah kabur. Dengan sumber 64 px dan
+    #    ukuran tampil yang lebih besar, tepinya tetap lurus dan rata.
+    #
+    #    logo-512.png tetap dibuat untuk sumber resolusi tinggi.
+    for sisi, nama in ((512, "logo-512.png"), (64, "logo-64.png")):
         kanvas = _latar((sisi, sisi), PUTIH)
         _tempel_tengah(kanvas, rubah, skala=1.0)
         kanvas.convert("RGB").save(PUBLIC / nama, optimize=True)
@@ -129,8 +159,7 @@ def main() -> None:
     lebar, tinggi = 1200, 630
     kanvas = _latar((lebar, tinggi), PUTIH)
     sisi_logo = 420
-    kecil = rubah.copy()
-    kecil.thumbnail((sisi_logo, sisi_logo), Image.LANCZOS)
+    kecil = _kecilkan(rubah, sisi_logo)
     kanvas.paste(
         kecil,
         ((lebar - kecil.width) // 2, (tinggi - kecil.height) // 2),
