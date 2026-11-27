@@ -102,6 +102,19 @@ for mati in ("gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-2.5-flash"):
         f"'{mati}' TIDAK dipakai lagi (sudah mati/deprecated)",
         mati not in main.GEMINI_MODELS,
     )
+# Model lambat diuji nyata: gemini-4-hydrogen kena 504 di Vercel (>60 dtk)
+# dan gemini-3.6-flash membalas jawaban kosong. Keduanya tidak boleh
+# dipakai: pengguna akan menunggu lama lalu tidak mendapat jawaban.
+for lambat in ("gemini-4-hydrogen", "gemini-3.6-flash"):
+    cek(
+        f"'{lambat}' TIDAK dipakai (terbukti timeout/kosong di produksi)",
+        lambat not in main.GEMINI_MODELS,
+    )
+cek(
+    "Model default bisa dijawab dalam batas waktu Vercel",
+    main.GEMINI_MODEL_DEFAULT == "gemini-3.5-flash-lite",
+    main.GEMINI_MODEL_DEFAULT,
+)
 cek(
     "Ada minimal satu model generasi 3 atau lebih baru",
     any(

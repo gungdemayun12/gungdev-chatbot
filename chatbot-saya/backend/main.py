@@ -172,23 +172,38 @@ GEMINI_MODEL_DEFAULT = _env("GEMINI_MODEL", "gemini-3.5-flash-lite")
 
 # Urutan model yang dicoba, dari yang paling diinginkan.
 #
+# URUTAN INI DIPILIH DARI HASIL UJI NYATA, BUKAN DARI TEORI.
+# Diuji langsung ke produksi (Vercel Hobby) dengan key gratis:
+#
+#   gemini-3.5-flash-lite  -> 200 OK, cepat          <- default
+#   gemini-4-argon         -> 200 OK, 2,8 dtk
+#   gemini-3.1-flash-lite  -> 200 OK, 15 dtk
+#   gemini-3.6-flash       -> 502 jawaban kosong (35,6 dtk)  <- TIDAK DIPAKAI
+#   gemini-4-hydrogen      -> 504 timeout Vercel (>60 dtk)   <- TIDAK DIPAKAI
+#
+# MENGAPA gemini-4-hydrogen DIBUANG
+# ---------------------------------
+# Model Gemini 4 adalah model "reasoning" yang berpikir panjang sebelum
+# menjawab. Vercel Hobby menghentikan fungsi sekitar 60 detik, sehingga
+# permintaan berakhir 504 dan pengguna TIDAK mendapat jawaban sama sekali.
+# Model yang lebih lambat dari batas waktu itu lebih buruk daripada tidak
+# ada: pengguna menunggu lama lalu gagal.
+#
+# gemini-4-argon tetap dipakai karena terbukti menjawab dalam 2,8 detik.
+#
 # Catatan jujur: TIDAK semua model di sini dijamin bisa dipakai dengan key
-# gratis. Google membatasi sebagian model hanya untuk akun lama. Karena
-# itu daftar ini berfungsi sebagai RANTAI CADANGAN: model yang ditolak
-# (404/403) dilewati otomatis, dan yang menjawab itulah yang dipakai.
-# Untuk melihat mana yang benar-benar hidup dengan key Anda, jalankan
-# `python uji_model_gemini.py`.
+# gratis. Google membatasi sebagian model hanya untuk akun lama. Karena itu
+# daftar ini berfungsi sebagai RANTAI CADANGAN: model yang ditolak
+# (404/403) dilewati otomatis. Untuk melihatnya dengan key Anda sendiri,
+# jalankan `python uji_model_gemini.py`.
 #
 # Model yang sudah dimatikan (2.0-flash, 2.0-flash-lite) SENGAJA tidak
 # dimasukkan lagi: hanya memperlambat setiap permintaan.
 GEMINI_MODELS = [
     GEMINI_MODEL_DEFAULT,
-    # Generasi 4 (terbaru): paling pintar, konteks 1 juta token.
-    # Dicoba bila kuota harian model default sudah habis.
-    "gemini-4-hydrogen",
+    # Terbukti cepat (2,8 dtk) saat model default kena batas kuota.
     "gemini-4-argon",
-    # Generasi 3 lain sebagai cadangan tambahan.
-    "gemini-3.6-flash",
+    # Cadangan terakhir yang juga terbukti menjawab (15 dtk).
     "gemini-3.1-flash-lite",
 ]
 
@@ -278,9 +293,7 @@ MODEL_VISION = {
     # Model Gemini asli (penyedia cadangan). Semua Gemini multimodal.
     # Daftar ini harus selaras dengan GEMINI_MODELS di atas.
     "gemini-3.5-flash-lite",
-    "gemini-4-hydrogen",
     "gemini-4-argon",
-    "gemini-3.6-flash",
     "gemini-3.1-flash-lite",
     # Model OpenRouter :free yang multimodal (bisa membaca gambar).
     "google/gemma-4-31b-it:free",

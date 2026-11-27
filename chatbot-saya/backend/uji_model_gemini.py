@@ -57,6 +57,8 @@ GAMBAR_URL = "data:image/png;base64," + base64.b64encode(PNG_1PX).decode()
 #   kemungkinan besar mati; diuji supaya jelas, bukan ditebak.
 KANDIDAT = [
     # --- Gemini 4 (terbaru) ---
+    # CATATAN: gemini-4-hydrogen terbukti 504 timeout di Vercel Hobby
+    # (>60 dtk). Tetap diuji agar terlihat, tapi jangan dipakai.
     "gemini-4-hydrogen",
     "gemini-4-argon",
     "gemini-4-neon",
@@ -74,6 +76,10 @@ KANDIDAT = [
     "gemini-2.0-flash",
     "gemini-2.0-flash-lite",
 ]
+
+# Batas waktu yang masuk akal untuk Vercel Hobby (±60 dtk). Model yang
+# lebih lambat dari ini akan gagal di produksi walau di lokal terasa wajar.
+BATAS_DETIK = 25.0
 
 PESAN = [
     {"role": "user", "content": "Jawab satu kata saja: halo"},
@@ -242,10 +248,13 @@ def main() -> int:
         print("Tidak ada model yang bisa dipakai. Periksa key Anda.")
         return 1
 
-    # Yang layak dipakai aplikasi: bisa teks DAN stream DAN gambar.
-    layak = [m for m in hidup if m["stream"] and m["gambar"]]
+    # Yang layak dipakai aplikasi: bisa teks DAN stream DAN gambar, serta
+    # cukup cepat untuk batas waktu Vercel.
+    layak = [
+        m for m in hidup if m["stream"] and m["gambar"] and m["detik"] <= BATAS_DETIK
+    ]
     if layak:
-        print("LAYAK DIPASANG (teks + stream + gambar semua jalan):")
+        print(f"LAYAK DIPASANG (teks + stream + gambar jalan, <= {BATAS_DETIK:.0f} dtk):")
         for m in sorted(layak, key=lambda x: x["detik"]):
             print(f"  - {m['model']:<30} {m['detik']:.2f} dtk")
         print("\nUsulan urutan di main.py (tercepat dulu sebagai cadangan):")
@@ -254,7 +263,14 @@ def main() -> int:
             print(f'    "{m["model"]}",')
         print("]")
     else:
-        print("Ada model yang hidup, tetapi tidak ada yang memenuhi ketiga syarat.")
+        print("Ada model yang hidup, tetapi tidak ada yang memenuhi semua syarat.")
+
+    lambat = [m for m in hidup if m["detik"] > BATAS_DETIK]
+    if lambat:
+        print(f"\nHidup tapi TERLALU LAMBAT (> {BATAS_DETIK:.0f} dtk) — akan")
+        print("timeout di Vercel, jangan dipakai:")
+        for m in lambat:
+            print(f"  - {m['model']:<30} {m['detik']:.1f} dtk")
 
     gagal_stream = [m for m in hidup if not m["stream"]]
     if gagal_stream:
