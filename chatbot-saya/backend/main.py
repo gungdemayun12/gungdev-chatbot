@@ -1634,6 +1634,27 @@ async def health_check():
 # ---------------------------------------------------------------------
 # 12a. ENDPOINT GET /diagnostik — status konfigurasi (AMAN, tanpa rahasia)
 # ---------------------------------------------------------------------
+def _format_key(kunci: str) -> str:
+    """
+    Menjelaskan BENTUK sebuah kunci tanpa membocorkan isinya.
+
+    Hanya untuk membantu diagnosa saat kunci "tidak terbaca":
+      - "kosong"            -> variabel tidak terpasang / tidak terbaca
+      - "awalan-salah"      -> terisi, tetapi bukan format OpenRouter
+      - "terlalu-pendek"    -> kemungkinan terpotong saat menempel
+      - "ok"                -> bentuknya wajar
+
+    Panjang dalam puluhan karakter tidak dapat dipakai menebak kunci.
+    """
+    if not kunci:
+        return "kosong"
+    if len(kunci) < 30:
+        return "terlalu-pendek"
+    if not kunci.startswith("sk-or-"):
+        return "awalan-salah"
+    return "ok"
+
+
 @app.get("/diagnostik")
 async def diagnostik():
     """
@@ -1667,6 +1688,19 @@ async def diagnostik():
         "panjang_key_groq": len(GROQ_API_KEY),
         # Model default yang dipakai provider aktif.
         "model_default": MODEL_NAME,
+        # Daftar NAMA environment variable yang terpasang (TANPA nilai).
+        # Berguna saat rahasia "tidak terbaca": langsung terlihat apakah
+        # variabelnya tidak ada, salah nama, atau terpasang di tempat lain.
+        # Nama variabel bukan rahasia; nilainya tetap tidak pernah keluar.
+        "env_terpasang": sorted(
+            nama
+            for nama in os.environ
+            if nama.startswith(("OPENROUTER", "GROQ", "AI_", "UPSTASH", "GOOGLE"))
+        ),
+        # Penanda aman: apakah kunci OpenRouter memakai awalan yang benar.
+        # Ini membedakan "variabel tidak ada" dari "variabel ada tapi salah
+        # isi" (mis. terpotong saat menempel). Tidak membocorkan key.
+        "format_key_openrouter": _format_key(OPENROUTER_API_KEY),
     }
 
 
