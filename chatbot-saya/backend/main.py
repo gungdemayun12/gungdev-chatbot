@@ -2687,11 +2687,35 @@ async def diagnostik():
         # Berguna saat rahasia "tidak terbaca": langsung terlihat apakah
         # variabelnya tidak ada, salah nama, atau terpasang di tempat lain.
         # Nama variabel bukan rahasia; nilainya tetap tidak pernah keluar.
+        #
+        # Daftar awalan ini WAJIB memuat SEMUA penyedia. Dulu hanya ada
+        # OPENROUTER/GROQ/AI_/UPSTASH/GOOGLE, sehingga NVIDIA_API_KEY dan
+        # GEMINI_API_KEY yang SUDAH terpasang tampak seolah tidak ada —
+        # dan orang bisa menghabiskan waktu memeriksa Vercel padahal
+        # masalahnya di daftar ini.
         "env_terpasang": sorted(
             nama
             for nama in os.environ
-            if nama.startswith(("OPENROUTER", "GROQ", "AI_", "UPSTASH", "GOOGLE"))
+            if nama.startswith(
+                (
+                    "OPENROUTER",
+                    "GROQ",
+                    "GEMINI",
+                    "NVIDIA",
+                    "AI_",
+                    "UPSTASH",
+                    "GOOGLE",
+                )
+            )
         ),
+        # Status tiap penyedia: terpasang atau tidak, dan dipakai atau
+        # tidak. Hanya benar/salah — nilainya tidak pernah keluar.
+        "penyedia": {
+            "groq": {"ada_kunci": bool(GROQ_API_KEY)},
+            "openrouter": {"ada_kunci": bool(OPENROUTER_API_KEY)},
+            "gemini": {"ada_kunci": bool(GEMINI_API_KEY)},
+            "nvidia": {"ada_kunci": bool(NVIDIA_API_KEY)},
+        },
         # Penanda aman: apakah kunci OpenRouter memakai awalan yang benar.
         # Ini membedakan "variabel tidak ada" dari "variabel ada tapi salah
         # isi" (mis. terpotong saat menempel). Tidak membocorkan key.
