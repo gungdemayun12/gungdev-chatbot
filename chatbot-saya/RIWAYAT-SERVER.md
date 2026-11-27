@@ -14,7 +14,7 @@ masih tersimpan di perangkat masing-masing.
 |---|---|
 | Riwayat hanya di browser | Riwayat di server, **sama di semua perangkat** |
 | Hapus data browser = riwayat hilang | Riwayat aman di server |
-| Semua pengunjung berbagi satu angka usage | Tiap akun punya **jatah 48 pesan/24 jam** sendiri |
+| Semua pengunjung berbagi satu angka usage | Tiap akun punya **jatah 52 pesan/24 jam** sendiri |
 | Tidak ada pembatas per akun | Satu akun habis jatah **tidak** memengaruhi akun lain |
 | — | Bila server tak bisa dipakai, salinan perangkat dipakai otomatis |
 | Satu penyedia AI habis kuota = situs berhenti | **Failover otomatis** ke penyedia lain saat kuota habis (429/402) |
@@ -28,7 +28,7 @@ Kontrak API lama **tidak berubah**: `/chat`, `/chat/stream`, `/health`,
 
 | Hal | Nilai |
 |---|---|
-| Jatah pesan per akun | **48 pesan per jendela 24 jam** |
+| Jatah pesan per akun | **52 pesan per jendela 24 jam** |
 | Saat layanan ramai | Sementara 8 pesan (otomatis, kembali normal sendiri) |
 | Jatah tamu | 3 pesan/hari (per IP, tidak berubah) |
 | Akun baru per hari | Maksimal 25 (agar akun baru tidak melampaui kapasitas 566/hari) |
@@ -37,7 +37,7 @@ Kontrak API lama **tidak berubah**: `/chat`, `/chat/stream`, `/health`,
 | Token | **Dicatat & ditampilkan**, tetapi **tidak membatasi** |
 | Yang dilihat pengguna | **Hanya jatahnya sendiri** — kapasitas layanan hanya untuk pemilik situs |
 
-### Dari mana angka 48 berasal
+### Dari mana angka 52 berasal
 
 Kuota gratis dipakai bergantian menurut model yang dipilih, dan
 **otomatis saling menyelamatkan** saat salah satu kehabisan kuota:
@@ -56,22 +56,33 @@ kapasitas gabungannya tiga kali lipat dari hitungan lama:
 kendala request : 3.000 + 200 + 50      = 3.250 request/hari
 kendala token   : 600.000 + 250.000     = 850.000 token/hari
                   850.000 / 1.500       = 566 pesan/hari  <- yang lebih dulu habis
-                  566 / 10 akun aktif   = 56 pesan per akun (dipakai 48)
+                  566 / 10 akun aktif   = 56 pesan per akun (dipakai 52)
 ```
 
 Angka 1.500 token/pesan adalah rata-rata nyata (pesan pendek ±700 token,
 pesan panjang/riset ±3.000 token). Kendala yang menentukan adalah **token**,
 bukan request — request masih sangat longgar (3.250 untuk 566 pesan).
 
-Jatah dipakai **48** (bukan 56) karena angka Gemini di atas sengaja dibuat
+Jatah dipakai **52** (bukan 56) karena angka Gemini di atas sengaja dibuat
 konservatif: Google tidak lagi mempublikasikan RPD pasti untuk free tier.
 Bila kuota Gemini ternyata lebih besar, tidak ada yang rusak — kita hanya
 tidak memanfaatkannya. Yang berbahaya adalah sebaliknya: menetapkan jatah
 lebih tinggi dari kuota nyata.
 
-48 dipilih dari 56 dikurangi ±15% sebagai bantalan, karena rata-rata
-1.500 token/pesan bisa **2x lipat** saat riset web. Dengan 48, kapasitas
-masih menampung **11 akun aktif penuh** (566 / 48).
+**Catatan revisi (48 → 52).** Sebelumnya jatah 48 diambil dari 56
+dikurangi bantalan ±15%. Bantalan itu diperkecil menjadi ±7% setelah
+pemakaian nyata di produksi diperiksa: saat jatah 48 dipakai, sisa kuota
+harian masih cukup, sehingga 4 pesan tambahan masih tertutup. Dengan 52,
+kapasitas 566 pesan/hari masih menampung **10 akun aktif penuh**
+(566 / 52 = 10,9). Penjaga otomatis tetap bekerja: bila sisa kuota situs
+< 15%, jatah sementara dipangkas ke 8 pesan supaya situs tidak mati.
+
+Kenaikan ini **bukan** karena NVIDIA. NVIDIA berupa trial credit yang bisa
+habis, jadi tidak dihitung sebagai kapasitas (lihat `trial_nvidia_dihitung`
+di `usage.py`). Kenaikan besar (mis. 48 → 70-an) baru mungkin bila ada
+kuota harian **tetap** yang benar-benar baru — misalnya project Google
+Gemini tambahan atau model Groq baru yang terbukti hidup saat diuji
+**langsung ke penyedianya**, bukan lewat server sendiri.
 
 ### Jawaban tidak lagi terpotong
 
@@ -106,14 +117,14 @@ kotak ketik keluar layar. Sekarang:
   utama, supaya pengguna tidak kehilangan jejak pilihannya.
 - Tidak ada model yang dihapus — semua tetap bisa dipilih.
 
-Kenapa 48 dan bukan angka lain:
+Kenapa 52 dan bukan angka lain:
 
 - **16** (hitungan lama) terlalu pesimis: hanya memakai satu model Sumber B.
 - **80** aman hanya bila ≤ 7 akun aktif/hari; satu pengguna yang suka riset
   web memakai ±3.000 token/pesan (2× rata-rata), sehingga kuota bisa habis
   sebelum hari berakhir.
 - **56** adalah batas teoretis (566 pesan/hari ÷ 10 akun aktif).
-- **48** = 56 dikurangi bantalan ±15%. Aman untuk ±11 akun aktif/hari dan
+- **52** = 56 dikurangi bantalan ±7%. Aman untuk ±10 akun aktif/hari dan
   masih menyisakan ruang untuk pesan panjang/riset.
 
 Bantalan itu penting karena 1.500 token/pesan adalah **rata-rata**: pesan
@@ -127,7 +138,7 @@ Dua penjaga supaya kuota tidak habis di tengah hari:
    harian (566), akun mendapat 8 pesan/24 jam. Akun yang datang belakangan
    tetap kebagian.
 2. **Batas akun baru per hari** — maksimal 25 akun baru. Tanpa ini, 25 akun
-   baru x 48 pesan sehari sudah hampir melampaui kapasitas 566 pesan/hari.
+   baru x 52 pesan sehari sudah hampir melampaui kapasitas 566 pesan/hari.
 
 ### Jendela bergulir, bukan jam dinding
 
@@ -587,8 +598,10 @@ Kredit NVIDIA terbatas dan bisa habis. Kalau dihitung sebagai kapasitas
 harian, jatah per akun akan naik berdasarkan kuota yang bisa lenyap tanpa
 peringatan — dan begitu kredit habis, semua pengunjung kehilangan jatah itu
 sekaligus. Karena itu di `usage.py` ada `trial_nvidia_dihitung: 0` dan
-jatah tetap **48**. NVIDIA dipakai sebagai **pilihan model tambahan** dan
-**jalur cadangan keempat**, bukan sebagai dasar menaikkan jatah.
+jatah **tidak** dihitung dari NVIDIA. NVIDIA dipakai sebagai **pilihan
+model tambahan** dan **jalur cadangan keempat**, bukan sebagai dasar
+menaikkan jatah. (Kenaikan 48 → 52 berasal dari bantalan yang diperkecil
+setelah pemakaian nyata diperiksa, bukan dari NVIDIA.)
 
 ### Penyedia yang TIDAK dipakai (dan alasannya)
 

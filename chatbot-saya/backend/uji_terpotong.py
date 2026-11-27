@@ -1,6 +1,6 @@
 """
 uji_terpotong.py — memastikan jawaban yang berhenti di tengah DIKENALI,
-dan jatah 48 tetap aman terhadap kapasitas harian.
+dan jatah 52 tetap aman terhadap kapasitas harian.
 
 MENGAPA PENTING
 ---------------
@@ -20,7 +20,7 @@ Uji ini mengunci:
      kehabisan token.
   5. Jawaban yang selesai normal TIDAK mengirim sinyal `terpotong`.
   6. Batas token bawaan cukup besar (>= 4096).
-  7. Jatah 48 masih di bawah kapasitas harian.
+  7. Jatah 52 masih di bawah kapasitas harian.
 
 Jalankan: python uji_terpotong.py
 """
@@ -368,17 +368,17 @@ cek(
 )
 
 # ---------------------------------------------------------------------
-print("\n=== 5. JATAH 48 AMAN TERHADAP KAPASITAS ===")
+print("\n=== 5. JATAH 52 AMAN TERHADAP KAPASITAS ===")
 # ---------------------------------------------------------------------
 cek(
-    "Jatah per akun = 48",
-    usage.JATAH_AKUN_DASAR == 48,
+    "Jatah per akun = 52",
+    usage.JATAH_AKUN_DASAR == 52,
     str(usage.JATAH_AKUN_DASAR),
 )
 cek(
-    "Jatah naik dari 40 sebelumnya",
-    usage.JATAH_AKUN_DASAR > 40,
-    f"40 -> {usage.JATAH_AKUN_DASAR}",
+    "Jatah naik 4 pesan dari 48 sebelumnya",
+    usage.JATAH_AKUN_DASAR == 48 + 4,
+    f"48 -> {usage.JATAH_AKUN_DASAR}",
 )
 cek(
     "Total 10 akun aktif x jatah masih di bawah kapasitas",
@@ -386,9 +386,14 @@ cek(
     f"{usage.JATAH_AKUN_DASAR} x 10 = {usage.JATAH_AKUN_DASAR * 10} <= {usage.PESAN_PER_HARI}",
 )
 cek(
-    "Kapasitas token menampung minimal 11 akun penuh",
-    usage.PESAN_PER_HARI // usage.JATAH_AKUN_DASAR >= 11,
+    "Kapasitas token menampung minimal 10 akun penuh",
+    usage.PESAN_PER_HARI // usage.JATAH_AKUN_DASAR >= 10,
     f"{usage.PESAN_PER_HARI} // {usage.JATAH_AKUN_DASAR}",
+)
+cek(
+    "Jatah TIDAK melebihi 10% dari pesan/hari (bantalan tetap ada)",
+    usage.JATAH_AKUN_DASAR <= int(usage.PESAN_PER_HARI * 0.10),
+    f"{usage.JATAH_AKUN_DASAR} <= {int(usage.PESAN_PER_HARI * 0.10)}",
 )
 cek(
     "Jatah tidak melebihi angka teoritis 56",

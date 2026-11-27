@@ -200,8 +200,8 @@ cek(
     str(usage.KUOTA_BERSAMA.get("trial_nvidia_dihitung")),
 )
 cek(
-    "Jatah tetap 48 (tidak naik karena kredit sementara)",
-    usage.JATAH_AKUN_DASAR == 48,
+    "Jatah tetap 52 (NVIDIA tidak menaikkan jatah; kenaikan 48->52 dari bantalan)",
+    usage.JATAH_AKUN_DASAR == 52,
     str(usage.JATAH_AKUN_DASAR),
 )
 cek(

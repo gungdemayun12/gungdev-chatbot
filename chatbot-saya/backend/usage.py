@@ -181,34 +181,46 @@ PESAN_PER_HARI = KAPASITAS_HARIAN["token"] // max(
 #     850.000 token / 1.500 token per pesan = 566 pesan/hari
 #   Dibagi ke ~10 akun aktif:
 #     566 / 10 = 56 pesan per akun
-#   => jatah TEORITIS 56, dipakai 48 (JATAH_AKUN_DASAR).
+#   => jatah TEORITIS 56, dipakai 52 (JATAH_AKUN_DASAR).
 #
-# KENAPA 48, BUKAN 56
+# KENAPA 52, BUKAN 56
 # -------------------
-# 48 diambil dari 56 dikurangi ±15% sebagai bantalan:
+# 52 diambil dari 56 dikurangi ±7% sebagai bantalan, dan merupakan
+# kenaikan 48 -> 52 (+4 pesan, +8,3%).
+#
+# Catatan revisi: sebelumnya angkanya 48 (bantalan ±15%). Bantalan
+# diperkecil karena pemakaian nyata di produksi menunjukkan kuota masih
+# tersisa cukup saat angka 48 dipakai, sehingga 4 pesan tambahan masih
+# tertutup. Bantalan tetap ada karena:
 #   - Angka Gemini sengaja konservatif (Google tidak lagi mempublikasikan
 #     RPD pasti; sebagian model dibatasi untuk akun lama).
 #   - Rata-rata 1.500 token/pesan adalah RATA-RATA. Pesan riset/file bisa
 #     3.000 token (2x lipat).
 #   - Bila kuota ternyata lebih kecil dari perkiraan, jatah 56 membuat
 #     kuota situs habis sebelum hari berakhir dan SEMUA pengunjung kena.
-# 48 masih naik 20% dari 40, dan bantalannya cukup.
+#
+# MENGAPA TIDAK LEBIH TINGGI
+# --------------------------
+# 56 adalah batas aman teoretis kalau kita menganggap SEMUA 10 akun
+# aktif menghabiskan jatahnya. Di atas 56, kuota situs bisa habis di
+# tengah hari. Itu sebabnya NVIDIA (trial credit) tidak dihitung, dan
+# kenaikan besar baru mungkin bila ada kuota harian TETAP yang baru.
 #
 # CATATAN PEMAKAIAN NYATA
 # -----------------------
 # Batas ini hanya mengikat bila jumlah akun aktif x jatah melebihi
-# kapasitas 566 pesan/hari. Dengan 48: 566/48 = 11 akun aktif penuh.
+# kapasitas 566 pesan/hari. Dengan 52: 566/52 = 10 akun aktif penuh.
 # Bila akun aktif lebih dari itu, penjaga otomatis di bawah
 # (JATAH_SAAT_KUOTA_TIPIS) yang menurunkan jatah sementara — jadi situs
 # tidak mati, hanya lebih ketat saat ramai.
 #
-# Kenapa 48 dan bukan 16 atau 80:
+# Kenapa 52 dan bukan 16 atau 80:
 #   - 16  : hanya memakai 1 model Groq + OpenRouter (terlalu pesimis,
 #           kapasitas sebenarnya 3x lebih besar karena kuota per model).
 #   - 80  : hanya aman bila <= 7 akun aktif/hari; satu pengguna yang suka
 #           riset web memakai ~3.000 token/pesan (2x rata-rata), jadi
 #           kuota bisa habis sebelum hari berakhir.
-#   - 48  : aman untuk ~11 akun aktif/hari dan masih menyisakan ruang
+#   - 52  : aman untuk ~10 akun aktif/hari dan masih menyisakan ruang
 #           untuk pesan panjang/riset.
 #
 # Bila pemakaian nyata menunjukkan kuota masih lega (cek panel
@@ -220,10 +232,10 @@ PESAN_PER_HARI = KAPASITAS_HARIAN["token"] // max(
 #     dipangkas ke 8 pesan/24 jam (JATAH_SAAT_KUOTA_TIPIS). Akun yang
 #     datang belakangan tetap bisa memakai layanan.
 #   - Total akun baru per hari dibatasi MAX_AKUN_BARU_PER_HARI. Tanpa
-#     ini, 25 akun baru sehari (x 48 pesan) langsung menghabiskan kuota.
-JATAH_AKUN_DASAR = int(os.getenv("JATAH_REQUEST_PER_AKUN", "48") or 48)
+#     ini, 25 akun baru sehari (x 52 pesan) langsung menghabiskan kuota.
+JATAH_AKUN_DASAR = int(os.getenv("JATAH_REQUEST_PER_AKUN", "52") or 52)
 JATAH_SAAT_KUOTA_TIPIS = int(os.getenv("JATAH_KUOTA_TIPIS", "8") or 8)
-# Akun baru per hari: 25 akun x 48 pesan = 1.200 pesan, jauh di atas
+# Akun baru per hari: 25 akun x 52 pesan = 1.300 pesan, jauh di atas
 # kapasitas 566 pesan/hari. Karena itu batasnya tetap 25 agar jumlah
 # akun baru tidak melampaui kapasitas token harian.
 MAX_AKUN_BARU_PER_HARI = int(os.getenv("MAKS_AKUN_BARU", "25") or 25)
@@ -520,8 +532,8 @@ async def sisa_pesan_situs() -> int:
     melihat jatahnya sendiri.
 
     Kendala diambil dari yang lebih dulu habis:
-      - request : 3.050/hari (3 model Groq + OpenRouter)
-      - token   : 600.000/hari -> 400 pesan
+      - request : 3.250/hari (3 model Groq + OpenRouter + Gemini)
+      - token   : 850.000/hari -> 566 pesan
     """
     try:
         harian = await baca_harian()
@@ -548,7 +560,7 @@ async def jatah_berjalan() -> int:
     sekaligus, kuota bersama akan habis di tengah hari dan semua orang
     (termasuk yang baru masuk) ikut kecewa. Karena itu:
 
-      - kuota masih lega  -> jatah penuh (JATAH_AKUN_DASAR, 40)
+      - kuota masih lega  -> jatah penuh (JATAH_AKUN_DASAR, 52)
       - kuota < 15% sisa  -> jatah dipangkas (JATAH_SAAT_KUOTA_TIPIS, 8)
 
     Pemangkasan hanya MEMBATASI lebih awal, tidak pernah menambah dan
