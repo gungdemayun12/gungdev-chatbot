@@ -400,14 +400,45 @@ Bila sebuah model ditutup penyedianya (HTTP `404`, umumnya karena model
 berubah statusnya), model berikutnya dicoba otomatis:
 
 ```
-Gemini : gemini-2.5-flash → gemini-2.5-flash-lite
-         → gemini-2.0-flash → gemini-2.0-flash-lite
+Gemini : gemini-3.5-flash-lite → gemini-4-hydrogen → gemini-4-argon
+         → gemini-3.6-flash → gemini-3.1-flash-lite
 Groq   : lihat _MODEL_GROQ_CADANGAN di main.py
 ```
 
 Bila permintaan berisi **gambar**, cadangan model dinonaktifkan — berganti
 ke model yang tidak bisa membaca gambar hanya menghasilkan error `400` yang
 membingungkan.
+
+### Model mati sengaja tidak dipakai
+
+Google mematikan model lama secara berkala. Per dokumentasi resmi
+(`ai.google.dev/gemini-api/docs/deprecations`):
+
+| Model | Status |
+|---|---|
+| `gemini-2.0-flash` | **dimatikan 1 Juni 2026** |
+| `gemini-2.0-flash-lite` | **dimatikan 1 Juni 2026** |
+| `gemini-2.5-flash` | deprecated; 1 Des 2026 dialihkan ke `gemini-3.5-flash-lite` |
+| `gemini-2.5-flash-lite` | hanya untuk pengguna lama |
+
+Karena itu daftar model di kode memakai generasi **3.5 ke atas**. Memasukkan
+model yang sudah mati hanya memperlambat setiap permintaan: model itu pasti
+gagal lebih dulu sebelum cadangan berikutnya dicoba.
+
+### Memeriksa model mana yang hidup untuk key Anda
+
+Dokumentasi tidak menjamin sebuah model bisa dipakai dengan key gratis —
+Google membatasi sebagian model untuk akun lama. Untuk melihat kenyataannya:
+
+```powershell
+cd chatbot-saya/backend
+$env:GEMINI_API_KEY="AIza..."
+python uji_model_gemini.py
+```
+
+Skrip itu menguji setiap model (teks, streaming, gambar), lalu mencetak
+daftar model yang lolos beserta kecepatannya — lengkap dengan usulan isi
+`GEMINI_MODELS`. Key hanya dibaca dari environment sesi, tidak disimpan.
 
 ### Mengaktifkan
 
@@ -433,7 +464,8 @@ cd chatbot-saya/backend
 python uji_server_riwayat.py      # 55 pemeriksaan penyimpanan riwayat
 python uji_jatah.py               # 78 pemeriksaan jatah, reset & kerahasiaan
 python uji_routing_penyedia.py    # 14 pemeriksaan routing model -> penyedia
-python uji_gemini.py              # 36 pemeriksaan Gemini & failover antar penyedia
+python uji_gemini.py              # 43 pemeriksaan Gemini & failover antar penyedia
+python uji_model_gemini.py        # cek model Gemini mana yang hidup untuk key Anda
 python server_uji.py              # jalankan server uji di port 8000
 python uji_api.py                 # 25 pemeriksaan endpoint lama
 python uji_jatah_api.py           # 44 pemeriksaan jatah/reset via HTTP

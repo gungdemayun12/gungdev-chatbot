@@ -94,6 +94,22 @@ cek(
     len(main.GEMINI_MODELS) >= 2,
     ", ".join(main.GEMINI_MODELS),
 )
+# Model yang sudah DIMATIKAN Google tidak boleh dipakai lagi: hanya
+# memperlambat setiap permintaan karena pasti gagal lebih dulu.
+# (gemini-2.0-* dimatikan 1 Juni 2026; gemini-2.5-flash deprecated.)
+for mati in ("gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-2.5-flash"):
+    cek(
+        f"'{mati}' TIDAK dipakai lagi (sudah mati/deprecated)",
+        mati not in main.GEMINI_MODELS,
+    )
+cek(
+    "Ada minimal satu model generasi 3 atau lebih baru",
+    any(
+        m.startswith(("gemini-3", "gemini-4", "gemini-5"))
+        for m in main.GEMINI_MODELS
+    ),
+    ", ".join(main.GEMINI_MODELS),
+)
 cek(
     "Timeout Gemini masuk akal (10-300 detik)",
     10 <= main.TIMEOUT_GEMINI <= 300,
@@ -131,8 +147,8 @@ print("\n=== 4. TANPA KUNCI GEMINI (kondisi sebelum key dipasang) ===")
 with dengan_kunci("", "kunci-groq", "kunci-openrouter"):
     cek(
         "Model Gemini dialihkan ke groq (situs tetap hidup)",
-        main._penyedia_untuk_model("gemini-2.5-flash") == "groq",
-        main._penyedia_untuk_model("gemini-2.5-flash"),
+        main._penyedia_untuk_model(main.GEMINI_MODEL_DEFAULT) == "groq",
+        main._penyedia_untuk_model(main.GEMINI_MODEL_DEFAULT),
     )
     urutan = main._urutan_penyedia("groq")
     cek(
@@ -144,7 +160,7 @@ with dengan_kunci("", "kunci-groq", "kunci-openrouter"):
 with dengan_kunci("", "", ""):
     cek(
         "Semua kunci kosong -> tidak crash",
-        isinstance(main._penyedia_untuk_model("gemini-2.5-flash"), str),
+        isinstance(main._penyedia_untuk_model(main.GEMINI_MODEL_DEFAULT), str),
     )
     cek("Urutan failover kosong bila tak ada kunci", main._urutan_penyedia("groq") == [])
 

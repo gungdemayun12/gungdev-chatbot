@@ -154,18 +154,42 @@ GEMINI_BASE_URL = _env(
     "https://generativelanguage.googleapis.com/v1beta/openai",
 ).rstrip("/")
 
-# Model Gemini yang dipakai. Default sengaja "flash" karena itulah yang
-# memberi kuota gratis paling lega.
-GEMINI_MODEL_DEFAULT = _env("GEMINI_MODEL", "gemini-2.5-flash")
+# Model Gemini yang dipakai.
+#
+# MENGAPA BUKAN gemini-2.5-flash LAGI
+# ------------------------------------
+# Per dokumentasi resmi Google (ai.google.dev/gemini-api/docs/deprecations):
+#   - gemini-2.0-flash / gemini-2.0-flash-lite : DIMATIKAN 1 Juni 2026
+#   - gemini-2.5-flash                         : deprecated, 1 Des 2026
+#                                                dialihkan paksa ke
+#                                                gemini-3.5-flash-lite
+#   - gemini-2.5-flash-lite                    : hanya untuk pengguna lama
+#
+# Karena itu default dipindah ke generasi yang masih hidup dan TIDAK punya
+# jadwal mati: gemini-3.5-flash-lite (pengganti resmi 2.5-flash, cepat dan
+# hemat). Bisa diubah lewat GEMINI_MODEL tanpa mengubah kode.
+GEMINI_MODEL_DEFAULT = _env("GEMINI_MODEL", "gemini-3.5-flash-lite")
 
-# Urutan model yang dicoba. Bila model utama tidak tersedia untuk key
-# ini (Gemini kadang menutup model lama untuk akun baru), otomatis turun
-# ke model berikutnya supaya chat tetap berjalan.
+# Urutan model yang dicoba, dari yang paling diinginkan.
+#
+# Catatan jujur: TIDAK semua model di sini dijamin bisa dipakai dengan key
+# gratis. Google membatasi sebagian model hanya untuk akun lama. Karena
+# itu daftar ini berfungsi sebagai RANTAI CADANGAN: model yang ditolak
+# (404/403) dilewati otomatis, dan yang menjawab itulah yang dipakai.
+# Untuk melihat mana yang benar-benar hidup dengan key Anda, jalankan
+# `python uji_model_gemini.py`.
+#
+# Model yang sudah dimatikan (2.0-flash, 2.0-flash-lite) SENGAJA tidak
+# dimasukkan lagi: hanya memperlambat setiap permintaan.
 GEMINI_MODELS = [
     GEMINI_MODEL_DEFAULT,
-    "gemini-2.5-flash-lite",
-    "gemini-2.0-flash",
-    "gemini-2.0-flash-lite",
+    # Generasi 4 (terbaru): paling pintar, konteks 1 juta token.
+    # Dicoba bila kuota harian model default sudah habis.
+    "gemini-4-hydrogen",
+    "gemini-4-argon",
+    # Generasi 3 lain sebagai cadangan tambahan.
+    "gemini-3.6-flash",
+    "gemini-3.1-flash-lite",
 ]
 
 # Model default.
@@ -252,10 +276,12 @@ MODEL_VISION = {
     "google/gemini-2.5-flash-tts",
     "google/gemini-3.1-flash-lite",
     # Model Gemini asli (penyedia cadangan). Semua Gemini multimodal.
-    "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
-    "gemini-2.0-flash",
-    "gemini-2.0-flash-lite",
+    # Daftar ini harus selaras dengan GEMINI_MODELS di atas.
+    "gemini-3.5-flash-lite",
+    "gemini-4-hydrogen",
+    "gemini-4-argon",
+    "gemini-3.6-flash",
+    "gemini-3.1-flash-lite",
     # Model OpenRouter :free yang multimodal (bisa membaca gambar).
     "google/gemma-4-31b-it:free",
     "google/gemma-4-26b-a4b-it:free",
