@@ -1558,6 +1558,187 @@
   color: var(--text-secondary);
 }
 
+/* Penampung animasi berpikir di area chat, tampil sebelum balon jawaban
+   dibuat. Sejajar dengan balon asisten (avatar + isi). */
+.chat__menunggu {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-2) 0;
+  animation: berpikirMasuk 0.25s ease-out;
+}
+
+.chat__menunggu .msg__body {
+  min-width: 0;
+  flex: 1;
+}
+
+@keyframes berpikirMasuk {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Animasi berpikir */
+
+/* =====================================================================
+   ANIMASI BERPIKIR
+   Indikator kecil yang berdenyut selama AI bekerja. Tujuannya bukan
+   hiasan, melainkan kepastian: "aplikasi masih jalan".
+   ===================================================================== */
+
+.berpikir {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 0.8125rem;
+  color: var(--text-tertiary);
+}
+
+.berpikir__titik {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+}
+
+/* Tiga titik kecil yang berdenyut bergantian. Warna aksen dipakai
+   hemat supaya tetap tenang, bukan mencolok. */
+.berpikir__titik i {
+  display: block;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.35;
+  animation: berpikirDenyut 1.3s infinite ease-in-out;
+}
+
+.berpikir__titik i:nth-child(1) {
+  animation-delay: 0s;
+}
+.berpikir__titik i:nth-child(2) {
+  animation-delay: 0.18s;
+}
+.berpikir__titik i:nth-child(3) {
+  animation-delay: 0.36s;
+}
+
+/* Saat riset web, titiknya sedikit lebih hidup (warna lebih terang)
+   karena prosesnya memang lebih lama. */
+.berpikir.is-research .berpikir__titik i {
+  opacity: 0.55;
+  animation-duration: 1s;
+}
+
+.berpikir__teks {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.berpikir__label {
+  font-weight: 500;
+  color: var(--text-secondary);
+  /* Efek kilau lembut: menandakan teks ini "hidup". */
+  background: linear-gradient(
+    90deg,
+    var(--text-secondary) 0%,
+    var(--text) 50%,
+    var(--text-secondary) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: berpikirKilau 2.4s linear infinite;
+}
+
+.berpikir__ket {
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+}
+
+.berpikir__elipsis {
+  display: inline-block;
+  animation: berpikirElipsis 1.6s steps(4, end) infinite;
+  overflow: hidden;
+  vertical-align: bottom;
+  width: 0;
+}
+
+.berpikir__tenang {
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+/* Penghitung detik: angka mati (tabular-nums) agar tidak bergoyang. */
+.berpikir__detik {
+  margin-left: auto;
+  font-size: 0.6875rem;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+
+/* Versi ringkas untuk hint di bawah kotak pesan. */
+.berpikir--ringkas {
+  padding: 0;
+  font-size: var(--fs-xs);
+}
+
+@keyframes berpikirDenyut {
+  0%,
+  60%,
+  100% {
+    transform: scale(0.8);
+    opacity: 0.3;
+  }
+  30% {
+    transform: scale(1.35);
+    opacity: 0.9;
+  }
+}
+
+@keyframes berpikirKilau {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes berpikirElipsis {
+  0% {
+    width: 0;
+  }
+  100% {
+    width: 1.4em;
+  }
+}
+
+/* Hormati preferensi pengguna yang tidak ingin animasi bergerak. */
+@media (prefers-reduced-motion: reduce) {
+  .berpikir__titik i,
+  .berpikir__label,
+  .berpikir__elipsis {
+    animation: none;
+  }
+  .berpikir__titik i {
+    opacity: 0.6;
+  }
+}
+
 /* Hint streaming */
 .chat__streaming-hint {
   display: flex;

@@ -8,6 +8,7 @@
  */
 import { memo, useState } from 'react'
 import Markdown from './Markdown.jsx'
+import Berpikir from './Berpikir.jsx'
 import {
   Brain,
   Check,
@@ -46,6 +47,7 @@ function ThinkingPanel({ text, streaming }) {
 function Message({
   message,
   isStreaming,
+  fase = 'menunggu',
   onCopy,
   onRegenerate,
   onFeedback,
@@ -98,6 +100,8 @@ function Message({
 
   /* --- Pesan asisten --- */
   const { thinking, answer } = splitThinking(message.content || '')
+  // Jawaban belum mulai mengalir: tampilkan animasi berpikir (bukan tiga
+  // titik kosong) supaya pengguna tahu tahap yang sedang berjalan.
   const showTyping = isStreaming && !answer && !thinking
 
   return (
@@ -108,13 +112,7 @@ function Message({
       <div className="msg__body">
         <ThinkingPanel text={thinking} streaming={isStreaming} />
 
-        {showTyping && (
-          <div className="typing" aria-label="GungDev sedang menulis">
-            <span />
-            <span />
-            <span />
-          </div>
-        )}
+        {showTyping && <Berpikir fase={fase} aktif={isStreaming} />}
 
         {answer && (
           <div className="msg__content">

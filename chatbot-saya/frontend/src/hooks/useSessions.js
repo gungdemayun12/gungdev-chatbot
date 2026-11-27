@@ -200,6 +200,13 @@ export function useSessions(settings, akunSub = null, apiUrl = '') {
     sessionsRef.current = sessions
   }, [sessions])
 
+  /* Salinan `activeId` terbaru, dipakai di dalam updater setSessions
+     (mis. saat sesi baru langsung diisi pesan pertama). */
+  const activeIdRef = useRef(activeId)
+  useEffect(() => {
+    activeIdRef.current = activeId
+  }, [activeId])
+
   /** Mengirim semua sesi yang berubah ke server, satu per satu. */
   const kirimPerubahan = useCallback(async () => {
     const sub = subTerpasang
@@ -450,13 +457,28 @@ export function useSessions(settings, akunSub = null, apiUrl = '') {
   /** Memperbarui satu sesi lewat fungsi updater. */
   const updateSession = useCallback(
     (id, updater) => {
-      setSessions((prev) =>
-        prev.map((s) => {
+      setSessions((prev) => {
+        // Sesi bisa belum ada di state saat dibuat & langsung diisi dalam
+        // satu putaran (kirim pesan pertama). Dulu perubahan seperti itu
+        // hilang diam-diam sehingga pesan pengguna tidak tampil sampai
+        // jawaban datang. Bila id belum ada, pakai sesi aktif sebagai
+        // dasar agar isinya tidak hilang.
+        const ada = prev.some((s) => s.id === id)
+        if (!ada) {
+          const dasar = prev.find((s) => s.id === activeIdRef.current)
+          if (!dasar) return prev
+          const next =
+            typeof updater === 'function' ? updater(dasar) : { ...dasar, ...updater }
+          return prev.map((s) =>
+            s.id === dasar.id ? { ...next, updatedAt: Date.now() } : s,
+          )
+        }
+        return prev.map((s) => {
           if (s.id !== id) return s
           const next = typeof updater === 'function' ? updater(s) : { ...s, ...updater }
           return { ...next, updatedAt: Date.now() }
-        }),
-      )
+        })
+      })
       // Setiap perubahan isi sesi perlu dikirim ke server.
       jadwalkanSimpan(id)
     },

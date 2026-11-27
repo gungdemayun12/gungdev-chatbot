@@ -127,7 +127,13 @@ async function jalankan() {
   cek('Esc membatalkan keluar (tetap masuk)', await sedangMasuk(page))
 
   // Pastikan overlay dialog benar-benar hilang sebelum lanjut, agar klik
-  // berikutnya tidak terhalang overlay.
+  // berikutnya tidak terhalang overlay. Bila masih ada, tutup lewat
+  // tombol X (data-close).
+  const masihOverlay = await page.$('.modal-overlay')
+  if (masihOverlay) {
+    await page.click('[role="dialog"] button[data-close]').catch(() => {})
+    await page.waitForTimeout(300)
+  }
   await page
     .waitForSelector('.modal-overlay', { state: 'detached', timeout: 8000 })
     .catch(() => {})

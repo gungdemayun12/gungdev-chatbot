@@ -249,6 +249,23 @@ main.app.router.routes = [
     r for r in main.app.router.routes if getattr(r, "path", "") not in ("/chat", "/chat/stream")
 ]
 
+# ---------------------------------------------------------------------
+# PERLAMBATAN BUATAN (hanya untuk uji animasi "berpikir").
+#
+# Jawaban stub biasanya selesai dalam ~0,1 detik, sehingga animasi
+# berpikir tidak sempat terlihat (dan tidak bisa diuji). Nilai ini
+# mengatur berapa detik stub MENAHAN jawaban sebelum mengirim teks.
+# Bawaannya 0 (perilaku lama, semua uji lain tidak terpengaruh).
+# ---------------------------------------------------------------------
+_JEDA_UJI = {"detik": 0.0}
+
+
+@main.app.post("/__uji/jeda")
+async def atur_jeda(payload: dict):
+    """Atur jeda buatan sebelum jawaban dikirim (detik)."""
+    _JEDA_UJI["detik"] = max(0.0, float(payload.get("detik", 0)))
+    return {"ok": True, "detik": _JEDA_UJI["detik"]}
+
 
 @main.app.post("/chat")
 async def chat_uji(request: main.ChatRequest, authorization: str | None = main.Header(None)):
@@ -285,6 +302,9 @@ async def chat_stream_uji(request: main.ChatRequest, authorization: str | None =
 
     async def aliran():
         teks = f"Jawaban untuk: {request.message[:40]}"
+        # Jeda buatan agar animasi "berpikir" bisa diamati/diuji.
+        if _JEDA_UJI["detik"] > 0:
+            await asyncio.sleep(_JEDA_UJI["detik"])
         for potong in [teks[: len(teks) // 2], teks[len(teks) // 2 :]]:
             await asyncio.sleep(0.05)
             yield sse({"delta": potong})

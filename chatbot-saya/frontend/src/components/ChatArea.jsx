@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import Message from './Message.jsx'
 import EmptyState from './EmptyState.jsx'
 import Composer from './Composer.jsx'
+import Berpikir from './Berpikir.jsx'
 import {
   ArrowDown,
   Lock,
@@ -261,6 +262,13 @@ export default function ChatArea({
                     key={m.id}
                     message={{ ...m, content }}
                     isStreaming={isStreamingMsg}
+                    fase={
+                      generationPhase === 'research'
+                        ? 'research'
+                        : generationPhase === 'writing'
+                          ? 'menulis'
+                          : 'berpikir'
+                    }
                     canRegenerate={
                       m.role === 'assistant' && index === lastAssistantIndex && !loading
                     }
@@ -271,6 +279,30 @@ export default function ChatArea({
                   />
                 )
               })}
+
+              {/* Animasi berpikir di AREA CHAT selama balon jawaban belum
+                  dibuat (server belum mengirim teks apa pun). Tanpa ini,
+                  pengguna hanya melihat layar diam dan tidak tahu apakah
+                  aplikasi masih bekerja — terutama saat riset web. */}
+              {loading && !messages.some((m) => m.id === streamingId) && (
+                <div className="chat__menunggu" data-uji="berpikir-wrapper">
+                  <div className="msg__avatar" aria-hidden="true">
+                    G
+                  </div>
+                  <div className="msg__body">
+                    <Berpikir
+                      aktif={loading}
+                      fase={
+                        generationPhase === 'research'
+                          ? 'research'
+                          : generationPhase === 'writing'
+                            ? 'menulis'
+                            : 'berpikir'
+                      }
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -337,15 +369,21 @@ export default function ChatArea({
         />
       </div>
 
-      {/* Indikator stop saat streaming (muncul juga di atas input di mobile) */}
+      {/* Indikator tahap berjalan: selalu terlihat selama AI bekerja,
+          termasuk di mobile, sehingga pengguna tahu aplikasi masih hidup. */}
       {loading && (
-        <div className="chat__streaming-hint" aria-live="polite">
-          <span className={`pulse-dot ${generationPhase === 'research' ? 'is-research' : ''}`} aria-hidden="true" />
-          {generationPhase === 'research'
-            ? 'GungDev sedang menelusuri web…'
-            : generationPhase === 'thinking'
-              ? 'GungDev sedang berpikir…'
-              : 'GungDev sedang menulis…'}
+        <div className="chat__streaming-hint">
+          <Berpikir
+            ringkas
+            aktif={loading}
+            fase={
+              generationPhase === 'research'
+                ? 'research'
+                : generationPhase === 'writing'
+                  ? 'menulis'
+                  : 'berpikir'
+            }
+          />
           <button type="button" className="link-btn" onClick={onStop}>
             <Square size={11} fill="currentColor" /> Hentikan
           </button>

@@ -121,6 +121,31 @@ seperti peringatan. Panduannya:
 - Saat jatah habis: "Jatah Anda sudah terpakai semua. Bisa chat lagi dalam
   …" — plus pengingat bahwa percakapan lama tetap bisa dibaca.
 
+### Animasi "berpikir" saat AI bekerja
+
+Jawaban panjang atau riset web bisa memakan puluhan detik. Selama itu UI
+menampilkan indikator kecil di area chat dan di bawah kotak pesan:
+
+```
+• • •  Berpikir  ·  Menimbang jawaban terbaik...        6 dtk
+```
+
+- **Tiga titik** berdenyut bergantian (CSS `berpikirDenyut`), labelnya
+  berkilau lembut — menandakan aplikasi masih hidup, bukan macet.
+- **Label jujur mengikuti tahap nyata**: `Berpikir` → `Menelusuri`
+  (saat riset web) → `Menyusun` (saat teks mulai mengalir).
+- **Penghitung detik** muncul setelah 5 detik: bukti proses berjalan.
+  Tidak ada progress bar yang mengarang persentase.
+- **Kalimat penenang** muncul bertahap saat menunggu lama (8, 20, 40, 75
+  detik) — mis. "Masih bekerja, terima kasih sudah menunggu."
+- Animasi **hilang sendiri** begitu jawaban mulai mengalir.
+- Menghormati `prefers-reduced-motion`: pengguna yang mematikan animasi
+  tetap melihat titik statis.
+
+Tahapnya diatur dari `generationPhase` di `App.jsx` (`thinking`,
+`research`, `writing`), jadi label tidak pernah menampilkan proses yang
+tidak benar-benar terjadi.
+
 ### Konfirmasi sebelum keluar
 
 Klik **Keluar** (dari header chat, menu akun di sidebar, atau Pengaturan →
@@ -287,6 +312,7 @@ Bila belum muncul, buka panel Usage dan lihat pesan di sidebar:
 | `frontend/src/hooks/useSessions.js` | Server sebagai sumber kebenaran, perangkat sebagai cadangan |
 | `frontend/src/hooks/useSettings.js` | Semua preferensi pengguna (tema, bahasa, perilaku chat) |
 | `frontend/src/components/Settings.jsx` | Halaman Pengaturan 7 tab |
+| `frontend/src/components/Berpikir.jsx` | Animasi "berpikir" (titik + label tahap) |
 | `frontend/src/components/UsagePanel.jsx` | Panel pemakaian + jatah akun |
 ## Menjalankan uji
 
@@ -304,6 +330,7 @@ cd chatbot-saya/frontend
 node uji_browser.mjs              # 18 pemeriksaan riwayat lintas "perangkat"
 node uji_jatah_browser.mjs        # 23 pemeriksaan jatah/hitung mundur di UI
 node uji_pengaturan_keluar.mjs    # 29 pemeriksaan konfirmasi keluar & pengaturan
+node uji_berpikir.mjs             # 17 pemeriksaan animasi "berpikir"
 node uji_alur_lengkap.mjs         # 26 pemeriksaan alur ujung-ke-ujung
 ```
 
