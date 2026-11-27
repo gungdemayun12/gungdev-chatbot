@@ -155,13 +155,22 @@ PESAN_PER_HARI = KAPASITAS_HARIAN["token"] // max(
 #
 # PERHITUNGAN ANGKA (dipakai JATAH_AKUN_DASAR di bawah):
 #   Kapasitas gabungan per hari (lihat KAPASITAS_HARIAN):
-#     request : 3 x 1.000 (Groq) + 50 (OpenRouter)  = 3.050 request
-#     token   : 3 x 200.000 (Groq)                  = 600.000 token
+#     request : 3 x 1.000 (Groq) + 200 (Gemini) + 50 (OpenRouter)
+#               = 3.250 request
+#     token   : 3 x 200.000 (Groq) + 250.000 (Gemini) = 850.000 token
 #   Kendala yang lebih dulu habis adalah TOKEN:
-#     600.000 token / 1.500 token per pesan = 400 pesan/hari
+#     850.000 token / 1.500 token per pesan = 566 pesan/hari
 #   Dibagi ke ~10 akun aktif:
-#     400 / 10 = 40 pesan per akun
-#   => JATAH = 40 pesan / 24 jam
+#     566 / 10 = 56 pesan per akun
+#   => jatah TEORITIS 56, tetapi dipakai 40 (JATAH_AKUN_DASAR).
+#
+# KENAPA TIDAK LANGSUNG 56
+# ------------------------
+# Angka Gemini sengaja dibuat konservatif: Google tidak lagi
+# mempublikasikan RPD pasti untuk free tier, dan sebagian model dibatasi
+# untuk akun lama. Bila kuota Gemini ternyata lebih kecil dari perkiraan,
+# jatah 56 akan membuat kuota situs habis sebelum hari berakhir — dan
+# SEMUA pengunjung terkena. Jatah 40 menyisakan ±30% ruang aman.
 #
 # Kenapa 40 dan bukan 16 atau 80:
 #   - 16  : hanya memakai 1 model Groq + OpenRouter (terlalu pesimis,
@@ -171,6 +180,10 @@ PESAN_PER_HARI = KAPASITAS_HARIAN["token"] // max(
 #           kuota bisa habis sebelum hari berakhir.
 #   - 40  : aman untuk ~10 akun aktif/hari dan masih menyisakan ruang
 #           untuk pesan panjang/riset.
+#
+# Bila pemakaian nyata menunjukkan kuota masih lega (cek panel
+# "Layanan" di /usage), angka ini boleh dinaikkan tanpa mengubah kode:
+# cukup pasang Environment Variable JATAH_REQUEST_PER_AKUN di Vercel.
 #
 # Penjaga agar kuota tidak habis:
 #   - Bila kuota situs tersisa < 15%, tiap akun yang masih punya jatah

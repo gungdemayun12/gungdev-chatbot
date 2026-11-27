@@ -114,6 +114,35 @@ export const MODEL_PILIHAN = [
     vision: true,
     browser: true,
   },
+  // --- Gemini (penyedia cadangan, gratis tanpa kartu kredit) ---
+  // Ketiganya TERBUKTI menjawab saat diuji langsung ke produksi.
+  // Model 2.0 sudah dimatikan Google (1 Juni 2026) dan 2.5 sudah
+  // deprecated, jadi tidak dicantumkan. Model 4-hydrogen & 3.6-flash
+  // juga tidak dicantumkan karena timeout di Vercel (>60 dtk).
+  {
+    id: 'gemini-3.5-flash-lite',
+    singkat: 'Gemini 3.5 Lite',
+    ket: 'Cepat, konteks panjang, bisa gambar',
+    Icon: 'Zap',
+    vision: true,
+    browser: true,
+  },
+  {
+    id: 'gemini-4-argon',
+    singkat: 'Gemini 4 Argon',
+    ket: 'Paling baru, cepat dan teliti',
+    Icon: 'Sparkles',
+    vision: true,
+    browser: true,
+  },
+  {
+    id: 'gemini-3.1-flash-lite',
+    singkat: 'Gemini 3.1 Lite',
+    ket: 'Cadangan hemat kuota',
+    Icon: 'Brain',
+    vision: true,
+    browser: true,
+  },
 ]
 
 /** Pilihan bawaan (juga dipakai bila pilihan tersimpan tidak dikenal). */
@@ -137,12 +166,22 @@ export const MODEL_ID = MODEL_PILIHAN.map((m) => m.id)
  * `capabilities` berasal dari GET /capabilities. Bila null (backend lama
  * atau offline), nilai cadangan di MODEL_PILIHAN yang dipakai — UI tetap
  * berfungsi, hanya penandaannya mengikuti data bawaan.
+ *
+ * PENTING: fungsi ini juga MENAMBAH model yang ada di server tetapi belum
+ * ada di MODEL_PILIHAN. Dulu fungsi ini hanya menimpa nilai vision, jadi
+ * model yang baru ditambahkan di backend TIDAK PERNAH muncul di menu —
+ * pengguna melihat daftar lama padahal server sudah punya model baru.
+ * Sekarang server yang menentukan isi menu; MODEL_PILIHAN hanya
+ * menyediakan nama pendek & keterangan (model tak dikenal tetap tampil
+ * dengan nama id-nya).
  */
 export function gabungKemampuan(capabilities) {
   if (!capabilities?.models?.length) return MODEL_PILIHAN
 
   const peta = new Map(capabilities.models.map((m) => [m.id, m]))
-  return MODEL_PILIHAN.map((m) => {
+
+  // 1. Model bawaan: urutan & tampilan dipertahankan, kemampuan diperbarui.
+  const hasil = MODEL_PILIHAN.map((m) => {
     const dari = peta.get(m.id)
     if (!dari) return m
     return {
@@ -153,6 +192,24 @@ export function gabungKemampuan(capabilities) {
       browser: dari.browser === undefined ? true : Boolean(dari.browser),
     }
   })
+
+  // 2. Model yang ADA di server tetapi belum dikenal di sini -> tambahkan.
+  const sudahAda = new Set(MODEL_PILIHAN.map((m) => m.id))
+  for (const dari of capabilities.models) {
+    if (sudahAda.has(dari.id)) continue
+    hasil.push({
+      id: dari.id,
+      // Tanpa nama pendek, tampilkan id apa adanya. Lebih baik daripada
+      // modelnya tidak bisa dipilih sama sekali.
+      singkat: dari.id,
+      ket: 'Tersedia',
+      Icon: 'Sparkles',
+      vision: Boolean(dari.vision),
+      browser: dari.browser === undefined ? true : Boolean(dari.browser),
+    })
+  }
+
+  return hasil
 }
 
 /**
