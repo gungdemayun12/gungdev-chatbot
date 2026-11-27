@@ -830,6 +830,53 @@
   white-space: nowrap;
 }
 
+/* --- Chip sitasi sebaris (menempel di ujung kalimat, gaya ChatGPT) --- */
+.sitasi {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin: 0 1px 0 3px;
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background-color: var(--bg-subtle);
+  font-size: 11px;
+  line-height: 1.5;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-decoration: none;
+  vertical-align: baseline;
+  white-space: nowrap;
+  transition: background-color var(--t-fast), border-color var(--t-fast),
+    color var(--t-fast);
+}
+
+.sitasi:hover {
+  background-color: var(--bg-hover);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.sitasi:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.sitasi__label {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sitasi__sisa {
+  padding: 0 4px;
+  border-radius: 999px;
+  background-color: var(--bg-hover);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
+}
+
 .msg__actions {
   display: flex;
   align-items: center;

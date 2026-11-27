@@ -18,6 +18,8 @@ import rehypeHighlight from 'rehype-highlight'
 import DOMPurify from 'dompurify'
 import { Check, Copy } from './icons.jsx'
 import { copyToClipboard } from '../lib/text.js'
+import { pecahSitasi } from '../lib/text.js'
+import ChipSitasi from './Sitasi.jsx'
 
 /** Tombol "Salin" untuk satu blok kode. */
 function CopyCodeButton({ text }) {
@@ -75,7 +77,7 @@ function CodeBlock({ children, className }) {
 }
 
 /** Komponen utama. `content` adalah teks Markdown. */
-function Markdown({ content }) {
+function Markdown({ content, sumber }) {
   /* Lapisan keamanan tambahan: buang skrip/atribut berbahaya dari string. */
   const safeContent = useMemo(() => {
     // DOMPurify pada string Markdown akan menghapus tag HTML berbahaya,
@@ -88,43 +90,64 @@ function Markdown({ content }) {
     })
   }, [content])
 
+  /* Sitasi sebaris: penanda [1] diubah menjadi chip nama situs yang bisa
+     diklik, persis setelah kalimat yang memakainya. Bila tidak ada daftar
+     sumber, teks dirender apa adanya (satu segmen utuh). */
+  const segmen = useMemo(() => pecahSitasi(safeContent, sumber), [safeContent, sumber])
+  const adaSitasi = segmen.some((s) => s.jenis === 'sitasi')
+
+  const renderer = (teks, kunci) => (
+    <ReactMarkdown
+      key={kunci}
+      remarkPlugins={[remarkGfm]}
+      rehypePlugins={[[rehypeHighlight, { detect: true, ignoreMissing: true }]]}
+      components={{
+        /* Blok kode: bungkus dengan header bahasa + tombol Salin. */
+        pre({ children }) {
+          const child = Array.isArray(children) ? children[0] : children
+          const className = child?.props?.className || ''
+          return <CodeBlock className={className}>{child?.props?.children}</CodeBlock>
+        },
+        /* Link eksternal: aman + buka tab baru. */
+        a({ href, children, ...props }) {
+          const isExternal = /^https?:\/\//i.test(href || '')
+          return (
+            <a
+              href={href}
+              {...props}
+              {...(isExternal ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+            >
+              {children}
+            </a>
+          )
+        },
+        /* Tabel dibungkus agar bisa di-scroll horizontal di mobile. */
+        table({ children }) {
+          return (
+            <div className="md-table-wrap">
+              <table>{children}</table>
+            </div>
+          )
+        },
+      }}
+    >
+      {teks}
+    </ReactMarkdown>
+  )
+
+  if (!adaSitasi) {
+    return <div className="markdown">{renderer(safeContent, 'utuh')}</div>
+  }
+
   return (
     <div className="markdown">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[[rehypeHighlight, { detect: true, ignoreMissing: true }]]}
-        components={{
-          /* Blok kode: bungkus dengan header bahasa + tombol Salin. */
-          pre({ children }) {
-            const child = Array.isArray(children) ? children[0] : children
-            const className = child?.props?.className || ''
-            return <CodeBlock className={className}>{child?.props?.children}</CodeBlock>
-          },
-          /* Link eksternal: aman + buka tab baru. */
-          a({ href, children, ...props }) {
-            const isExternal = /^https?:\/\//i.test(href || '')
-            return (
-              <a
-                href={href}
-                {...props}
-                {...(isExternal ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
-              >
-                {children}
-              </a>
-            )
-          },
-          /* Tabel dibungkus agar bisa di-scroll horizontal di mobile. */
-          table({ children }) {
-            return (
-              <div className="md-table-wrap">
-                <table>{children}</table>
-              </div>
-            )
-          },
-        }}
-      >
-        {safeContent}
-      </ReactMarkdown>
+      {segmen.map((s, i) =>
+        s.jenis === 'sitasi' ? (
+          <ChipSitasi key={`s${i}`} nomor={s.nomor} daftar={sumber} />
+        ) : (
+          renderer(s.isi, `t${i}`)
+        ),
+      )}
     </div>
   )
 }

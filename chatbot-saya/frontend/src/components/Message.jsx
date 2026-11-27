@@ -118,7 +118,7 @@ function Message({
 
         {answer && (
           <div className="msg__content">
-            <Markdown content={answer} />
+            <Markdown content={answer} sumber={message.sumber} />
             {isStreaming && <span className="caret" aria-hidden="true" />}
           </div>
         )}

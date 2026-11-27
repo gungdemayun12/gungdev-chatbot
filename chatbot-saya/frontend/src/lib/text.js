@@ -159,6 +159,129 @@ export function safeFilename(name, fallback = 'percakapan') {
   return (clean || fallback).slice(0, 80)
 }
 
+/* ---------------------------------------------------------------------
+   SITASI SEBARIS
+   ---------------------------------------------------------------------
+   Model menulis penanda [1], [2] persis setelah kalimat yang memakai
+   sumber itu. Penanda itu diubah di sini menjadi chip kecil berisi NAMA
+   SITUS yang bisa diklik — seperti ChatGPT ("Batur Tours +1").
+
+   Kenapa diubah di sisi tampilan, bukan meminta model menulis format
+   khusus: model kadang lupa/salah menulis format panjang, sedangkan
+   angka [1] adalah hal paling sederhana dan paling sering benar. Dengan
+   cara ini tampilan tetap rapi walau model menulisnya berbeda-beda.
+   --------------------------------------------------------------------- */
+
+/** Host tanpa "www." — dipakai sebagai nama pengganti bila situs kosong. */
+function hostDari(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./i, '')
+  } catch {
+    return ''
+  }
+}
+
+/** Nama pendek untuk chip: nama situs, atau host, dipotong wajar. */
+function namaSumber(s) {
+  const mentah = (s?.situs || '').trim() || hostDari(s?.url || '')
+  // "Advertorial Kompas.id" -> tetap dibaca enak; potong yang kepanjangan.
+  return mentah.length > 28 ? `${mentah.slice(0, 27)}…` : mentah
+}
+
+/**
+ * Memecah teks menjadi potongan biasa dan potongan sitasi.
+ *
+ * @param {string} teks      jawaban model (Markdown)
+ * @param {Array}  daftar    daftar sumber dari server ({nomor, judul, url, situs})
+ * @returns {Array<{jenis:'teks',isi:string}|{jenis:'sitasi',nomor:number[]}>}
+ *
+ * Yang dikenali:
+ *   [1]        -> satu sumber
+ *   [1][3]     -> dua sumber berurutan
+ *   [1, 3]     -> dua sumber dalam satu kurung
+ *   [1-3]      -> rentang
+ *
+ * Penanda yang nomornya tidak ada di daftar sumber DIBIARKAN apa adanya,
+ * supaya tidak ada informasi yang hilang.
+ */
+export function pecahSitasi(teks, daftar) {
+  const isi = String(teks || '')
+  if (!isi) return []
+
+  const sah = new Set(
+    (Array.isArray(daftar) ? daftar : []).map((s) => Number(s?.nomor)).filter((n) => n > 0),
+  )
+  if (sah.size === 0) return [{ jenis: 'teks', isi }]
+
+  const potongan = []
+  // Satu grup kurung berisi angka & pemisah, mis. "[1]", "[1][2]", "[1, 3]", "[2-4]".
+  const pola = /\[(\d+(?:\s*[,–-]\s*\d+)*)\](?:\[(\d+(?:\s*[,–-]\s*\d+)*)\])*/g
+
+  const nomorDari = (teksAngka) => {
+    const hasil = []
+    for (const bagian of teksAngka.split(',')) {
+      const rentang = bagian.trim().match(/^(\d+)\s*[–-]\s*(\d+)$/)
+      if (rentang) {
+        const a = Number(rentang[1])
+        const b = Number(rentang[2])
+        for (let n = a; n <= b && n - a < 20; n += 1) hasil.push(n)
+      } else if (/^\d+$/.test(bagian.trim())) {
+        hasil.push(Number(bagian.trim()))
+      }
+    }
+    return hasil
+  }
+
+  let akhir = 0
+  let cocok
+  while ((cocok = pola.exec(isi)) !== null) {
+    // Kumpulkan SEMUA grup angka pada kecocokan ini ([1][2] -> 1 dan 2).
+    const semua = []
+    const mentah = cocok[0]
+    for (const grup of mentah.matchAll(/\[([^\]]+)\]/g)) {
+      semua.push(...nomorDari(grup[1]))
+    }
+    const valid = semua.filter((n) => sah.has(n))
+
+    if (valid.length === 0) continue // bukan sitasi -> biarkan apa adanya
+
+    if (cocok.index > akhir) {
+      potongan.push({ jenis: 'teks', isi: isi.slice(akhir, cocok.index) })
+    }
+    potongan.push({ jenis: 'sitasi', nomor: [...new Set(valid)] })
+    akhir = cocok.index + mentah.length
+  }
+
+  if (akhir < isi.length) potongan.push({ jenis: 'teks', isi: isi.slice(akhir) })
+  return potongan
+}
+
+/**
+ * Menyiapkan data tampilan untuk satu kelompok sitasi.
+ *
+ * @returns {{label:string, url:string, lainnya:Array}|null}
+ *   `label`  = nama situs sumber pertama (mis. "Batur Tours")
+ *   `url`    = tautan yang dibuka saat chip diklik
+ *   `lainnya`= sumber tambahan (untuk "+1" dan daftar kecil saat diklik)
+ */
+export function ringkasSitasi(nomor, daftar) {
+  const peta = new Map(
+    (Array.isArray(daftar) ? daftar : []).map((s) => [Number(s?.nomor), s]),
+  )
+  const sumber = nomor.map((n) => peta.get(n)).filter(Boolean)
+  if (sumber.length === 0) return null
+
+  const utama = sumber[0]
+  return {
+    label: namaSumber(utama),
+    url: utama.url,
+    judul: utama.judul || utama.url,
+    lainnya: sumber.slice(1),
+    jumlah: sumber.length,
+  }
+}
+
+
 /** Satu sesi -> Markdown. */
 export function sessionToMarkdown(session) {
   const lines = [`# ${session.title || 'Percakapan'}`, '']

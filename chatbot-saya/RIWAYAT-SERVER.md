@@ -785,6 +785,33 @@ setelah halaman dimuat ulang atau dibuka di perangkat lain.
 Bila model lupa menulis penanda, kartu sumber tetap ditampilkan —
 pengguna tetap tahu dari mana jawaban itu diambil.
 
+### Chip sumber sebaris (menempel di ujung kalimat)
+
+Selain kartu di bawah, setiap kalimat yang memakai sumber diberi **chip
+kecil berisi NAMA SITUS** yang bisa diklik, misalnya:
+
+```
+Harga awal: Rp200.000–Rp250.000/orang. [Batur Tours +1]
+```
+
+- Chip dibangun dari penanda `[1]`, `[2]` yang ditulis model, lalu diubah
+  di sisi tampilan (`pecahSitasi` + `ringkasSitasi` di `lib/text.js`,
+  komponen `Sitasi.jsx`). Model **tidak** diminta menghafal format khusus,
+  karena angka `[1]` adalah hal paling sederhana dan paling sering benar.
+- Nomor pertama menjadi nama chip; sisanya diringkas menjadi `+N`, dengan
+  daftar judul lengkap saat kursor diarahkan (`title`).
+- Chip membuka **situs asli** di tab baru (`target="_blank"`,
+  `rel="noopener noreferrer"`).
+- Yang dikenali: `[1]`, `[1][3]`, `[1, 3]`, dan rentang `[1-3]`. Nomor yang
+  tidak ada di daftar sumber dibiarkan apa adanya agar informasi tidak
+  hilang.
+- Bila tidak ada sumber (chat biasa), penanda tidak diubah dan tidak ada
+  chip yang muncul.
+
+Agar chip duduk di ujung kalimat, aturan ke model diperketat: penanda
+wajib ditulis **tepat sebelum titik** pada kalimat yang memakainya, dan
+untuk jawaban berbentuk daftar setiap butir diberi penandanya sendiri.
+
 ### Jatah: satu permintaan riset = SATU pesan
 
 Ini perlu ditegaskan karena riset memanggil model beberapa kali:
@@ -830,7 +857,7 @@ node uji_pengaturan_keluar.mjs    # 29 pemeriksaan konfirmasi keluar & pengatura
 node uji_berpikir.mjs             # 20 pemeriksaan animasi "berpikir"
 node uji_alur_lengkap.mjs         # 26 pemeriksaan alur ujung-ke-ujung
 node uji_menu_model.mjs           # 17 pemeriksaan menu model ringkas & rapi
-node uji_sumber_ui.mjs            # 15 pemeriksaan kartu sumber riset (gaya ChatGPT)
+node uji_sumber_ui.mjs            # 23 pemeriksaan kartu + chip sumber riset (gaya ChatGPT)
 ```
 
 > **Penting:** `server_uji.py` menyimpan state di memori proses. Restart

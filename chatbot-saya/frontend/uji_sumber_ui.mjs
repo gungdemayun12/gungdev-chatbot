@@ -121,8 +121,42 @@ console.log('\n=== 4. NOMOR SUMBER ===')
 const nomor = await page.locator('.sumber__nomor').allInnerTexts()
 cek('nomor berurutan 1,2,3', nomor.join(',') === '1,2,3', nomor.join(','))
 const isiJawaban = await page.locator('.msg--assistant .msg__content').first().innerText()
-cek('jawaban memakai penanda [1]', /\[1\]/.test(isiJawaban), isiJawaban.slice(0, 60))
-cek('jawaban memakai penanda [2]', /\[2\]/.test(isiJawaban), isiJawaban.slice(0, 60))
+cek('penanda [1] sudah jadi chip (bukan teks mentah)', !/\[1\]/.test(isiJawaban), isiJawaban.slice(0, 80))
+
+/* ---------- 4b. Chip sitasi sebaris (gaya ChatGPT) ---------- */
+console.log('\n=== 4b. CHIP SITASI SEBARIS ===')
+const chip = page.locator('.msg--assistant .sitasi')
+const jumlahChip = await chip.count()
+cek('chip sumber muncul di dalam jawaban', jumlahChip >= 2, `${jumlahChip} chip`)
+
+if (jumlahChip > 0) {
+  const chip1 = chip.first()
+  const label1 = (await chip1.locator('.sitasi__label').innerText()).trim()
+  const hrefChip1 = await chip1.getAttribute('href')
+  const targetChip1 = await chip1.getAttribute('target')
+  const relChip1 = await chip1.getAttribute('rel')
+  cek('chip menampilkan NAMA SITUS (bukan angka)', label1 === 'contoh.com', label1)
+  cek('chip bisa diklik ke situs asli', hrefChip1 === 'https://contoh.com/private-tour', String(hrefChip1))
+  cek('chip membuka tab baru', targetChip1 === '_blank', String(targetChip1))
+  cek('chip aman (noopener)', /noopener/.test(relChip1 || ''), String(relChip1))
+
+  const judulChip = await chip1.getAttribute('title')
+  cek('chip menyimpan judul sumber', /Private Tours Bali/.test(judulChip || ''), String(judulChip).slice(0, 50))
+
+  // Chip duduk di ujung kalimat: teks sesudahnya tidak memuat angka mentah,
+  // dan kalimat sebelum chip sudah berakhir (ada koma/titik/awal baris).
+  const posisiChip = await page.evaluate(() => {
+    const el = document.querySelector('.msg--assistant .sitasi')
+    if (!el) return null
+    const sebelum = (el.previousSibling?.textContent || '').trim().slice(-40)
+    return { sebelum }
+  })
+  cek(
+    'chip menempel setelah kalimat (bukan di awal)',
+    Boolean(posisiChip && posisiChip.sebelum.length > 3),
+    posisiChip ? posisiChip.sebelum : 'null',
+  )
+}
 
 /* ---------- 5. Kartu sumber tetap ada setelah refresh ---------- */
 console.log('\n=== 5. SETELAH REFRESH ===')
@@ -131,6 +165,8 @@ await page.reload({ waitUntil: 'networkidle' })
 await page.waitForSelector('.msg--assistant .sumber', { timeout: 15000 })
 const masihAda = await page.locator('.sumber__ringkas').first().isVisible()
 cek('kartu sumber tersimpan bersama riwayat', masihAda)
+const chipSetelahRefresh = await page.locator('.msg--assistant .sitasi').count()
+cek('chip sitasi tetap tampil setelah refresh', chipSetelahRefresh >= 2, `${chipSetelahRefresh} chip`)
 
 /* ---------- 6. Chat biasa TANPA riset tidak menampilkan sumber ---------- */
 console.log('\n=== 6. CHAT BIASA TANPA SUMBER ===')
@@ -144,6 +180,12 @@ await page.waitForFunction(
 await page.waitForTimeout(900)
 const jumlahKartu = await page.locator('.msg--assistant .sumber').count()
 cek('chat biasa tidak menampilkan kartu sumber', jumlahKartu <= 1, `${jumlahKartu} kartu (hanya dari pesan riset)`)
+const chipChatBiasa = await page.evaluate(() => {
+  const pesan = document.querySelectorAll('.msg--assistant')
+  const terakhir = pesan[pesan.length - 1]
+  return terakhir ? terakhir.querySelectorAll('.sitasi').length : -1
+})
+cek('chat biasa tidak menampilkan chip sitasi', chipChatBiasa === 0, `${chipChatBiasa} chip`)
 
 /* ---------- 7. Tidak ada error JS ---------- */
 console.log('\n=== 7. TIDAK ADA ERROR JS ===')
