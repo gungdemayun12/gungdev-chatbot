@@ -1,5 +1,5 @@
-/**
- * Message.jsx — satu pesan dalam percakapan.
+﻿/**
+ * Message.jsx â€” satu pesan dalam percakapan.
  *
  * - Pesan pengguna: bubble membulat rata kanan + menu Edit / Salin.
  * - Pesan GungDev: teks langsung di kanvas (tanpa bubble berat), avatar "G",
@@ -20,6 +20,7 @@ import {
   ThumbsUp,
 } from './icons.jsx'
 import { copyToClipboard, formatTime, splitThinking } from '../lib/text.js'
+import LogoGungDev from './Logo.jsx'
 
 /** Panel lipat untuk proses berpikir model (default tertutup). */
 function ThinkingPanel({ text, streaming }) {
@@ -37,7 +38,7 @@ function ThinkingPanel({ text, streaming }) {
         <ChevronRight size={14} className="thinking__chevron" aria-hidden="true" />
         <Brain size={14} aria-hidden="true" />
         <span>Proses berpikir</span>
-        {streaming && <span className="thinking__live">sedang berpikir…</span>}
+        {streaming && <span className="thinking__live">sedang berpikirâ€¦</span>}
       </button>
       {open && <div className="thinking__body">{text}</div>}
     </div>
@@ -107,7 +108,7 @@ function Message({
   return (
     <article className="msg msg--assistant" aria-label="Jawaban GungDev">
       <div className="msg__avatar" aria-hidden="true">
-        G
+        <LogoGungDev ukuran={22} />
       </div>
       <div className="msg__body">
         <ThinkingPanel text={thinking} streaming={isStreaming} />
@@ -129,7 +130,7 @@ function Message({
               className="msg-action"
               onClick={handleCopy}
               aria-label={copied ? 'Tersalin' : 'Salin jawaban'}
-              title={copied ? 'Tersalin ✓' : 'Salin'}
+              title={copied ? 'Tersalin âœ“' : 'Salin'}
             >
               {copied ? <Check size={14} /> : <Copy size={14} />}
             </button>

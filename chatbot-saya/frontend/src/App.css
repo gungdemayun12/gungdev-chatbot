@@ -1,4 +1,4 @@
-/* =====================================================================
+﻿/* =====================================================================
    LOGIN GOOGLE (tamu vs akun)
    Diimpor paling awal (aturan CSS: @import harus di atas). File ini
    terpisah agar tidak menyentuh satu baris pun gaya lama.
@@ -6,7 +6,7 @@
 @import './auth.css';
 
 /* =====================================================================
-   GungDev — App.css
+   GungDev â€” App.css
    Struktur:
      1. Layout aplikasi
      2. Sidebar (logo, cari, riwayat, footer)
@@ -96,13 +96,23 @@
 .sb-brand__mark {
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
-  flex: 0 0 28px;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
   border-radius: 9px;
-  background: linear-gradient(140deg, var(--accent), var(--accent-active));
-  color: #fdfcf9;
-  box-shadow: var(--shadow-xs);
+  /* Bidang terang di belakang logo: rubahnya oranye dengan garis hampir
+     hitam, sehingga di tema gelap garis itu butuh latar terang agar
+     tidak menyatu. */
+  background: var(--logo-bidang);
+  box-shadow: 0 0 0 1px var(--logo-bingkai);
+  transition: box-shadow var(--t-fast), transform var(--t-fast);
+}
+
+.sb-brand:hover .sb-brand__mark {
+  transform: translateY(-1px);
+  box-shadow:
+    0 0 0 1px var(--logo-bingkai),
+    0 4px 10px rgba(242, 98, 15, 0.22);
 }
 
 .sb-brand__name {
@@ -674,17 +684,13 @@
 .msg__avatar {
   display: grid;
   place-items: center;
-  width: 30px;
-  height: 30px;
-  flex: 0 0 30px;
-  margin-top: 2px;
-  border-radius: 50%;
-  background: linear-gradient(140deg, var(--accent), var(--accent-active));
-  color: #fdfcf9;
-  font-family: var(--font-serif);
-  font-size: var(--fs-sm);
-  font-weight: 600;
-  box-shadow: var(--shadow-xs);
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  margin-top: 1px;
+  border-radius: 9px;
+  background: var(--logo-bidang);
+  box-shadow: 0 0 0 1px var(--logo-bingkai);
   user-select: none;
 }
 
@@ -1020,7 +1026,7 @@
 }
 
 /* ---------------------------------------------------------------------
-   Syntax highlighting (highlight.js) — token warna hangat
+   Syntax highlighting (highlight.js) â€” token warna hangat
    --------------------------------------------------------------------- */
 .hljs-comment,
 .hljs-quote { color: var(--text-tertiary); font-style: italic; }
@@ -1331,7 +1337,7 @@
   font-weight: 600;
   line-height: 1.25;
   /* Nama model bisa panjang ("openai/gpt-oss-120b"). Potong dengan
-     elipsis alih-alih memecah kata — daftar jadi jauh lebih rapi. */
+     elipsis alih-alih memecah kata â€” daftar jadi jauh lebih rapi. */
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1692,7 +1698,7 @@
 
 /* Kotak indikator: latar tipis + sudut membulat agar jelas terlihat
    sebagai "status yang sedang berjalan", bukan teks biasa yang samar.
-   Tetap tenang — hanya satu tingkat di atas latar, bukan warna mencolok. */
+   Tetap tenang â€” hanya satu tingkat di atas latar, bukan warna mencolok. */
 .berpikir {
   display: inline-flex;
   align-items: center;
@@ -1720,7 +1726,7 @@
 }
 
 /* Tiga titik yang berdenyut bergantian. Ukurannya cukup besar agar
-   terlihat dari kejauhan — inilah tanda utama "masih bekerja". */
+   terlihat dari kejauhan â€” inilah tanda utama "masih bekerja". */
 .berpikir__titik i {
   display: block;
   width: 6px;
@@ -1756,7 +1762,7 @@
   min-width: 0;
 }
 
-/* Label tahap — sengaja dibuat lebih besar dan terang supaya langsung
+/* Label tahap â€” sengaja dibuat lebih besar dan terang supaya langsung
    terlihat sebagai tanda "ada yang sedang dikerjakan", bukan teks samar
    yang mudah terlewat. */
 .berpikir__label {
@@ -1999,12 +2005,14 @@
 .empty__spark {
   display: grid;
   place-items: center;
-  width: 44px;
-  height: 44px;
-  margin-bottom: var(--sp-1);
-  border-radius: 50%;
-  background-color: var(--accent-soft);
-  color: var(--accent);
+  width: 72px;
+  height: 72px;
+  margin-bottom: var(--sp-3);
+  border-radius: 20px;
+  background: var(--logo-bidang);
+  box-shadow:
+    0 0 0 1px var(--logo-bingkai),
+    0 12px 28px rgba(242, 98, 15, 0.16);
   animation: floatIn 600ms var(--ease) both;
 }
 
@@ -2456,14 +2464,12 @@ select.input {
 .about__mark {
   display: grid;
   place-items: center;
-  width: 48px;
-  height: 48px;
-  border-radius: var(--r-md);
-  background: linear-gradient(140deg, var(--accent), var(--accent-active));
-  color: #fdfcf9;
-  font-family: var(--font-serif);
-  font-size: var(--fs-xl);
-  font-weight: 600;
+  width: 60px;
+  height: 60px;
+  flex: 0 0 60px;
+  border-radius: var(--r-lg);
+  background: var(--logo-bidang);
+  box-shadow: 0 0 0 1px var(--logo-bingkai), var(--shadow-sm);
 }
 
 .about__name {
@@ -2885,6 +2891,7 @@ select.input {
     width: 26px;
     height: 26px;
     flex-basis: 26px;
+    border-radius: 8px;
   }
 
   /* Aksi pesan selalu tampak di sentuh (tanpa hover) */
@@ -3106,7 +3113,7 @@ select.input {
 
 /* --- Pemakaian akun ini sendiri (hanya saat login) ---
    Sengaja dibuat ringan: satu baris ringkas, bukan bar kuota penuh,
-   karena angkanya informatif — bukan batas yang bisa tercapai. */
+   karena angkanya informatif â€” bukan batas yang bisa tercapai. */
 .usage__akun {
   padding: var(--sp-3);
   border: 1px solid var(--border);
@@ -3561,7 +3568,7 @@ select.input {
 }
 
 /* =====================================================================
-   PENYEMPURNAAN MOBILE — panel kuota & pengaturan
+   PENYEMPURNAAN MOBILE â€” panel kuota & pengaturan
    ===================================================================== */
 
 @media (max-width: 560px) {
@@ -3696,3 +3703,66 @@ select.input {
   }
 }
 
+
+/* =====================================================================
+   LOGO GUNGDEV
+   Lambang rubah berasal dari logo asli (public/logo-512.png, dibuat oleh
+   _buat_ikon.py). Bentuknya tinggi dan sempit, jadi ukuran gambar
+   dikunci dengan object-fit agar tidak gepeng, dan selalu diletakkan di
+   atas bidang terang: garis logonya hampir hitam sehingga di tema gelap
+   akan menyatu bila latarnya ikut gelap.
+   ===================================================================== */
+:root {
+  --logo-bidang: linear-gradient(165deg, #ffffff, #f1ece1);
+  --logo-bingkai: rgba(28, 27, 26, 0.09);
+}
+
+[data-theme='dark'] {
+  --logo-bidang: linear-gradient(165deg, #ffffff, #e9e3d6);
+  --logo-bingkai: rgba(255, 255, 255, 0.14);
+}
+
+.logo-gungdev {
+  display: grid;
+  place-items: center;
+  width: var(--logo-ukuran, 28px);
+  height: var(--logo-ukuran, 28px);
+  line-height: 0;
+}
+
+.logo-gungdev__img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+/* Di dalam bidang kecil, logo diberi sedikit napas agar tidak menyentuh
+   tepi dan tidak terlihat sesak. */
+.sb-brand__mark .logo-gungdev,
+.msg__avatar .logo-gungdev,
+.about__mark .logo-gungdev,
+.empty__spark .logo-gungdev {
+  width: calc(100% - 8px);
+  height: calc(100% - 8px);
+}
+
+/* Avatar di layar sempit lebih kecil. */
+@media (max-width: 640px) {
+  .msg__avatar .logo-gungdev {
+    width: calc(100% - 6px);
+    height: calc(100% - 6px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .empty__spark {
+    animation: none;
+  }
+
+  .sb-brand:hover .sb-brand__mark {
+    transform: none;
+  }
+}

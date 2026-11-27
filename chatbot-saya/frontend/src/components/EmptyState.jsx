@@ -1,8 +1,9 @@
-/**
- * EmptyState.jsx — tampilan saat percakapan masih kosong.
+﻿/**
+ * EmptyState.jsx â€” tampilan saat percakapan masih kosong.
  * Sapaan besar bergaya serif sesuai waktu + kartu saran prompt.
  */
-import { Bug, Lightbulb, AlignLeft, Sparkles, BookOpen } from './icons.jsx'
+import { Bug, Lightbulb, AlignLeft, BookOpen } from './icons.jsx'
+import LogoGungDev from './Logo.jsx'
 
 /** Sapaan sesuai jam lokal. */
 function greeting(date = new Date()) {
@@ -36,7 +37,7 @@ const SUGGESTIONS = [
     icon: AlignLeft,
     title: 'Ringkas teks ini',
     prompt:
-      'Ringkas teks berikut menjadi 3 poin utama. Pertahankan angka dan nama penting:\n\nTempel teks kamu di sini…',
+      'Ringkas teks berikut menjadi 3 poin utama. Pertahankan angka dan nama penting:\n\nTempel teks kamu di siniâ€¦',
   },
 ]
 
@@ -47,7 +48,7 @@ export default function EmptyState({ nickname, onPick }) {
     <div className="empty">
       <div className="empty__hero">
         <span className="empty__spark" aria-hidden="true">
-          <Sparkles size={22} />
+          <LogoGungDev ukuran={54} />
         </span>
         <h1 className="empty__greeting">
           {greeting()}

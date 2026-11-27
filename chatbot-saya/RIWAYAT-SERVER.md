@@ -396,6 +396,59 @@ Bila belum muncul, buka panel Usage dan lihat pesan di sidebar:
 | `frontend/src/components/Settings.jsx` | Halaman Pengaturan 7 tab |
 | `frontend/src/components/Berpikir.jsx` | Animasi "berpikir" (titik + label tahap) |
 | `frontend/src/components/UsagePanel.jsx` | Panel pemakaian + jatah akun |
+| `frontend/src/components/Logo.jsx` | Lambang rubah (sidebar, avatar jawaban, layar kosong, Tentang) |
+| `frontend/_buat_ikon.py` | Membuat semua ukuran logo/ikon dari `public/White-Chested Fox Logo.png` |
+| `frontend/index.html` | Pemasangan favicon, apple-touch-icon, manifest, pratinjau tautan |
+
+## Logo & ikon situs
+
+Logo yang dipakai adalah berkas milik pemilik situs:
+`frontend/public/White-Chested Fox Logo.png` (1448×1086, rubah oranye
+dengan garis hampir hitam di latar putih).
+
+**Bentuknya tidak digambar ulang.** Semua ukuran dibuat dengan memotong
+gambar aslinya (`frontend/_buat_ikon.py`), supaya garis rubahnya persis
+seperti aslinya. Percobaan membuat ulang sebagai vektor (SVG) sempat
+dilakukan dan **dibuang**: hasil vektorisasi otomatis tidak setia pada
+garis aslinya, sementara gambar tangan menghasilkan bentuk yang berbeda
+dari logo pemilik situs.
+
+| Berkas | Ukuran | Dipakai di |
+|---|---|---|
+| `logo-512.png` | 512px, latar transparan | Sumber logo untuk layar beresolusi tinggi |
+| `logo-192.png` | 192px, latar transparan | Sidebar, avatar jawaban, layar kosong, Tentang |
+| `icon-192.png` | 192px, ubin gelap membulat | Favicon tab browser |
+| `icon-512.png` | 512px, ubin gelap membulat | Manifest (dipasang ke layar utama) |
+| `icon-maskable-512.png` | 512px, latar penuh | Android (ikon dipotong sesuai bentuk launcher) |
+| `apple-touch-icon.png` | 180px, persegi tanpa transparan | iOS/iPadOS (iOS membulatkan sendiri) |
+| `og-image.png` | 1200×630 | Pratinjau saat tautan dibagikan |
+
+Bila logo sumber diganti, cukup jalankan sekali dari folder `frontend`:
+
+```
+python _buat_ikon.py
+```
+
+lalu `git add -A`, commit, push. Tidak ada yang perlu diubah di kode.
+
+**Kenapa logo selalu diberi bidang terang.** Sebagian garis logo hampir
+hitam. Di tema gelap, garis itu akan menyatu dengan latar bila ditempel
+langsung. Karena itu di tempat kecil (sidebar, avatar) logo diletakkan di
+atas bidang putih keabu-abuan bergaris tepi tipis — terlihat sama jelas
+di tema terang maupun gelap.
+
+**Posisi logo saat ini:**
+
+| Tempat | Ukuran |
+|---|---|
+| Sidebar, kiri atas | kotak 34px, logo 26px |
+| Avatar setiap jawaban AI | kotak 30px, logo 24px |
+| Layar kosong (atas sapaan) | kotak 72px, logo 64px |
+| Pengaturan → Tentang | kotak 60px, logo 52px |
+
+Ukuran gambar dikunci (`object-fit: contain`) agar tidak gepeng, karena
+bentuk logonya tinggi dan sempit.
+
 
 ## Failover antar penyedia (Gemini & NVIDIA sebagai cadangan)
 

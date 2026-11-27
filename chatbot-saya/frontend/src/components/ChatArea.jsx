@@ -1,5 +1,5 @@
-/**
- * ChatArea.jsx — header tipis + daftar pesan + tombol scroll ke bawah.
+﻿/**
+ * ChatArea.jsx â€” header tipis + daftar pesan + tombol scroll ke bawah.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Message from './Message.jsx'
@@ -18,6 +18,7 @@ import {
   TriangleAlert,
   X,
 } from './icons.jsx'
+import LogoGungDev from './Logo.jsx'
 
 /**
  * Banner kecil di atas kotak pesan.
@@ -38,11 +39,11 @@ function GuestBanner({ sisa, onOpenLogin }) {
         {habis ? (
           <>
             Batas tamu hari ini tercapai. <strong>Masuk dengan Google</strong> untuk
-            melanjutkan — riwayat Anda juga akan tersimpan.
+            melanjutkan â€” riwayat Anda juga akan tersimpan.
           </>
         ) : (
           <>
-            Anda memakai mode tamu — <strong>riwayat tidak disimpan</strong>. Sisa{' '}
+            Anda memakai mode tamu â€” <strong>riwayat tidak disimpan</strong>. Sisa{' '}
             {sisa} pesan hari ini.
           </>
         )}
@@ -116,7 +117,7 @@ export default function ChatArea({
         Yang dipakai: apakah balon asisten terakhir berada SETELAH pesan
         pengguna terakhir. Urutan itulah yang menentukan.
      2. Saat riset web, server bisa lama tanpa mengirim satu karakter pun.
-        Selama balon terakhir kosong, animasi harus tetap tampil — kalau
+        Selama balon terakhir kosong, animasi harus tetap tampil â€” kalau
         tidak, layar terlihat diam seperti aplikasi mati. */
   const indeksUserTerakhir = messages.map((m) => m.role).lastIndexOf('user')
   const balonTerakhir = [...messages].reverse().find((m) => m.role === 'assistant')
@@ -190,8 +191,8 @@ export default function ChatArea({
 
         <div className="chat__header-actions">
           {/* Indikator jatah akun / pintu masuk panel "Jatah Saya".
-              SELALU tampil — termasuk untuk tamu dan saat data belum
-              termuat — supaya panel tidak pernah "hilang" bagi pengguna.
+              SELALU tampil â€” termasuk untuk tamu dan saat data belum
+              termuat â€” supaya panel tidak pernah "hilang" bagi pengguna.
               Bila angka belum tersedia, tampil sebagai "Jatah" saja. */}
           <button
             type="button"
@@ -281,7 +282,7 @@ export default function ChatArea({
               {loading && (
                 <div className="chat__menunggu chat__menunggu--tengah" data-uji="berpikir-wrapper">
                   <div className="msg__avatar" aria-hidden="true">
-                    G
+                    <LogoGungDev ukuran={22} />
                   </div>
                   <div className="msg__body">
                     <Berpikir
@@ -329,7 +330,7 @@ export default function ChatArea({
 
               {/* Animasi berpikir di AREA CHAT selama balon jawaban belum
                   berisi teks apa pun. Tanpa ini, pengguna hanya melihat
-                  layar diam dan tidak tahu apakah aplikasi masih bekerja —
+                  layar diam dan tidak tahu apakah aplikasi masih bekerja â€”
                   terutama saat riset web.
 
                   CATATAN: pengecekannya TIDAK boleh memakai
@@ -341,7 +342,7 @@ export default function ChatArea({
               {loading && perluIndikatorMenunggu && (
                 <div className="chat__menunggu" data-uji="berpikir-wrapper">
                   <div className="msg__avatar" aria-hidden="true">
-                    G
+                    <LogoGungDev ukuran={22} />
                   </div>
                   <div className="msg__body">
                     <Berpikir
@@ -411,7 +412,7 @@ export default function ChatArea({
           loading={loading}
           autoFocus={!isEmpty}
           large={isEmpty}
-          placeholder={isEmpty ? 'Tanya apa saja ke GungDev…' : 'Balas GungDev…'}
+          placeholder={isEmpty ? 'Tanya apa saja ke GungDevâ€¦' : 'Balas GungDevâ€¦'}
           model={model}
           onModelChange={onModelChange}
           daftarModel={daftarModel}
