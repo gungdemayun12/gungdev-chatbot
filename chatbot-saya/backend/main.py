@@ -1460,6 +1460,35 @@ async def health_check():
 
 
 # ---------------------------------------------------------------------
+# 12a. ENDPOINT GET /diagnostik — status konfigurasi (AMAN, tanpa rahasia)
+# ---------------------------------------------------------------------
+@app.get("/diagnostik")
+async def diagnostik():
+    """
+    Menjawab pertanyaan "kenapa riwayat hanya tersimpan di perangkat?"
+
+    Yang dikirim HANYA status terpasang/belum terpasang (boolean).
+    Tidak ada API key, token, URL, atau nama penyedia — sehingga endpoint
+    ini aman dibuka walau situsnya publik. Nilai rahasia tetap tidak
+    pernah keluar dari server.
+    """
+    return {
+        # Penyimpanan riwayat per akun (Redis). Bila false, frontend
+        # menampilkan "Riwayat sementara hanya di perangkat ini".
+        "penyimpanan_riwayat": penyimpanan.tersedia(),
+        # Verifikasi ID token Google. Bila false, SEMUA permintaan riwayat
+        # ditolak (401) walau pengguna sudah login.
+        "verifikasi_login": identitas.tersedia(),
+        # Status AI (hanya boolean).
+        "ai_siap": bool(
+            GROQ_API_KEY if PROVIDER == "groq"
+            else OPENROUTER_API_KEY if PROVIDER == "openrouter"
+            else True
+        ),
+    }
+
+
+# ---------------------------------------------------------------------
 # 12b. ENDPOINT GET /usage — pemakaian & sisa kuota AI
 # ---------------------------------------------------------------------
 @app.get("/usage")
