@@ -103,7 +103,7 @@
   /* Bidang terang di belakang logo: rubahnya oranye dengan garis hampir
      hitam, sehingga di tema gelap garis itu butuh latar terang agar
      tidak menyatu. */
-  background: var(--logo-bidang);
+  background: #ffffff;
   box-shadow: 0 0 0 1px var(--logo-bingkai);
   transition: box-shadow var(--t-fast), transform var(--t-fast);
 }
@@ -689,7 +689,7 @@
   flex: 0 0 32px;
   margin-top: 1px;
   border-radius: 9px;
-  background: var(--logo-bidang);
+  background: #ffffff;
   box-shadow: 0 0 0 1px var(--logo-bingkai);
   user-select: none;
 }
@@ -2009,7 +2009,7 @@
   height: 72px;
   margin-bottom: var(--sp-3);
   border-radius: 20px;
-  background: var(--logo-bidang);
+  background: #ffffff;
   box-shadow:
     0 0 0 1px var(--logo-bingkai),
     0 12px 28px rgba(242, 98, 15, 0.16);
@@ -2468,7 +2468,7 @@ select.input {
   height: 60px;
   flex: 0 0 60px;
   border-radius: var(--r-lg);
-  background: var(--logo-bidang);
+  background: #ffffff;
   box-shadow: 0 0 0 1px var(--logo-bingkai), var(--shadow-sm);
 }
 
@@ -3706,20 +3706,17 @@ select.input {
 
 /* =====================================================================
    LOGO GUNGDEV
-   Lambang rubah berasal dari logo asli (public/logo-512.png, dibuat oleh
-   _buat_ikon.py). Bentuknya tinggi dan sempit, jadi ukuran gambar
-   dikunci dengan object-fit agar tidak gepeng, dan selalu diletakkan di
-   atas bidang terang: garis logonya hampir hitam sehingga di tema gelap
-   akan menyatu bila latarnya ikut gelap.
+   Lambang rubah berasal dari logo asli pemilik situs
+   (public/White-Chested Fox Logo.png). Bentuknya tinggi dan sempit, jadi
+   ukuran gambar dikunci dengan object-fit agar tidak gepeng.
+   Berkas ukuran dibuat oleh frontend/_buat_ikon.py.
    ===================================================================== */
 :root {
-  --logo-bidang: linear-gradient(165deg, #ffffff, #f1ece1);
-  --logo-bingkai: rgba(28, 27, 26, 0.09);
+  --logo-bingkai: rgba(28, 27, 26, 0.14);
 }
 
 [data-theme='dark'] {
-  --logo-bidang: linear-gradient(165deg, #ffffff, #e9e3d6);
-  --logo-bingkai: rgba(255, 255, 255, 0.14);
+  --logo-bingkai: rgba(255, 255, 255, 0.24);
 }
 
 .logo-gungdev {
@@ -3739,22 +3736,35 @@ select.input {
   -webkit-user-drag: none;
 }
 
-/* Di dalam bidang kecil, logo diberi sedikit napas agar tidak menyentuh
-   tepi dan tidak terlihat sesak. */
+/* Kotak di sekitar logo.
+   Logo punya latar putih. Di tema gelap, kotak putih bersudut tajam
+   terlihat seperti tempelan; karena itu sudutnya dibulatkan dan diberi
+   bingkai tipis, sehingga terbaca sebagai lambang aplikasi. */
+.sb-brand__mark,
+.msg__avatar,
+.about__mark,
+.empty__spark {
+  background: #ffffff;
+  box-shadow: 0 0 0 1px var(--logo-bingkai);
+}
+
+[data-theme='dark'] .sb-brand__mark,
+[data-theme='dark'] .msg__avatar,
+[data-theme='dark'] .about__mark,
+[data-theme='dark'] .empty__spark {
+  background: #ffffff;
+  box-shadow:
+    0 0 0 1px var(--logo-bingkai),
+    0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+/* Logo diberi sedikit napas di dalam kotaknya. */
 .sb-brand__mark .logo-gungdev,
 .msg__avatar .logo-gungdev,
 .about__mark .logo-gungdev,
 .empty__spark .logo-gungdev {
-  width: calc(100% - 8px);
-  height: calc(100% - 8px);
-}
-
-/* Avatar di layar sempit lebih kecil. */
-@media (max-width: 640px) {
-  .msg__avatar .logo-gungdev {
-    width: calc(100% - 6px);
-    height: calc(100% - 6px);
-  }
+  width: calc(100% - 6px);
+  height: calc(100% - 6px);
 }
 
 @media (prefers-reduced-motion: reduce) {
