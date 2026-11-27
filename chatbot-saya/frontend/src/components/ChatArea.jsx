@@ -1,4 +1,4 @@
-﻿/**
+/**
  * ChatArea.jsx — header tipis + daftar pesan + tombol scroll ke bawah.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'

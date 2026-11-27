@@ -104,7 +104,7 @@ OPENROUTER_API_KEY = _env("OPENROUTER_API_KEY")
 OPENROUTER_BASE_URL = _env(
     "OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"
 ).rstrip("/")
-OPENROUTER_SITE_URL = _env("OPENROUTER_SITE_URL", "https://gungdev-chatbot-ai.vercel.app")
+OPENROUTER_SITE_URL = _env("OPENROUTER_SITE_URL", "https://gungdevchatbot.vercel.app")
 OPENROUTER_APP_NAME = _env("OPENROUTER_APP_NAME", "GungDev")
 OPENROUTER_MODEL_DEFAULT = _env("OPENROUTER_MODEL", "openai/gpt-oss-20b")
 # Daftar model OpenRouter yang boleh dipilih. Semua di sini mendukung

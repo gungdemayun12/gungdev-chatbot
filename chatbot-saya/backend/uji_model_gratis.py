@@ -1,5 +1,5 @@
-"""
-uji_model_gratis.py — memeriksa model OpenRouter mana yang BENAR-BENAR
+﻿"""
+uji_model_gratis.py â€” memeriksa model OpenRouter mana yang BENAR-BENAR
 bisa dipakai dengan API key Anda (khusus model :free / tanpa kredit).
 
 CARA PAKAI (PowerShell, di folder chatbot-saya/backend):
@@ -7,7 +7,7 @@ CARA PAKAI (PowerShell, di folder chatbot-saya/backend):
     $env:OPENROUTER_API_KEY="sk-or-v1-...(key baru Anda)"
     python uji_model_gratis.py
 
-Key TIDAK ditulis di file ini dan TIDAK disimpan — hanya dibaca dari
+Key TIDAK ditulis di file ini dan TIDAK disimpan â€” hanya dibaca dari
 environment sesi terminal itu.
 
 Yang diperiksa per model:
@@ -55,7 +55,7 @@ def headers(key: str) -> dict:
     return {
         "Authorization": f"Bearer {key}",
         "Content-Type": "application/json",
-        "HTTP-Referer": "https://gungdev-chatbot-ai.vercel.app",
+        "HTTP-Referer": "https://gungdevchatbot.vercel.app",
         "X-Title": "GungDev",
     }
 
@@ -103,7 +103,7 @@ async def main() -> int:
         print('PowerShell:  $env:OPENROUTER_API_KEY="sk-or-v1-..."')
         return 1
 
-    print(f"Key terbaca (panjang {len(key)}, awalan {key[:8]}…)\n")
+    print(f"Key terbaca (panjang {len(key)}, awalan {key[:8]}â€¦)\n")
 
     async with httpx.AsyncClient(timeout=90) as http:
         print("=== STATUS KEY & KREDIT ===")

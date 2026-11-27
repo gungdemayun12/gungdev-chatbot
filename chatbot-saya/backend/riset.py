@@ -71,7 +71,7 @@ BAHASA_WIKI = ("id", "en")
 # robot resmi mereka). UA ini sengaja memuat nama aplikasi + kontak
 # situs, sebagaimana diminta: https://w.wiki/4wJS
 UA_WIKI = (
-    "GungDev/2.0 (https://gungdev-chatbot-ai.vercel.app; admin@gungdev.ai) "
+    "GungDev/2.0 (https://gungdevchatbot.vercel.app; admin@gungdev.ai) "
     "httpx/0.27"
 )
 UA_BROWSER = (

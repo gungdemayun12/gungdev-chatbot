@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Message.jsx — satu pesan dalam percakapan.
  *
  * - Pesan pengguna: bubble membulat rata kanan + menu Edit / Salin.
@@ -130,7 +130,7 @@ function Message({
               className="msg-action"
               onClick={handleCopy}
               aria-label={copied ? 'Tersalin' : 'Salin jawaban'}
-              title={copied ? 'Tersalin âœ“' : 'Salin'}
+              title={copied ? 'Tersalin ✓' : 'Salin'}
             >
               {copied ? <Check size={14} /> : <Copy size={14} />}
             </button>

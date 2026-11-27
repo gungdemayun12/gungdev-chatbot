@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Sidebar.jsx — panel kiri: logo, tombol percakapan baru, pencarian,
  * riwayat terkelompok, dan footer pengguna.
  *

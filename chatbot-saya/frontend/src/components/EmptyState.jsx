@@ -1,4 +1,4 @@
-﻿/**
+/**
  * EmptyState.jsx — tampilan saat percakapan masih kosong.
  * Sapaan besar bergaya serif sesuai waktu + kartu saran prompt.
  */

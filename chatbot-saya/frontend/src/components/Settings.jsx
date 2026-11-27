@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Settings.jsx — panel pengaturan dengan tab:
  * Umum, Personalisasi, Percakapan, Akun, Lanjutan, Pintasan, Tentang.
  *

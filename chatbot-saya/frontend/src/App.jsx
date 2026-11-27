@@ -1,4 +1,4 @@
-﻿/**
+/**
  * App.jsx — komponen utama GungDev.
  *
  * Tanggung jawab:
