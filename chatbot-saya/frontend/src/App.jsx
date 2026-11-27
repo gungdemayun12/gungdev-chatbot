@@ -364,7 +364,7 @@ export default function App() {
       const penanda = []
       if (images.length) penanda.push(`🖼️ ${images.length} gambar`)
       if (files.length) penanda.push(`📎 ${files.map((f) => f.name).join(', ')}`)
-      if (pakaiRiset) penanda.push('🌐 riset web')
+      if (pakaiRiset) penanda.push('🌐 riset lebih dalam')
       const teksTampil = penanda.length
         ? `${text}\n\n_${penanda.join(' · ')}_`
         : text
@@ -634,12 +634,12 @@ export default function App() {
   )
 
   /**
-   * Mengaktifkan/mematikan riset web.
+   * Mengaktifkan/mematikan "riset lebih dalam".
    *
-   * Riset TIDAK mengganti model. Riset dikerjakan di server (lihat
-   * backend/riset.py), jadi semua model bisa riset dengan kualitas yang
-   * sama — pengguna tidak perlu berpindah model hanya untuk mencari
-   * informasi di web.
+   * Riset web TIDAK lagi bergantung pada tombol ini: riset berjalan
+   * otomatis untuk semua model (dikerjakan di server, lihat
+   * backend/riset.py). Tombol globe kini hanya MEMAKSA penggalian lebih
+   * dalam. Riset juga tidak mengganti model pilihan pengguna.
    */
   const handleResearchChange = useCallback(
     (aktif) => {

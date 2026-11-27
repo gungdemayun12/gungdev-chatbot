@@ -31,7 +31,7 @@ const MANFAAT = [
   {
     icon: Telescope,
     judul: 'Riset web',
-    isi: 'Minta GungDev mencari informasi terbaru di internet.',
+    isi: 'GungDev mencari dan membaca sumber di internet, otomatis untuk semua model.',
   },
   {
     icon: ShieldCheck,

@@ -7,7 +7,8 @@
  *   - tombol kirim bulat; berubah jadi tombol Stop saat AI menjawab
  *   - lampirkan GAMBAR (dibaca model vision) dan FILE (PDF/DOCX/XLSX/
  *     PPTX/TXT/CSV/kode) yang isinya diekstrak jadi teks di browser
- *   - tombol "Riset web" untuk meminta AI mencari di internet dulu
+ *   - tombol globe "riset lebih dalam": riset web sudah OTOMATIS untuk
+ *     semua model, tombol ini hanya memaksa penggalian lebih dalam
  *   - pratinjau lampiran (thumbnail gambar, nama & ukuran file)
  *   - hint keyboard hanya tampil di desktop
  *   - disclaimer kecil di bawah
@@ -277,13 +278,13 @@ export default function Composer({
             aria-pressed={Boolean(research)}
             aria-label={
               research
-                ? 'Riset web aktif. Klik untuk mematikan'
-                : 'Aktifkan riset web'
+                ? 'Riset lebih dalam aktif. Klik untuk mematikan'
+                : 'Paksa riset lebih dalam'
             }
             title={
               research
-                ? 'Riset web AKTIF — AI akan mencari di internet dulu'
-                : 'Riset web — AI mencari di internet dulu'
+                ? 'Riset lebih dalam AKTIF — AI menggali lebih banyak sumber'
+                : 'Paksa riset lebih dalam (riset web sudah otomatis)'
             }
           >
             <Globe size={18} />

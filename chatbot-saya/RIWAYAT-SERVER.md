@@ -670,6 +670,103 @@ Cara menaikkan jatah yang **benar-benar** bekerja: menambah project Google
 Gemini (kuota dihitung per project, bukan per key), menambah model Groq
 yang kuotanya terpisah, atau berlangganan Groq berbayar.
 
+## Riset web: otomatis, untuk SEMUA model
+
+### Masalahnya
+
+Dulu riset web hanya dikerjakan bila pengguna menekan tombol globe, dan
+hanya model yang punya tool `browser_search` milik Groq (keluarga
+GPT-OSS) yang bisa melakukannya. Model lain — Claude, Gemini, DeepSeek,
+Kimi, GLM — sama sekali tidak bisa riset. Kalau pengguna tetap meminta,
+jawabannya dikarang dari ingatan, atau model menjawab jujur:
+
+> "di percakapan ini aku belum bisa benar-benar membuka browser…"
+
+Itu bukan halusinasi model. Memang tidak ada bahan yang diberikan
+kepadanya.
+
+### Akar masalah yang ditemukan lewat pengujian
+
+Waktu sumber pencarian diuji satu per satu dari server, hasilnya:
+
+| Sumber | Hasil uji nyata |
+|---|---|
+| **Bing** | **selalu kosong** — penanda `b_algo` muncul **0 kali** pada query apa pun, karena halaman hasilnya kini dirender JavaScript |
+| DuckDuckGo (html & lite) | HTTP 202 + halaman kosong |
+| Brave | HTTP 429 |
+| Mojeek | halaman tanpa hasil |
+| Startpage | tanpa hasil |
+| Ecosia | HTTP 403 |
+| Google | halaman persetujuan/captcha |
+| SearXNG publik (`searx.be` dll.) | captcha / 429 / bukan JSON |
+| Qwant | koneksi mati |
+| Reddit | HTTP 403 |
+| Wikipedia dengan UA tanpa kontak | HTTP 403 |
+
+Jadi mesin "utama" yang dipakai selama ini memang tidak pernah memberi
+hasil. Yang tersisa hanya artikel Wikipedia — sering salah topik. Itulah
+sebab riset terasa tidak nyata.
+
+### Sumber yang dipakai sekarang (semua terbukti bekerja)
+
+1. **Yahoo Search** — mesin utama. Mengembalikan judul, URL asli, tanggal,
+   dan cuplikan. Diuji pada berita, tutorial, harga, resep, dan jadwal:
+   semuanya berhasil.
+2. **Google News RSS** — berita terkini, XML bersih, tanpa API key.
+3. **Marginalia** — mesin independen, cadangan saat Yahoo membatasi;
+   bagus untuk tutorial/topik teknis.
+4. **Wikipedia** (id + en) — pelengkap topik ensiklopedis. UA **wajib**
+   memuat kontak (`admin@gungdev.ai`), kalau tidak ditolak 403.
+
+Catatan teknis:
+
+- Yahoo kadang membalas **HTTP 500** (pembatas laju sementara) walau query
+  yang sama berhasil beberapa detik kemudian. Karena itu ada **3 percobaan
+  ulang** dengan jeda 1,2 s dan 2,4 s. Marginalia 2 percobaan.
+- Tautan Google News (`news.google.com/rss/articles/…`) tidak bisa dibaca
+  sebagai artikel. Yang dipakai adalah alamat situs asli dari atribut
+  `<source url>` dan tautan di dalam `<description>`; bila tidak ada,
+  cuplikannya tetap dipakai sebagai bahan.
+
+### Cara kerjanya sekarang
+
+1. Pengguna mengirim pesan — **tanpa perlu menekan apa pun**.
+2. Server menilai apakah pesan itu wajar diriset (`riset.perlu_riset`).
+   Sapaan singkat seperti "halo" atau "terima kasih" dilewati agar tidak
+   memperlambat.
+3. Model merumuskan kata kunci pencarian dari permintaan pengguna.
+4. Server mencari di empat sumber di atas **secara bersamaan**, membuang
+   duplikat, lalu **membaca isi halaman** yang paling relevan.
+5. Isi sumber dikirim ke model sebagai konteks, dengan aturan menjawab:
+   sebut sumber `[1]`, `[2]`, dan **dilarang** berkata tidak bisa membuka
+   web.
+6. Model menulis jawaban berdasarkan sumber itu.
+
+Karena seluruh proses ada di server, **semua model** — Groq, OpenRouter,
+Gemini, NVIDIA — mendapat kualitas riset yang sama. Model **tidak lagi
+diganti** hanya karena pengguna minta riset.
+
+### Tombol globe sekarang: paksa riset LEBIH DALAM
+
+Riset biasa sudah otomatis. Tombol globe (dan kata "riset", "research",
+"teliti", "mendalam") memicu **riset berlapis**:
+
+- putaran pertama: 6 sumber;
+- model diminta menyebut bagian yang **belum terjawab**;
+- putaran kedua mencari celah itu dengan kata kunci berbeda;
+- hasil kedua putaran digabung, maksimal 8 sumber.
+
+### Yang perlu diketahui (jujur)
+
+- Tambahan waktu sekitar 5–12 detik pada pesan yang diriset. Ini harga
+  dari membaca halaman sungguhan, bukan sekadar menempelkan judul.
+- Sumber gratis bisa berubah perilaku kapan saja (seperti Bing). Bila
+  suatu saat riset terasa menurun, jalankan `uji_riset.py` lebih dulu —
+  uji itu mencari sumber nyata, bukan menebak.
+- Bila seluruh sumber gagal, chat **tetap** berjalan: model menjawab dari
+  pengetahuannya, dan prompt kejujuran membuatnya tidak mengaku-ngaku
+  sudah menelusuri web.
+
 ## Menjalankan uji
 
 ```powershell
@@ -682,6 +779,8 @@ python uji_gemini.py              # 40 pemeriksaan Gemini & failover antar penye
 python uji_nvidia.py              # 60 pemeriksaan penyedia keempat (NVIDIA NIM)
 python uji_unik_model.py          # 6 pemeriksaan id model tidak bentrok antar penyedia
 python uji_terpotong.py           # 29 pemeriksaan deteksi & sambung jawaban terpotong
+python uji_riset.py               # 20 pemeriksaan riset web NYATA (mencari di internet sungguhan)
+python uji_riset_semua_model.py   # 80 pemeriksaan: semua model bisa riset, model tidak diganti
 python uji_model_gemini.py        # cek model Gemini mana yang hidup untuk key Anda
 python uji_model_baru.py          # cari model Gemini TAMBAHAN yang hidup (jujur, tanpa pengalihan)
 python cek_key.py nvidia          # cek API key baru hidup atau tidak, sebelum ke Vercel

@@ -400,16 +400,19 @@ MODEL_VISION = {
 # bukan model vision.
 MODEL_VISION_DEFAULT = "qwen/qwen3.8-27b"
 
-# 2. MODEL_BROWSER — bisa melakukan riset web memakai tool bawaan Groq
-#    "browser_search" (dijalankan di sisi Groq, tanpa API key tambahan).
-#    Per dokumentasi Groq, hanya keluarga GPT-OSS yang mendukungnya.
+# 2. MODEL_BROWSER — model yang SECARA TEKNIS punya tool `browser_search`
+#    bawaan Groq. Dulu daftar ini menentukan siapa yang bisa riset,
+#    sehingga model lain sama sekali tidak bisa. Sekarang riset dikerjakan
+#    di server (riset.py) untuk SEMUA model, jadi daftar ini hanya
+#    dipertahankan sebagai catatan/dokumentasi dan tidak dipakai untuk
+#    mengganti model lagi.
 MODEL_BROWSER = {
     "openai/gpt-oss-120b",
     "openai/gpt-oss-20b",
 }
 
-# Model pengganti bila pengguna meminta riset web dengan model yang
-# tidak mendukung browser_search.
+# Tidak dipakai lagi (riset tidak memaksa ganti model). Dipertahankan agar
+# impor/uji lama yang menyebut nama ini tidak error.
 MODEL_BROWSER_DEFAULT = "openai/gpt-oss-120b"
 
 
@@ -455,7 +458,7 @@ def model_untuk_permintaan(
 
     Aturan:
       - Ada gambar  -> model harus multimodal (MODEL_VISION).
-      - Minta riset -> model harus bisa browser_search (MODEL_BROWSER).
+      - Riset       -> TIDAK memengaruhi pilihan model (dikerjakan server).
       - Selain itu  -> hormati pilihan pengguna apa adanya.
 
     Bila pilihan pengguna tidak memenuhi syarat, model diganti otomatis
@@ -463,10 +466,8 @@ def model_untuk_permintaan(
     pengguna dengan jujur alih-alih membiarkan permintaan gagal dengan
     error 400 dari penyedia.
 
-    Bila gambar DAN riset diminta sekaligus, riset diutamakan: model
-    vision tidak punya browser_search, dan jawaban riset yang dikarang
-    lebih berbahaya daripada gambar yang diabaikan (pengguna tetap
-    mendapat pemberitahuan lewat `catatan`).
+    Parameter `penelitian` masih diterima demi kompatibilitas pemanggil
+    lama, tetapi tidak lagi dipakai untuk berpindah model.
 
     Mengembalikan: (nama_model, catatan_penyesuaian_atau_None)
     """
@@ -498,20 +499,17 @@ def _catatan_penyesuaian(
     model_final: str,
     dipilih: str,
     ada_gambar: bool,
-    penelitian: bool,
+    penelitian: bool,  # dipertahankan agar pemanggil lama tetap jalan
 ) -> Optional[str]:
-    """Menjelaskan ke pengguna mengapa modelnya diganti (bahasa awam)."""
+    """
+    Menjelaskan ke pengguna mengapa modelnya diganti (bahasa awam).
+
+    Catatan: riset web TIDAK lagi menjadi alasan penggantian model. Riset
+    dikerjakan di server (riset.py) untuk semua model, jadi pesan lama
+    "belum mendukung riset web" tidak boleh muncul lagi.
+    """
     if model_final == dipilih:
         return None
-
-    if penelitian and model_final in MODEL_BROWSER:
-        alasan = "belum mendukung riset web"
-        if ada_gambar:
-            alasan = "belum bisa riset web sekaligus membaca gambar"
-        return (
-            f"Model {dipilih} {alasan}, jadi permintaan ini diproses oleh "
-            f"{model_final}."
-        )
 
     if model_final in MODEL_VISION:
         return (
@@ -718,10 +716,12 @@ class ChatRequest(BaseModel):
         description="File biner base64 untuk diekstrak di server: [{name, data}]",
     )
 
-    # Minta AI melakukan riset di web (memakai browser_search bawaan Groq).
+    # Paksa riset web LEBIH DALAM. Riset biasa sudah berjalan otomatis
+    # untuk semua model; flag ini hanya menambah kedalaman (lebih banyak
+    # sumber + putaran lanjutan).
     research: bool = Field(
         False,
-        description="True = lakukan riset web sebelum menjawab",
+        description="True = paksa riset web lebih dalam sebelum menjawab",
     )
 
 
@@ -872,9 +872,10 @@ def resolve_options(request: ChatRequest) -> dict:
     Menentukan model, temperature, & batas token final.
 
     Model dipilih dengan mempertimbangkan isi permintaan: gambar butuh
-    model vision, riset web butuh model dengan browser_search. Bila
-    pilihan pengguna tidak memenuhi syarat, model diganti otomatis dan
-    `penyesuaian` berisi penjelasan untuk pengguna.
+    model vision. Riset web TIDAK lagi mengubah pilihan model, karena
+    riset dikerjakan di server dan berlaku untuk semua model. Bila
+    pilihan pengguna tidak memenuhi syarat (mis. gambar), model diganti
+    otomatis dan `penyesuaian` berisi penjelasan untuk pengguna.
     """
     ada_gambar = bool(request.images)
     model, penyesuaian = model_untuk_permintaan(
@@ -1138,18 +1139,16 @@ def _groq_payload(model: str, messages: List[dict], opsi: dict, streaming: bool)
     """
     Menyusun body permintaan ke Groq.
 
-    Riset web memakai tool bawaan Groq `browser_search`, yang berjalan
-    di sisi server Groq — tidak perlu API key pencarian tambahan dan
-    tidak perlu layanan pihak ketiga.
+    Riset web TIDAK lagi memakai tool bawaan Groq `browser_search`.
+    Alasan: tool itu hanya tersedia untuk keluarga GPT-OSS, sehingga
+    model lain tidak bisa riset sama sekali — dan itulah yang membuat
+    riset terasa "tidak nyata". Sekarang riset dikerjakan di server
+    (lihat riset.py + lakukan_riset_server), sehingga SEMUA model di
+    semua penyedia mendapat kualitas riset yang sama.
 
-    Catatan penting dari dokumentasi Groq:
-      - browser_search hanya untuk keluarga GPT-OSS.
-      - `tool_choice: "required"` membuat model WAJIB mencari dulu,
-        bukan menjawab dari ingatan. Itu yang membuat risetnya nyata.
-      - reasoning rendah disarankan agar sesi browsing tidak terlalu
-        panjang (hemat token kuota gratis).
-      - browser_search tidak kompatibel dengan structured outputs; kita
-        tidak memakainya, jadi aman.
+    Yang tetap dipakai dari pengaturan riset: batas token lebih besar,
+    karena jawaban riset biasanya panjang dan rinci. Tanpa ini jawaban
+    terpotong di tengah.
 
     Catatan: dokumentasi Groq selalu memakai `temperature=1, top_p=1`
     pada contoh vision. Nilai itu dipakai untuk permintaan bergambar
@@ -1169,11 +1168,9 @@ def _groq_payload(model: str, messages: List[dict], opsi: dict, streaming: bool)
     if streaming:
         payload["stream_options"] = {"include_usage": True}
 
-    if opsi.get("penelitian"):
-        payload["tools"] = [{"type": "browser_search"}]
-        payload["tool_choice"] = "required"
-        # Riset butuh waktu; beri ruang token lebih besar agar jawaban
-        # tidak terpotong di tengah.
+    if opsi.get("penelitian") or opsi.get("perlu_riset"):
+        # Jawaban riset panjang dan rinci; beri ruang token lebih besar
+        # agar tidak terpotong di tengah.
         payload["max_completion_tokens"] = max(
             opsi["max_tokens"], MAX_TOKENS_RISET
         )
@@ -1232,10 +1229,11 @@ def _openrouter_payload(model: str, messages: List[dict], opsi: dict, streaming:
     # OpenRouter bila endpoint/model menyediakannya.
     if streaming:
         payload["stream_options"] = {"include_usage": True}
-    if opsi.get("penelitian"):
-        # OpenRouter tidak memakai tool browser_search milik Groq. Jangan
-        # mengirim tool Groq ke sini; fitur research provider lama tetap aman.
-        logger.info("Riset diminta pada OpenRouter; memakai model tanpa tool Groq.")
+    if opsi.get("perlu_riset") or opsi.get("penelitian"):
+        # Riset dikerjakan di server untuk semua penyedia, jadi tidak ada
+        # tool yang perlu dikirim ke OpenRouter. Jawaban riset panjang,
+        # jadi ruang tokennya diperbesar.
+        payload["max_tokens"] = max(opsi["max_tokens"], MAX_TOKENS_RISET)
     return payload
 
 
@@ -2935,13 +2933,15 @@ async def sessions_hapus(
 # Instruksi ini ditambahkan HANYA bila fiturnya dipakai, sehingga
 # percakapan biasa tetap memakai prompt dasar yang ringkas (hemat token).
 PROMPT_RISET = (
-    "Pengguna meminta RISET WEB. Kamu punya akses penjelajah web. "
-    "Aturan: (1) Selalu cari informasi terbaru di web sebelum menjawab, "
-    "jangan mengandalkan ingatan. (2) Utamakan sumber yang kredibel dan "
-    "terbaru. (3) Sebutkan sumbernya secara ringkas (nama situs + tanggal "
-    "bila ada) agar pengguna bisa memeriksa sendiri. (4) Bila informasi "
-    "tidak ditemukan atau sumber saling bertentangan, katakan terus "
-    "terang. (5) Jangan mengarang kutipan, angka, atau tautan."
+    "Pengguna meminta RISET WEB. Sumber web SUDAH dibaca untukmu oleh "
+    "sistem dan disertakan di bawah. Aturan: (1) Jawab berdasarkan isi "
+    "sumber itu, jangan mengandalkan ingatan. (2) Utamakan informasi "
+    "terbaru; bila sumber mencantumkan tanggal, sebutkan. (3) Sebutkan "
+    "sumbernya (nama situs + nomor [1], [2]) agar pengguna bisa memeriksa "
+    "sendiri. (4) Bila informasi tidak ditemukan atau sumber saling "
+    "bertentangan, katakan terus terang. (5) Jangan mengarang kutipan, "
+    "angka, atau tautan. (6) JANGAN mengatakan bahwa kamu tidak bisa "
+    "membuka web — sumber sudah dibacakan untukmu."
 )
 
 PROMPT_LAMPIRAN = (
@@ -2994,22 +2994,31 @@ async def lakukan_riset_server(
     """
     Menjalankan riset web DI SERVER, berlaku untuk semua model/penyedia.
 
-    Mengapa di server: sebelumnya riset hanya bisa dilakukan model yang
-    punya tool `browser_search` (keluarga GPT-OSS di Groq). Dengan cara
-    ini, model apa pun — termasuk semua model OpenRouter — bisa riset
-    dengan kualitas yang sama, tanpa pengguna perlu berganti model.
+    Mengapa di server: model tidak punya akses internet sendiri. Sebelumnya
+    riset hanya dikerjakan bila pengguna menekan tombol globe, dan hasilnya
+    tipis karena bertumpu pada Bing yang ternyata selalu kosong. Sekarang:
 
-    Alur:
-      1. Model merumuskan kata kunci pencarian yang tajam.
-      2. Server mencari & membaca sumber (lihat riset.py).
-      3. Hasil dikembalikan sebagai konteks untuk jawaban akhir.
+      1. Riset berjalan OTOMATIS untuk semua model — pengguna tidak perlu
+         menekan apa pun. `opsi["perlu_riset"]` sudah dinilai oleh
+         pemanggil (lihat riset.perlu_riset), sedangkan tombol globe
+         (request.research) hanya MEMAKSA riset lebih dalam.
+      2. Model merumuskan kata kunci; server mencari di Yahoo + Google News
+         + Marginalia + Wikipedia, lalu membaca isi halaman.
+      3. Bila pengguna meminta "riset"/"research"/"teliti", riset
+         dilanjutkan satu putaran lagi untuk menutup bagian yang belum
+         terjawab (riset berlapis).
 
     Mengembalikan teks konteks, atau None bila tidak ada hasil. TIDAK
     pernah melempar exception: kegagalan riset tidak boleh menggagalkan
-    chat — model tetap menjawab dari pengetahuannya sendiri.
+    chat — model tetap menjawab dari pengetahuannya sendiri, dan instruksi
+    kejujuran di prompt membuatnya tidak mengaku-ngaku sudah menelusuri
+    web.
     """
-    if not opsi.get("penelitian"):
+    if not opsi.get("perlu_riset"):
         return None
+
+    dalam = bool(opsi.get("riset_dalam"))
+    maunya_banyak = dalam or bool(opsi.get("penelitian"))
 
     try:
         # Langkah 1: minta model merumuskan query. Kalau gagal (mis.
@@ -3026,7 +3035,49 @@ async def lakukan_riset_server(
             logger.info("Perumusan query riset gagal (%s); memakai pesan asli.", exc)
             query = riset.bersihkan_query(None, permintaan)
 
-        hasil = await riset.cari_dan_baca(query or permintaan)
+        query = query or permintaan
+
+        # Langkah 2: putaran pertama. Saat riset mendalam, ambil lebih
+        # banyak sumber sekaligus.
+        hasil = await riset.cari_dan_baca(query, maks_sumber=6 if maunya_banyak else 4)
+        semua_sumber = list(hasil.get("sumber") or [])
+        kueri_dipakai = [query]
+
+        # Langkah 3: putaran lanjutan HANYA bila diminta mendalam. Model
+        # diminta menyebut celah yang belum terjawab, lalu dicari lagi.
+        if dalam and riset.ada_hasil(hasil):
+            try:
+                pesan_lanjut = [
+                    {
+                        "role": "system",
+                        "content": riset.instruksi_query_lanjutan(
+                            permintaan, " | ".join(kueri_dipakai)
+                        ),
+                    }
+                ]
+                mentah2 = await complete(
+                    pesan_lanjut, {**opsi, "penelitian": False, "max_tokens": 64}
+                )
+                query2 = riset.bersihkan_query(mentah2, "")
+                if query2 and query2.upper() != "CUKUP" and len(query2) > 3:
+                    kueri_dipakai.append(query2)
+                    hasil2 = await riset.cari_dan_baca(query2, maks_sumber=4)
+                    # Gabungkan, jangan buang putaran pertama.
+                    semua_sumber.extend(hasil2.get("sumber") or [])
+            except Exception as exc:  # noqa: BLE001
+                logger.info("Putaran riset lanjutan dilewati (%s).", exc)
+
+        if semua_sumber:
+            hasil["sumber"] = semua_sumber[:8]
+            hasil["teks"] = riset._susun_teks(hasil["sumber"])
+
+        logger.info(
+            "Riset '%s': %d sumber, %d putaran, dalam=%s",
+            (query or "")[:50],
+            len(hasil.get("sumber") or []),
+            len(kueri_dipakai),
+            dalam,
+        )
         return riset.konteks_untuk_model(hasil)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Riset web gagal, chat tetap dilanjutkan: %s", exc)
@@ -3055,10 +3106,24 @@ async def siapkan_permintaan(request: ChatRequest) -> tuple[List[dict], dict]:
     opsi["penelitian"] = bool(request.research)
     opsi["ada_gambar"] = bool(gambar)
 
+    # Riset web OTOMATIS untuk semua model.
+    #
+    # Dulu riset hanya jalan bila pengguna menekan tombol globe. Akibatnya
+    # permintaan seperti "carikan artikel tentang X" dijawab dari ingatan,
+    # dan model lalu mengaku tidak bisa menelusuri internet. Sekarang:
+    #   - pesan yang wajar diriset -> riset jalan sendiri;
+    #   - tombol globe (request.research) -> MEMAKSA riset lebih dalam;
+    #   - permintaan yang mengandung "riset/research/teliti" -> berlapis.
+    #
+    # Pesan yang tidak wajar diriset (sapaan, basa-basi singkat) dilewati
+    # agar tidak memperlambat jawaban tanpa menambah mutu.
+    opsi["riset_dalam"] = bool(request.research) or riset.perlu_riset_dalam(user_message)
+    opsi["perlu_riset"] = bool(opsi["riset_dalam"]) or riset.perlu_riset(user_message)
+
     # Susun messages dasar dulu: dipakai untuk merumuskan query riset.
     prompt_awal = susun_system_prompt(
         request.system_prompt,
-        penelitian=opsi["penelitian"],
+        penelitian=opsi["perlu_riset"],
         ada_lampiran=bool(blok_lampiran),
         ada_gambar=bool(gambar),
     )
@@ -3075,9 +3140,12 @@ async def siapkan_permintaan(request: ChatRequest) -> tuple[List[dict], dict]:
     konteks_riset = await lakukan_riset_server(user_message, opsi, messages_awal)
 
     if konteks_riset:
+        # penelitian=True di sini WAJIB: instruksi "jangan mengaku tidak
+        # bisa membuka web" harus ikut terkirim, meski pengguna tidak
+        # menekan tombol globe (riset otomatis).
         prompt = susun_system_prompt(
             request.system_prompt,
-            penelitian=opsi["penelitian"],
+            penelitian=True,
             ada_lampiran=bool(blok_lampiran),
             ada_gambar=bool(gambar),
             konteks_riset=konteks_riset,
