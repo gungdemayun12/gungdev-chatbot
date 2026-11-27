@@ -107,6 +107,18 @@ KUOTA_BERSAMA = {
     "model_groq": 3,
     "rpd_per_model_groq": 1_000,
     "tpd_per_model_groq": 200_000,
+    # Gemini (penyedia cadangan). Google TIDAK lagi mempublikasikan angka
+    # RPD pasti untuk free tier, jadi angka di bawah adalah perkiraan
+    # KONSERVATIF yang sengaja dibuat kecil: bila ternyata kuota aslinya
+    # lebih besar, tidak ada yang rusak — hanya saja perhitungan kita
+    # tidak memanfaatkannya. Yang penting jangan sampai terlalu besar,
+    # karena itu akan membuat jatah per akun melebihi kuota nyata.
+    #
+    # Rujukan: free tier Gemini 2.5 Flash sekitar 250 request/hari dan
+    # 250.000 token/menit. Kita pakai 200 request/hari dan 250.000 token
+    # per hari (bukan per menit) agar aman.
+    "rpd_gemini": 200,
+    "tpd_gemini": 250_000,
     # Rata-rata token per pesan (prompt + riwayat + jawaban). Diukur dari
     # pemakaian nyata: pesan pendek ~700 token, pesan panjang/riset
     # ~3.000 token, sehingga rata-ratanya ~1.500.
@@ -118,8 +130,12 @@ KAPASITAS_HARIAN = {
     "request": (
         KUOTA_BERSAMA["model_groq"] * KUOTA_BERSAMA["rpd_per_model_groq"]
         + KUOTA_BERSAMA["rpd_penyedia_langka"]
+        + KUOTA_BERSAMA["rpd_gemini"]
     ),
-    "token": KUOTA_BERSAMA["model_groq"] * KUOTA_BERSAMA["tpd_per_model_groq"],
+    "token": (
+        KUOTA_BERSAMA["model_groq"] * KUOTA_BERSAMA["tpd_per_model_groq"]
+        + KUOTA_BERSAMA["tpd_gemini"]
+    ),
 }
 
 # Berapa PESAN yang muat per hari bila seluruh token dipakai bertanya.

@@ -130,6 +130,44 @@ OPENROUTER_CADANGAN = [
     "nvidia/nemotron-3.5-lightning:free",
 ]
 
+# ---------------------------------------------------------------------
+# PENYEDIA CADANGAN: GOOGLE GEMINI
+# ---------------------------------------------------------------------
+# Mengapa Gemini ditambahkan:
+#   Groq membatasi 200.000 token/hari PER MODEL. Bila kuota itu habis,
+#   seluruh situs berhenti melayani. Gemini memberi jalur tambahan yang
+#   GRATIS (tanpa kartu kredit) dengan konteks 1 juta token, sehingga
+#   kuota situs tidak lagi bergantung pada satu penyedia saja.
+#
+# Kenapa aman ditambahkan:
+#   Gemini menyediakan endpoint yang KOMPATIBEL OpenAI di
+#   https://generativelanguage.googleapis.com/v1beta/openai/ , jadi
+#   format pesan, streaming SSE, dan gambar (image_url) sama persis
+#   dengan yang sudah dipakai OpenRouter/Groq. Tidak ada kontrak API
+#   yang berubah.
+#
+# Bila GEMINI_API_KEY kosong, penyedia ini otomatis TIDAK dipakai dan
+# perilaku situs kembali seperti semula (Groq/OpenRouter saja).
+GEMINI_API_KEY = _env("GEMINI_API_KEY")
+GEMINI_BASE_URL = _env(
+    "GEMINI_BASE_URL",
+    "https://generativelanguage.googleapis.com/v1beta/openai",
+).rstrip("/")
+
+# Model Gemini yang dipakai. Default sengaja "flash" karena itulah yang
+# memberi kuota gratis paling lega.
+GEMINI_MODEL_DEFAULT = _env("GEMINI_MODEL", "gemini-2.5-flash")
+
+# Urutan model yang dicoba. Bila model utama tidak tersedia untuk key
+# ini (Gemini kadang menutup model lama untuk akun baru), otomatis turun
+# ke model berikutnya supaya chat tetap berjalan.
+GEMINI_MODELS = [
+    GEMINI_MODEL_DEFAULT,
+    "gemini-2.5-flash-lite",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+]
+
 # Model default.
 #
 # CATATAN PENTING (diperbarui):
@@ -190,7 +228,7 @@ MODEL_GROQ_DIIZINKAN = [
     "openai/gpt-oss-20b",
     "qwen/qwen3.8-27b",
 ]
-MODEL_DIIZINKAN = MODEL_GROQ_DIIZINKAN + OPENROUTER_MODELS
+MODEL_DIIZINKAN = MODEL_GROQ_DIIZINKAN + OPENROUTER_MODELS + GEMINI_MODELS
 
 # Model yang dipakai bila klien tidak mengirim pilihan / mengirim nilai
 # di luar daftar.
@@ -213,6 +251,11 @@ MODEL_VISION = {
     "qwen/qwen3.8-27b",
     "google/gemini-2.5-flash-tts",
     "google/gemini-3.1-flash-lite",
+    # Model Gemini asli (penyedia cadangan). Semua Gemini multimodal.
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
     # Model OpenRouter :free yang multimodal (bisa membaca gambar).
     "google/gemma-4-31b-it:free",
     "google/gemma-4-26b-a4b-it:free",
@@ -377,6 +420,9 @@ OLLAMA_MODEL = _env("OLLAMA_MODEL", "deepseek-r1:7b")
 # Groq diturunkan agar tidak menggantung melewati batas fungsi.
 TIMEOUT_GROQ = _env_float("TIMEOUT_GROQ", 60)
 TIMEOUT_OLLAMA = _env_float("TIMEOUT_OLLAMA", 300)
+# Gemini bisa lebih lambat saat "thinking"; beri ruang lebih lega, tetapi
+# tetap di bawah batas fungsi Vercel agar tidak menggantung.
+TIMEOUT_GEMINI = _env_float("TIMEOUT_GEMINI", 90)
 
 # ---- CORS ----
 # Daftar origin tambahan dipisah koma, mis:
@@ -423,11 +469,18 @@ def pilih_provider() -> str:
             "pilihan diabaikan."
         )
         dipaksa = ""
+    elif dipaksa == "gemini" and not GEMINI_API_KEY:
+        logger.warning(
+            "AI_PROVIDER=gemini tetapi GEMINI_API_KEY kosong; pilihan diabaikan."
+        )
+        dipaksa = ""
 
-    if dipaksa in ("groq", "openrouter", "ollama"):
+    if dipaksa in ("groq", "openrouter", "gemini", "ollama"):
         return dipaksa
     if GROQ_API_KEY:
         return "groq"
+    if GEMINI_API_KEY:
+        return "gemini"
     if OPENROUTER_API_KEY:
         return "openrouter"
     return "ollama"
@@ -1394,6 +1447,236 @@ async def groq_stream(messages: List[dict], opsi: dict) -> AsyncIterator[str]:
 
 
 # ---------------------------------------------------------------------
+# 10b. PEMANGGILAN KE GOOGLE GEMINI (penyedia cadangan)
+# ---------------------------------------------------------------------
+def _gemini_headers() -> dict:
+    return {
+        "Authorization": f"Bearer {GEMINI_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+
+def _gemini_payload(model: str, messages: List[dict], opsi: dict, streaming: bool) -> dict:
+    """
+    Menyusun body permintaan untuk endpoint OpenAI-compatible Gemini.
+
+    Bentuknya sengaja sama dengan Groq/OpenRouter karena Gemini meniru
+    standar OpenAI. Yang TIDAK dikirim: `tools` milik Groq — riset web
+    sudah dikerjakan di server (lihat riset.py), jadi tidak diperlukan.
+    """
+    payload = {
+        "model": model,
+        "messages": messages,
+        "temperature": opsi["temperature"],
+        "max_tokens": opsi["max_tokens"],
+        "stream": streaming,
+    }
+    return payload
+
+
+def _kandidat_gemini(model: str, ada_gambar: bool) -> List[str]:
+    """
+    Daftar model Gemini yang dicoba berurutan.
+
+    Google kadang menutup model lama untuk API key baru (mis. 404 "model
+    not found"). Tanpa cadangan, situs akan mati padahal hanya perlu
+    ganti nama model. Bila ada gambar, hanya model vision yang dicoba.
+    """
+    utama = model if model in GEMINI_MODELS else GEMINI_MODEL_DEFAULT
+    kandidat = [utama]
+    for m in GEMINI_MODELS:
+        if m == utama:
+            continue
+        if ada_gambar and m not in MODEL_VISION:
+            continue
+        kandidat.append(m)
+    return kandidat
+
+
+async def gemini_complete(messages: List[dict], opsi: dict) -> str:
+    """Meminta jawaban lengkap (non-streaming) ke Gemini."""
+    kandidat = _kandidat_gemini(
+        opsi.get("model") or GEMINI_MODEL_DEFAULT, bool(opsi.get("ada_gambar"))
+    )
+    error_terakhir: Optional[HTTPException] = None
+
+    async with httpx.AsyncClient(timeout=TIMEOUT_GEMINI) as http:
+        for model in kandidat:
+            payload = _gemini_payload(model, messages, opsi, streaming=False)
+            res = await http.post(
+                f"{GEMINI_BASE_URL}/chat/completions",
+                headers=_gemini_headers(),
+                json=payload,
+            )
+
+            # 404 = model tidak tersedia untuk key ini -> coba berikutnya.
+            if res.status_code == 404 and model != kandidat[-1]:
+                logger.warning(
+                    "Model Gemini '%s' tidak tersedia, mencoba model cadangan.", model
+                )
+                error_terakhir = HTTPException(
+                    status_code=502, detail=pesan_error_http(404)
+                )
+                continue
+
+            if res.status_code >= 400:
+                body = await res.aread() if hasattr(res, "aread") else b""
+                logger.error(
+                    "Gemini menolak permintaan: %s %s",
+                    res.status_code,
+                    (body or res.text.encode())[:200],
+                )
+                error_terakhir = ke_http_exception(
+                    httpx.HTTPStatusError(
+                        f"Gemini {res.status_code}",
+                        request=res.request,
+                        response=res,
+                    )
+                )
+                # 429 = kuota habis. Tidak ada gunanya mencoba model lain
+                # bila kuotanya memang habis untuk seluruh akun; tetapi
+                # kuota Gemini dihitung per model, jadi tetap dicoba.
+                if res.status_code == 429 and model != kandidat[-1]:
+                    continue
+                raise error_terakhir
+
+            data = res.json()
+            try:
+                pesan = data["choices"][0]["message"] or {}
+            except (KeyError, IndexError, TypeError):
+                pesan = {}
+
+            # Simpan angka token sebenarnya agar pencatatan jatah akurat.
+            try:
+                pakai = data.get("usage") or {}
+                usage.simpan_token_asli(
+                    pakai.get("total_tokens") or 0,
+                    pakai.get("prompt_tokens") or 0,
+                    pakai.get("completion_tokens") or 0,
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
+            isi = _teks_dari_pesan(pesan)
+            if not isi:
+                raise HTTPException(
+                    status_code=502,
+                    detail="Layanan AI mengembalikan jawaban kosong. Silakan coba lagi.",
+                )
+            return isi
+
+    raise error_terakhir or HTTPException(
+        status_code=502, detail=pesan_error_http(404)
+    )
+
+
+async def gemini_stream(messages: List[dict], opsi: dict) -> AsyncIterator[str]:
+    """
+    Menghasilkan potongan teks (delta) dari Gemini secara bertahap.
+
+    Mekanisme cadangan model sama dengan gemini_complete(). Penentuan
+    model dilakukan SEBELUM ada data dikirim ke pengguna, jadi aman
+    untuk dialihkan di tengah jalan.
+    """
+    kandidat = _kandidat_gemini(
+        opsi.get("model") or GEMINI_MODEL_DEFAULT, bool(opsi.get("ada_gambar"))
+    )
+
+    async with httpx.AsyncClient(timeout=TIMEOUT_GEMINI) as http:
+        res = None
+        for model in kandidat:
+            payload = _gemini_payload(model, messages, opsi, streaming=True)
+            permintaan = http.build_request(
+                "POST",
+                f"{GEMINI_BASE_URL}/chat/completions",
+                headers=_gemini_headers(),
+                json=payload,
+            )
+            kandidat_res = await http.send(permintaan, stream=True)
+
+            if kandidat_res.status_code == 404 and model != kandidat[-1]:
+                body = await kandidat_res.aread()
+                logger.warning(
+                    "Model Gemini '%s' tidak tersedia saat streaming: %s. "
+                    "Mencoba model cadangan.",
+                    model,
+                    body[:120],
+                )
+                await kandidat_res.aclose()
+                continue
+
+            if kandidat_res.status_code == 429 and model != kandidat[-1]:
+                await kandidat_res.aread()
+                logger.warning(
+                    "Kuota Gemini untuk '%s' habis; mencoba model berikutnya.", model
+                )
+                await kandidat_res.aclose()
+                continue
+
+            if kandidat_res.status_code >= 400:
+                body = await kandidat_res.aread()
+                logger.error(
+                    "Gemini menolak streaming: %s %s",
+                    kandidat_res.status_code,
+                    body[:200],
+                )
+                kode = kandidat_res.status_code
+                await kandidat_res.aclose()
+                raise ke_http_exception(
+                    httpx.HTTPStatusError(
+                        f"Gemini {kode}",
+                        request=kandidat_res.request,
+                        response=kandidat_res,
+                    )
+                )
+
+            res = kandidat_res
+            break
+
+        if res is None:
+            raise HTTPException(status_code=502, detail=pesan_error_http(404))
+
+        try:
+            async for baris in res.aiter_lines():
+                if not baris or not baris.startswith("data:"):
+                    continue
+                data = baris[5:].strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    obj = json.loads(data)
+                except json.JSONDecodeError:
+                    continue
+
+                pakai = obj.get("usage")
+                if isinstance(pakai, dict) and pakai:
+                    try:
+                        usage.simpan_token_asli(
+                            pakai.get("total_tokens") or 0,
+                            pakai.get("prompt_tokens") or 0,
+                            pakai.get("completion_tokens") or 0,
+                        )
+                    except Exception:  # noqa: BLE001
+                        pass
+
+                try:
+                    delta = obj["choices"][0]["delta"].get("content") or ""
+                except (KeyError, IndexError, TypeError):
+                    delta = ""
+                if isinstance(delta, list):
+                    delta = "".join(
+                        b.get("text", "")
+                        for b in delta
+                        if isinstance(b, dict) and isinstance(b.get("text"), str)
+                    )
+                if isinstance(delta, str) and delta:
+                    yield delta
+        finally:
+            # Tutup koneksi juga saat pengguna menekan "Stop".
+            await res.aclose()
+
+
+# ---------------------------------------------------------------------
 # 10. PEMANGGILAN KE OLLAMA (lokal)
 # ---------------------------------------------------------------------
 def _pesan_untuk_ollama(messages: List[dict]) -> List[dict]:
@@ -1536,6 +1819,7 @@ def _penyedia_untuk_model(model: str) -> str:
     """
     di_openrouter = model in OPENROUTER_MODELS
     di_groq = model in MODEL_GROQ_DIIZINKAN
+    di_gemini = model in GEMINI_MODELS
 
     if di_openrouter:
         if OPENROUTER_API_KEY:
@@ -1544,10 +1828,22 @@ def _penyedia_untuk_model(model: str) -> str:
         # dipakai sebagai penyelamat bila kuncinya tersedia.
         if GROQ_API_KEY:
             return "groq"
+        if GEMINI_API_KEY:
+            return "gemini"
+        return PROVIDER
+    if di_gemini:
+        if GEMINI_API_KEY:
+            return "gemini"
+        if GROQ_API_KEY:
+            return "groq"
+        if OPENROUTER_API_KEY:
+            return "openrouter"
         return PROVIDER
     if di_groq:
         if GROQ_API_KEY:
             return "groq"
+        if GEMINI_API_KEY:
+            return "gemini"
         if OPENROUTER_API_KEY:
             return "openrouter"
         return PROVIDER
@@ -1555,31 +1851,117 @@ def _penyedia_untuk_model(model: str) -> str:
     return PROVIDER
 
 
+def _urutan_penyedia(penyedia_utama: str) -> List[str]:
+    """
+    Urutan penyedia yang dicoba saat penyedia utama gagal karena kuota.
+
+    MENGAPA PERLU FAILOVER
+    ----------------------
+    Setiap penyedia gratis punya batas harian (Groq 200.000 token/hari
+    per model, OpenRouter 50 request/hari, Gemini kuota harian). Dahulu
+    bila satu penyedia habis, SEMUA pengguna langsung melihat error
+    padahal penyedia lain masih punya sisa kuota.
+
+    Dengan urutan ini, permintaan otomatis dialihkan ke penyedia lain
+    yang kuncinya tersedia. Pengguna tidak perlu tahu — jawaban tetap
+    datang.
+
+    Urutannya: penyedia pilihan pengguna lebih dulu (agar pilihannya
+    dihormati), lalu penyedia lain sebagai penyelamat.
+    """
+    semua = ["groq", "gemini", "openrouter"]
+
+    def tersedia(nama: str) -> bool:
+        if nama == "groq":
+            return bool(GROQ_API_KEY)
+        if nama == "gemini":
+            return bool(GEMINI_API_KEY)
+        if nama == "openrouter":
+            return bool(OPENROUTER_API_KEY)
+        return False
+
+    urutan = [penyedia_utama] if tersedia(penyedia_utama) else []
+    urutan += [p for p in semua if p != penyedia_utama and tersedia(p)]
+    return urutan
+
+
+# Status yang menandakan "kuota penyedia ini habis" dan layak dicoba ke
+# penyedia lain. 401/403 TIDAK termasuk: itu masalah kunci, bukan kuota,
+# dan berpindah penyedia justru menyembunyikan kesalahan konfigurasi.
+_STATUS_KUOTA = {429, 402}
+
+
 async def complete(messages: List[dict], opsi: dict) -> str:
-    """Menghasilkan jawaban lengkap dari penyedia yang tepat."""
+    """Menghasilkan jawaban lengkap, dengan failover antar penyedia."""
     model = opsi.get("model") or MODEL_NAME
-    penyedia = _penyedia_untuk_model(model)
-    if penyedia == "openrouter":
-        return await openrouter_complete(messages, opsi)
-    if penyedia == "groq":
-        return await groq_complete(messages, opsi)
-    return await ollama_complete(messages, opsi)
+    penyedia_utama = _penyedia_untuk_model(model)
+    urutan = _urutan_penyedia(penyedia_utama) or [penyedia_utama]
+    error_terakhir: Optional[Exception] = None
+
+    for i, penyedia in enumerate(urutan):
+        try:
+            if penyedia == "gemini":
+                return await gemini_complete(messages, opsi)
+            if penyedia == "openrouter":
+                return await openrouter_complete(messages, opsi)
+            if penyedia == "groq":
+                return await groq_complete(messages, opsi)
+            return await ollama_complete(messages, opsi)
+        except HTTPException as exc:
+            error_terakhir = exc
+            # Hanya kuota habis yang layak dialihkan ke penyedia lain.
+            if exc.status_code not in _STATUS_KUOTA or i == len(urutan) - 1:
+                raise
+            logger.warning(
+                "Penyedia '%s' kehabisan kuota (%s); mengalihkan ke '%s'.",
+                penyedia,
+                exc.status_code,
+                urutan[i + 1],
+            )
+
+    raise error_terakhir or HTTPException(status_code=502, detail=pesan_error_http(429))
 
 
 async def stream(messages: List[dict], opsi: dict) -> AsyncIterator[str]:
-    """Menghasilkan jawaban bertahap dari penyedia yang tepat."""
+    """
+    Menghasilkan jawaban bertahap, dengan failover antar penyedia.
+
+    PENTING: failover hanya dilakukan SEBELUM potongan pertama dikirim.
+    Setelah satu karakter sampai ke pengguna, berpindah penyedia akan
+    membuat jawaban terasa terulang dari awal, jadi itu tidak dilakukan.
+    """
     model = opsi.get("model") or MODEL_NAME
-    penyedia = _penyedia_untuk_model(model)
-    if penyedia == "openrouter":
-        async for delta in openrouter_stream(messages, opsi):
-            yield delta
-        return
-    if penyedia == "groq":
-        async for delta in groq_stream(messages, opsi):
-            yield delta
-        return
-    async for delta in ollama_stream(messages, opsi):
-        yield delta
+    penyedia_utama = _penyedia_untuk_model(model)
+    urutan = _urutan_penyedia(penyedia_utama) or [penyedia_utama]
+
+    for i in range(len(urutan)):
+        penyedia = urutan[i]
+        mulai = False
+        try:
+            if penyedia == "gemini":
+                aliran = gemini_stream(messages, opsi)
+            elif penyedia == "openrouter":
+                aliran = openrouter_stream(messages, opsi)
+            elif penyedia == "groq":
+                aliran = groq_stream(messages, opsi)
+            else:
+                aliran = ollama_stream(messages, opsi)
+
+            async for delta in aliran:
+                mulai = True
+                yield delta
+            return
+        except HTTPException as exc:
+            # Sudah ada teks terkirim -> tidak boleh pindah penyedia.
+            if mulai or exc.status_code not in _STATUS_KUOTA or i == len(urutan) - 1:
+                raise
+            logger.warning(
+                "Penyedia '%s' kehabisan kuota saat streaming (%s); "
+                "mengalihkan ke '%s'.",
+                penyedia,
+                exc.status_code,
+                urutan[i + 1],
+            )
 
 # ---------------------------------------------------------------------
 # 11b. PERKIRAAN TOKEN (untuk pencatatan usage)
@@ -2194,6 +2576,9 @@ async def capabilities():
             }
             for m in MODEL_DIIZINKAN
         ],
+        # Penyedia cadangan aktif? Dipakai diagnostik/uji, bukan untuk
+        # menampilkan nama backend ke pengguna.
+        "cadangan_aktif": bool(GEMINI_API_KEY),
         "vision_default": MODEL_VISION_DEFAULT,
         "browser_default": MODEL_BROWSER_DEFAULT,
         # Kemampuan tingkat fitur (bukan per model).

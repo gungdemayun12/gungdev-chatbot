@@ -17,6 +17,7 @@ masih tersimpan di perangkat masing-masing.
 | Semua pengunjung berbagi satu angka usage | Tiap akun punya **jatah 40 pesan/24 jam** sendiri |
 | Tidak ada pembatas per akun | Satu akun habis jatah **tidak** memengaruhi akun lain |
 | — | Bila server tak bisa dipakai, salinan perangkat dipakai otomatis |
+| Satu penyedia AI habis kuota = situs berhenti | **Failover otomatis** ke penyedia lain saat kuota habis (429/402) |
 
 Kontrak API lama **tidak berubah**: `/chat`, `/chat/stream`, `/health`,
 `/capabilities` tetap sama persis.
@@ -38,27 +39,35 @@ Kontrak API lama **tidak berubah**: `/chat`, `/chat/stream`, `/health`,
 
 ### Dari mana angka 40 berasal
 
-Dua sumber kuota dipakai bergantian menurut model yang dipilih:
+Kuota gratis dipakai bergantian menurut model yang dipilih, dan
+**otomatis saling menyelamatkan** saat salah satu kehabisan kuota:
 
 | Sumber | Batas request/hari | Batas token/hari |
 |---|---|---|
-| Sumber A (model `:free`) | 50 | tanpa batas |
-| Sumber B (tiga model gratis) | 3 × 1.000 = 3.000 | 3 × 200.000 = 600.000 |
+| Groq (tiga model gratis) | 3 × 1.000 = 3.000 | 3 × 200.000 = 600.000 |
+| Gemini (penyedia cadangan) | 200 | 250.000 |
+| OpenRouter (model `:free`) | 50 | tanpa batas |
 
-Kunci perubahannya: **batas Sumber B dihitung per model**, bukan per
-sumber. Tiga model gratis yang dipakai punya jatah masing-masing, jadi
+Kunci perubahannya: **batas Groq dihitung per model**, bukan per
+penyedia. Tiga model gratis yang dipakai punya jatah masing-masing, jadi
 kapasitas gabungannya tiga kali lipat dari hitungan lama:
 
 ```
-kendala request : 3.000 + 50          = 3.050 request/hari
-kendala token   : 3 x 200.000 = 600.000 token/hari
-                  600.000 / 1.500      = 400 pesan/hari  <- yang lebih dulu habis
-                  400 / 10 akun aktif  = 40 pesan per akun
+kendala request : 3.000 + 200 + 50      = 3.250 request/hari
+kendala token   : 600.000 + 250.000     = 850.000 token/hari
+                  850.000 / 1.500       = 566 pesan/hari  <- yang lebih dulu habis
+                  566 / 10 akun aktif   = 56 pesan per akun (dibatasi 40)
 ```
 
 Angka 1.500 token/pesan adalah rata-rata nyata (pesan pendek ±700 token,
 pesan panjang/riset ±3.000 token). Kendala yang menentukan adalah **token**,
-bukan request — request masih sangat longgar (3.050 untuk 400 pesan).
+bukan request — request masih sangat longgar (3.250 untuk 566 pesan).
+
+Jatah tetap **40** (bukan 56) karena angka Gemini di atas sengaja dibuat
+konservatif: Google tidak lagi mempublikasikan RPD pasti untuk free tier.
+Bila kuota Gemini ternyata lebih besar, tidak ada yang rusak — kita hanya
+tidak memanfaatkannya. Yang berbahaya adalah sebaliknya: menetapkan jatah
+lebih tinggi dari kuota nyata.
 
 Kenapa 40 dan bukan angka lain:
 
@@ -333,6 +342,89 @@ Bila belum muncul, buka panel Usage dan lihat pesan di sidebar:
 | `frontend/src/components/Settings.jsx` | Halaman Pengaturan 7 tab |
 | `frontend/src/components/Berpikir.jsx` | Animasi "berpikir" (titik + label tahap) |
 | `frontend/src/components/UsagePanel.jsx` | Panel pemakaian + jatah akun |
+
+## Failover antar penyedia (Gemini sebagai cadangan)
+
+### Masalahnya
+
+Setiap penyedia gratis punya batas harian. Groq membatasi **200.000
+token per hari per model**, OpenRouter `:free` hanya **50 request/hari**.
+Sebelumnya, begitu salah satu penyedia habis kuota, **seluruh situs**
+berhenti melayani — padahal penyedia lain masih punya sisa kuota. Pengguna
+melihat pesan error, padahal masalahnya hanya di satu jalur.
+
+### Solusinya
+
+Google Gemini ditambahkan sebagai **jalur ketiga yang gratis** (tanpa kartu
+kredit, konteks 1 juta token). Permintaan otomatis dialihkan ke penyedia
+lain bila penyedia utama kehabisan kuota.
+
+Urutan percobaan:
+
+| Kondisi | Urutan |
+|---|---|
+| Pengguna memilih model Groq | Groq → Gemini → OpenRouter |
+| Pengguna memilih model Gemini | Gemini → Groq → OpenRouter |
+| Pengguna memilih model `:free` OpenRouter | OpenRouter → Groq → Gemini |
+
+Penyedia pilihan pengguna **selalu dicoba lebih dulu**, jadi pilihannya
+tetap dihormati. Penyedia lain hanya menjadi penyelamat.
+
+### Kapan failover terjadi (dan kapan TIDAK)
+
+Failover **hanya** pada status yang berarti kuota habis:
+
+| Status | Arti | Dialihkan? |
+|---|---|---|
+| `429` | kuota/rate limit habis | ✅ ya |
+| `402` | kredit/tagihan habis | ✅ ya |
+| `401` / `403` | kunci salah atau tidak berhak | ❌ tidak |
+| `500` | penyedia sedang bermasalah | ❌ tidak |
+
+Alasannya: `401`/`403` adalah **kesalahan konfigurasi**, bukan kuota.
+Kalau dialihkan, kunci yang salah akan tersembunyi dan kita tidak pernah
+tahu ada yang perlu diperbaiki. Error seperti ini diteruskan apa adanya.
+
+### Streaming: tidak pindah setelah teks terkirim
+
+Di `/chat/stream`, failover hanya dilakukan **sebelum potongan pertama
+dikirim** ke pengguna. Setelah satu huruf sampai di layar, berpindah
+penyedia akan membuat jawaban **terulang dari awal** dan terasa rusak.
+Karena itu, bila koneksi putus di tengah jawaban, pengguna mendapat pesan
+error yang wajar — bukan jawaban kedua yang menimpa jawaban pertama.
+
+### Cadangan model di dalam satu penyedia
+
+Selain failover antar penyedia, tiap penyedia juga punya cadangan model.
+Bila sebuah model ditutup penyedianya (HTTP `404`, umumnya karena model
+berubah statusnya), model berikutnya dicoba otomatis:
+
+```
+Gemini : gemini-2.5-flash → gemini-2.5-flash-lite
+         → gemini-2.0-flash → gemini-2.0-flash-lite
+Groq   : lihat _MODEL_GROQ_CADANGAN di main.py
+```
+
+Bila permintaan berisi **gambar**, cadangan model dinonaktifkan — berganti
+ke model yang tidak bisa membaca gambar hanya menghasilkan error `400` yang
+membingungkan.
+
+### Mengaktifkan
+
+Cukup pasang **satu** Environment Variable di Vercel:
+
+```
+GEMINI_API_KEY = (ambil gratis di https://aistudio.google.com/apikey)
+```
+
+Bila variabel ini **kosong**, Gemini otomatis tidak dipakai dan situs
+kembali ke perilaku lama (Groq + OpenRouter saja). Tidak ada yang rusak —
+hanya tidak ada jalur cadangan.
+
+Untuk memeriksa apakah cadangan sudah aktif, buka `/capabilities` dan
+lihat field `cadangan_aktif` (`true` = siap dipakai). Field ini **tidak**
+ditampilkan di UI — nama penyedia tidak pernah muncul ke pengguna.
+
 ## Menjalankan uji
 
 ```powershell
@@ -340,6 +432,8 @@ Bila belum muncul, buka panel Usage dan lihat pesan di sidebar:
 cd chatbot-saya/backend
 python uji_server_riwayat.py      # 55 pemeriksaan penyimpanan riwayat
 python uji_jatah.py               # 78 pemeriksaan jatah, reset & kerahasiaan
+python uji_routing_penyedia.py    # 14 pemeriksaan routing model -> penyedia
+python uji_gemini.py              # 36 pemeriksaan Gemini & failover antar penyedia
 python server_uji.py              # jalankan server uji di port 8000
 python uji_api.py                 # 25 pemeriksaan endpoint lama
 python uji_jatah_api.py           # 44 pemeriksaan jatah/reset via HTTP

@@ -385,16 +385,16 @@ async def jalankan() -> None:
     cek(f"Kuota lega -> jatah penuh {JATAH}",
         (await usage.jatah_berjalan()) == JATAH,
         str(await usage.jatah_berjalan()))
-    cek("Kapasitas harian = 3 model Groq + OpenRouter (3.050 request)",
-        usage.KAPASITAS_HARIAN["request"] == 3050,
+    cek("Kapasitas harian = 3 Groq + OpenRouter + Gemini (3.250 request)",
+        usage.KAPASITAS_HARIAN["request"] == 3250,
         str(usage.KAPASITAS_HARIAN["request"]))
-    cek("Kapasitas token harian = 600.000 (3 model Groq)",
-        usage.KAPASITAS_HARIAN["token"] == 600_000,
+    cek("Kapasitas token harian = 850.000 (600rb Groq + 250rb Gemini)",
+        usage.KAPASITAS_HARIAN["token"] == 850_000,
         str(usage.KAPASITAS_HARIAN["token"]))
-    cek("Kapasitas 400 pesan/hari (kendala token)",
-        usage.PESAN_PER_HARI == 400, str(usage.PESAN_PER_HARI))
-    cek("Jatah 40 x 10 akun aktif = 400 -> pas dengan kapasitas",
-        JATAH * 10 == usage.PESAN_PER_HARI, f"{JATAH} x 10")
+    cek("Kapasitas 566 pesan/hari (kendala token)",
+        usage.PESAN_PER_HARI == 566, str(usage.PESAN_PER_HARI))
+    cek("Jatah 40 x 10 akun aktif = 400 -> masih di bawah kapasitas",
+        JATAH * 10 <= usage.PESAN_PER_HARI, f"{JATAH} x 10")
 
     # Situs sudah memakai hampir seluruh kapasitas token harian.
     kunci_global = usage._kunci_harian()
