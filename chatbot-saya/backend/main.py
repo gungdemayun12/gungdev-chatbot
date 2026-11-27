@@ -1810,13 +1810,21 @@ async def diagnostik():
             "request_per_hari_penyedia_langka": usage.KUOTA_BERSAMA[
                 "rpd_penyedia_langka"
             ],
-            "request_per_hari_penyedia_lega": usage.KUOTA_BERSAMA[
-                "rpd_penyedia_lega"
+            "model_groq": usage.KUOTA_BERSAMA["model_groq"],
+            "request_per_hari_per_model_groq": usage.KUOTA_BERSAMA[
+                "rpd_per_model_groq"
             ],
-            "token_per_hari_penyedia_lega": usage.KUOTA_BERSAMA[
-                "tpd_penyedia_lega"
+            "token_per_hari_per_model_groq": usage.KUOTA_BERSAMA[
+                "tpd_per_model_groq"
             ],
             "token_per_pesan_rata2": usage.KUOTA_BERSAMA["token_per_pesan"],
+        },
+        # Kapasitas gabungan kedua penyedia per hari (hanya pemilik situs).
+        "kapasitas_harian": {
+            "request": usage.KAPASITAS_HARIAN["request"],
+            "token": usage.KAPASITAS_HARIAN["token"],
+            "pesan": usage.PESAN_PER_HARI,
+            "sisa_pesan_hari_ini": await usage.sisa_pesan_situs(),
         },
     }
 

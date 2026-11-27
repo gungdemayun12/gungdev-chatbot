@@ -14,7 +14,7 @@ masih tersimpan di perangkat masing-masing.
 |---|---|
 | Riwayat hanya di browser | Riwayat di server, **sama di semua perangkat** |
 | Hapus data browser = riwayat hilang | Riwayat aman di server |
-| Semua pengunjung berbagi satu angka usage | Tiap akun punya **jatah 16 pesan/24 jam** sendiri |
+| Semua pengunjung berbagi satu angka usage | Tiap akun punya **jatah 40 pesan/24 jam** sendiri |
 | Tidak ada pembatas per akun | Satu akun habis jatah **tidak** memengaruhi akun lain |
 | — | Bila server tak bisa dipakai, salinan perangkat dipakai otomatis |
 
@@ -27,43 +27,55 @@ Kontrak API lama **tidak berubah**: `/chat`, `/chat/stream`, `/health`,
 
 | Hal | Nilai |
 |---|---|
-| Jatah pesan per akun | **16 pesan per jendela 24 jam** |
-| Saat layanan ramai | Sementara 5 pesan (otomatis, kembali normal sendiri) |
+| Jatah pesan per akun | **40 pesan per jendela 24 jam** |
+| Saat layanan ramai | Sementara 8 pesan (otomatis, kembali normal sendiri) |
 | Jatah tamu | 3 pesan/hari (per IP, tidak berubah) |
-| Akun baru per hari | Maksimal 40 (agar kuota tidak dihabiskan akun baru) |
+| Akun baru per hari | Maksimal 25 (agar 25 × 40 tidak melampaui kapasitas 400/hari) |
 | Kapan jendela dimulai | **Saat pesan pertama akun itu** |
 | Kapan reset | Saat jendela 24 jamnya berakhir — **berbeda tiap akun** |
 | Token | **Dicatat & ditampilkan**, tetapi **tidak membatasi** |
 | Yang dilihat pengguna | **Hanya jatahnya sendiri** — kapasitas layanan hanya untuk pemilik situs |
 
-### Dari mana angka 16 berasal
+### Dari mana angka 40 berasal
 
 Dua sumber kuota dipakai bergantian menurut model yang dipilih:
 
 | Sumber | Batas request/hari | Batas token/hari |
 |---|---|---|
 | Sumber A (model `:free`) | 50 | tanpa batas |
-| Sumber B (model lain) | 1.000 | 200.000 |
+| Sumber B (tiga model gratis) | 3 × 1.000 = 3.000 | 3 × 200.000 = 600.000 |
 
-Perhitungannya memakai pembagian **paling buruk** bagi sumber A:
+Kunci perubahannya: **batas Sumber B dihitung per model**, bukan per
+sumber. Tiga model gratis yang dipakai punya jatah masing-masing, jadi
+kapasitas gabungannya tiga kali lipat dari hitungan lama:
 
 ```
-kendala request : 50 request/hari      -> kalau 25 akun = 2 pesan (terlalu kecil)
-kendala token   : 200.000 / 1.500      = 133 pesan/hari
-                  -> 8 akun aktif      = 16 pesan per akun
+kendala request : 3.000 + 50          = 3.050 request/hari
+kendala token   : 3 x 200.000 = 600.000 token/hari
+                  600.000 / 1.500      = 400 pesan/hari  <- yang lebih dulu habis
+                  400 / 10 akun aktif  = 40 pesan per akun
 ```
 
 Angka 1.500 token/pesan adalah rata-rata nyata (pesan pendek ±700 token,
-pesan panjang/riset ±3.000 token). Dengan 25 akun hasilnya hanya 2 pesan
-(pengguna kecewa), dengan 100 pesan hanya 2 akun yang kebagian (situs
-mati untuk sisanya). **16 pesan** adalah titik seimbangnya.
+pesan panjang/riset ±3.000 token). Kendala yang menentukan adalah **token**,
+bukan request — request masih sangat longgar (3.050 untuk 400 pesan).
+
+Kenapa 40 dan bukan angka lain:
+
+- **16** (hitungan lama) terlalu pesimis: hanya memakai satu model Sumber B.
+- **80** aman hanya bila ≤ 5 akun aktif/hari; satu pengguna yang suka riset
+  web memakai ±3.000 token/pesan (2× rata-rata), sehingga kuota bisa habis
+  sebelum hari berakhir.
+- **40** aman untuk ±10 akun aktif/hari dan masih menyisakan ruang untuk
+  pesan panjang/riset.
 
 Dua penjaga supaya kuota tidak habis di tengah hari:
 
-1. **Jatah dipangkas otomatis** — bila sisa kuota situs < 15%, akun
-   mendapat 5 pesan/24 jam. Akun yang datang belakangan tetap kebagian.
-2. **Batas akun baru per hari** — maksimal 40 akun baru. Tanpa ini, 40
-   akun baru sehari saja sudah memakai 37% kuota harian sumber A.
+1. **Jatah dipangkas otomatis** — bila sisa pesan situs < 15% dari kapasitas
+   harian (400), akun mendapat 8 pesan/24 jam. Akun yang datang belakangan
+   tetap kebagian.
+2. **Batas akun baru per hari** — maksimal 25 akun baru. Tanpa ini, 25 akun
+   baru x 40 pesan sehari sudah melampaui kapasitas 400 pesan/hari.
 
 ### Jendela bergulir, bukan jam dinding
 
@@ -79,6 +91,22 @@ Akun yang **tidak** menghabiskan jatah tidak pernah dibatasi sama
 sekali; hitung mundur hanya ditampilkan sebagai informasi.
 
 Jendela yang dipakai bersama: `JENDELA_JATAH_JAM` (bawaan 24).
+
+### Panel jatah & hitung mundur reset
+
+Panel **"Jatah saya"** bisa dibuka dari tombol jatah di header chat. Tombol
+itu **selalu tampil** — juga untuk tamu dan saat data belum termuat — supaya
+panel tidak pernah "hilang" bagi pengguna.
+
+Di dalam panel ada **hitung mundur reset** dalam format `jam:menit:detik`
+(mis. `23:59:52`) yang **berdetak setiap detik**. Cara kerjanya:
+
+- Server mengirim waktu pulih **absolut** (`akun.reset.pada`, epoch detik).
+- Browser menghitung selisihnya sendiri tiap detik, jadi hitung mundur tetap
+  real time **tanpa** menambah permintaan ke server (hemat kuota).
+- Saat hitung mundur mencapai nol, panel mengambil data terbaru sekali
+  sehingga jatah yang baru pulih langsung terlihat.
+- Angka juga disegarkan saat tab kembali aktif (pindah tab → kembali).
 
 ### Mengapa hanya jumlah pesan yang membatasi?
 
@@ -222,7 +250,7 @@ Bila belum muncul, buka panel Usage dan lihat pesan di sidebar:
 # Backend (tanpa perlu Upstash asli — Redis & Google dipalsukan)
 cd chatbot-saya/backend
 python uji_server_riwayat.py      # 55 pemeriksaan penyimpanan riwayat
-python uji_jatah.py               # 71 pemeriksaan jatah, reset & kerahasiaan
+python uji_jatah.py               # 78 pemeriksaan jatah, reset & kerahasiaan
 python server_uji.py              # jalankan server uji di port 8000
 python uji_api.py                 # 25 pemeriksaan endpoint lama
 python uji_jatah_api.py           # 44 pemeriksaan jatah/reset via HTTP
@@ -230,7 +258,7 @@ python uji_jatah_api.py           # 44 pemeriksaan jatah/reset via HTTP
 # Frontend (butuh server_uji.py + npm run dev berjalan)
 cd chatbot-saya/frontend
 node uji_browser.mjs              # 18 pemeriksaan riwayat lintas "perangkat"
-node uji_jatah_browser.mjs        # 17 pemeriksaan jatah/reset di UI
+node uji_jatah_browser.mjs        # 23 pemeriksaan jatah/hitung mundur di UI
 node uji_alur_lengkap.mjs         # 26 pemeriksaan alur ujung-ke-ujung
 ```
 

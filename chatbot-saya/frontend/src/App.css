@@ -2842,11 +2842,42 @@ select.input {
   border: 1px solid color-mix(in srgb, var(--danger, #e5484d) 30%, transparent);
 }
 
+/* Hitung mundur reset: angka yang berdetak tiap detik, jadi dibuat
+   menonjol namun tetap tenang (tabular-nums agar lebarnya tidak goyang). */
+.usage__hitung {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-3, var(--surface-2));
+}
+
+.usage__hitung-label {
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+}
+
+.usage__hitung-nilai {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.usage__hitung-jam {
+  font-size: 0.6875rem;
+  color: var(--text-tertiary);
+  margin-left: auto;
+}
+
 /* Penjelasan jendela bergulir: informasi tenang, bukan peringatan. */
 .usage__akun-jendela {
   margin-top: 6px;
-  font-size: 0.6875rem;
-  line-height: 1.45;
+  font-size: 0.6875rem;  line-height: 1.45;
   color: var(--text-tertiary);
 }
 

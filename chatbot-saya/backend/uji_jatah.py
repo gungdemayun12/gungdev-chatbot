@@ -2,7 +2,7 @@
 uji_jatah.py — uji jatah (kuota) chat per akun.
 
 Yang diuji:
-  1. Akun baru mulai dengan jatah penuh (0 terpakai, 16 tersisa).
+  1. Akun baru mulai dengan jatah penuh (0 terpakai, 40 tersisa).
   2. Setelah chat, angka TURUN hanya untuk akun itu.
   3. Akun LAIN tidak terpengaruh (inti permintaan pengguna).
   4. Saat jatah habis, akun itu DITOLAK — akun lain tetap bisa chat.
@@ -337,6 +337,16 @@ async def jalankan() -> None:
         str(akun.get("tokens", {}).get("batas")))
     cek("Belum habis", akun.get("habis") is False)
     cek("Ada jadwal reset akun", bool(akun.get("reset", {}).get("waktu_utc")))
+    # `pada` = waktu absolut (epoch detik). Frontend memakainya untuk
+    # menghitung mundur sendiri tiap detik -> panel terasa real time
+    # tanpa perlu bertanya ulang ke server.
+    pada = (akun.get("reset") or {}).get("pada")
+    cek("Reset menyertakan waktu absolut 'pada' (untuk hitung mundur lokal)",
+        isinstance(pada, int) and pada > 0, str(pada))
+    sekarang_epoch = int(datetime.now(timezone.utc).timestamp())
+    cek("'pada' berada dalam jendela 24 jam ke depan",
+        isinstance(pada, int) and 0 < pada - sekarang_epoch <= 86400,
+        f"{(pada or 0) - sekarang_epoch} dtk")
     cek("Nama penyedia tetap disamarkan", r.get("provider") == "gungdev")
     cek("Nama model tetap disamarkan", r.get("model") == "gungdev")
 
@@ -375,11 +385,26 @@ async def jalankan() -> None:
     cek(f"Kuota lega -> jatah penuh {JATAH}",
         (await usage.jatah_berjalan()) == JATAH,
         str(await usage.jatah_berjalan()))
+    cek("Kapasitas harian = 3 model Groq + OpenRouter (3.050 request)",
+        usage.KAPASITAS_HARIAN["request"] == 3050,
+        str(usage.KAPASITAS_HARIAN["request"]))
+    cek("Kapasitas token harian = 600.000 (3 model Groq)",
+        usage.KAPASITAS_HARIAN["token"] == 600_000,
+        str(usage.KAPASITAS_HARIAN["token"]))
+    cek("Kapasitas 400 pesan/hari (kendala token)",
+        usage.PESAN_PER_HARI == 400, str(usage.PESAN_PER_HARI))
+    cek("Jatah 40 x 10 akun aktif = 400 -> pas dengan kapasitas",
+        JATAH * 10 == usage.PESAN_PER_HARI, f"{JATAH} x 10")
 
-    # Situs sudah memakai sebagian besar request penyedia langka.
+    # Situs sudah memakai hampir seluruh kapasitas token harian.
     kunci_global = usage._kunci_harian()
-    hampir = usage.KUOTA_BERSAMA["rpd_penyedia_langka"] - 3
-    DB[kunci_global] = {"requests": hampir, "tokens": 0}
+    hampir_habis = usage.KAPASITAS_HARIAN["token"] - (
+        usage.KUOTA_BERSAMA["token_per_pesan"] * 3
+    )
+    DB[kunci_global] = {"requests": 100, "tokens": hampir_habis}
+    cek("Sisa pesan situs terbaca sedikit",
+        (await usage.sisa_pesan_situs()) <= usage.PESAN_PER_HARI * 0.15,
+        str(await usage.sisa_pesan_situs()))
     jatah_baru = await usage.jatah_berjalan()
     cek(f"Kuota tipis -> jatah turun ke {usage.JATAH_SAAT_KUOTA_TIPIS}",
         jatah_baru == usage.JATAH_SAAT_KUOTA_TIPIS, str(jatah_baru))
@@ -400,10 +425,10 @@ async def jalankan() -> None:
         (akun.get("requests") or {}).get("jatah_penuh") == JATAH,
         str((akun.get("requests") or {}).get("jatah_penuh")))
 
-    # Token penyedia lega habis lebih dulu juga memangkas jatah.
-    DB[kunci_global] = {"requests": 0,
-                        "tokens": usage.KUOTA_BERSAMA["tpd_penyedia_lega"] - 1000}
-    cek("Kuota token menipis -> jatah juga dipangkas",
+    # Request yang menipis juga memangkas jatah.
+    DB[kunci_global] = {"requests": usage.KAPASITAS_HARIAN["request"] - 10,
+                        "tokens": 0}
+    cek("Kuota request menipis -> jatah juga dipangkas",
         (await usage.jatah_berjalan()) == usage.JATAH_SAAT_KUOTA_TIPIS,
         str(await usage.jatah_berjalan()))
 

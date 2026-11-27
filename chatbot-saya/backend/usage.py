@@ -86,23 +86,47 @@ BATAS_DEFAULT = {"rpm": 30, "rpd": 1000, "tpm": 8000, "tpd": 200000}
 # ---------------------------------------------------------------------
 # Dua penyedia dipakai bergantian menurut model yang dipilih pengguna:
 #
-#   Penyedia A (model:free) : 50 request/hari, tanpa batas token
-#   Penyedia B (model lain) : 1.000 request/hari, TAPI 200.000 token/hari
+#   Penyedia A (model :free) : 50 request/hari, tanpa batas token
+#   Penyedia B (Groq)        : 3 model gratis, masing-masing
+#                              1.000 request/hari DAN 200.000 token/hari
 #
-# Karena pembagiannya belum tentu 50:50, jatah dihitung dengan pembagian
-# PALING BURUK bagi penyedia A (yang request-nya langka): seluruh jatah
-# akun dianggap habis di penyedia A. Dengan begitu jatah tetap "pas"
-# dalam kondisi apa pun, dan penyedia B (yang 20x lebih lega untuk
-# request) tidak pernah kekurangan.
+# PENTING — kuota Groq dihitung PER MODEL, bukan per penyedia. Tiga model
+# gratis yang kita pakai (gpt-oss-120b, gpt-oss-20b, qwen3.8-27b) punya
+# jatah masing-masing, jadi kapasitas gabungan penyedia B adalah
+# 3 x 1.000 = 3.000 request dan 3 x 200.000 = 600.000 token per hari.
+#
+# Hitungan sebelumnya hanya memakai SATU model Groq + OpenRouter
+# (50 request, 200.000 token), sehingga jatah per akun jadi jauh lebih
+# kecil dari yang sebenarnya bisa diberikan.
 KUOTA_BERSAMA = {
-    "rpd_penyedia_langka": 50,       # penyedia dengan request/hari paling sedikit
-    "rpd_penyedia_lega": 1000,       # penyedia dengan request/hari lega
-    "tpd_penyedia_lega": 200_000,    # batas token/hari penyedia lega
+    # Request penyedia langka (OpenRouter :free). Tetap dicatat karena
+    # inilah penyedia yang paling cepat habis bila semua orang memilih
+    # model :free.
+    "rpd_penyedia_langka": 50,
+    # Model Groq gratis yang kuotanya terpisah satu sama lain.
+    "model_groq": 3,
+    "rpd_per_model_groq": 1_000,
+    "tpd_per_model_groq": 200_000,
     # Rata-rata token per pesan (prompt + riwayat + jawaban). Diukur dari
     # pemakaian nyata: pesan pendek ~700 token, pesan panjang/riset
     # ~3.000 token, sehingga rata-ratanya ~1.500.
     "token_per_pesan": 1_500,
 }
+
+# Kapasitas gabungan per hari (dihitung dari KUOTA_BERSAMA di atas).
+KAPASITAS_HARIAN = {
+    "request": (
+        KUOTA_BERSAMA["model_groq"] * KUOTA_BERSAMA["rpd_per_model_groq"]
+        + KUOTA_BERSAMA["rpd_penyedia_langka"]
+    ),
+    "token": KUOTA_BERSAMA["model_groq"] * KUOTA_BERSAMA["tpd_per_model_groq"],
+}
+
+# Berapa PESAN yang muat per hari bila seluruh token dipakai bertanya.
+# Inilah kendala sebenarnya (request jauh lebih longgar).
+PESAN_PER_HARI = KAPASITAS_HARIAN["token"] // max(
+    1, KUOTA_BERSAMA["token_per_pesan"]
+)
 
 # ---------------------------------------------------------------------
 # JATAH HARIAN PER AKUN
@@ -114,25 +138,36 @@ KUOTA_BERSAMA = {
 # ditegakkan di server.
 #
 # PERHITUNGAN ANGKA (dipakai JATAH_AKUN_DASAR di bawah):
-#   kendala 1 (request) : 50  request/hari  / 25 akun =  2  (terlalu kecil)
-#   kendala 2 (token)   : 200.000 token/hari / 1.500 token per pesan
-#                         = 133 pesan/hari -> / 8 akun = 16 pesan/akun
-#   => JATAH = 16 pesan / 24 jam
+#   Kapasitas gabungan per hari (lihat KAPASITAS_HARIAN):
+#     request : 3 x 1.000 (Groq) + 50 (OpenRouter)  = 3.050 request
+#     token   : 3 x 200.000 (Groq)                  = 600.000 token
+#   Kendala yang lebih dulu habis adalah TOKEN:
+#     600.000 token / 1.500 token per pesan = 400 pesan/hari
+#   Dibagi ke ~10 akun aktif:
+#     400 / 10 = 40 pesan per akun
+#   => JATAH = 40 pesan / 24 jam
 #
-# 16 pesan bukan angka asal-asalan: itulah BANYAKNYA pesan yang benar-
-# benar "muat" di kuota gratis bila ada ~8 akun aktif per hari. Coba
-# dengan 25 akun hanya bertahan 2 pesan (pengguna kecewa), 100 pesan
-# hanya bertahan 2 akun (situs mati untuk yang lain).
+# Kenapa 40 dan bukan 16 atau 80:
+#   - 16  : hanya memakai 1 model Groq + OpenRouter (terlalu pesimis,
+#           kapasitas sebenarnya 3x lebih besar karena kuota per model).
+#   - 80  : aman hanya bila <= 5 akun aktif/hari; satu pengguna yang suka
+#           riset web memakai ~3.000 token/pesan (2x rata-rata), jadi
+#           kuota bisa habis sebelum hari berakhir.
+#   - 40  : aman untuk ~10 akun aktif/hari dan masih menyisakan ruang
+#           untuk pesan panjang/riset.
 #
 # Penjaga agar kuota tidak habis:
-#   - Bila jatah situs tersisa < 15%, tiap akun yang masih punya jatah
-#     dipangkas ke 5 pesan/24 jam (JATAH_SAAT_KUOTA_TIPIS). Akun yang
+#   - Bila kuota situs tersisa < 15%, tiap akun yang masih punya jatah
+#     dipangkas ke 8 pesan/24 jam (JATAH_SAAT_KUOTA_TIPIS). Akun yang
 #     datang belakangan tetap bisa memakai layanan.
 #   - Total akun baru per hari dibatasi MAX_AKUN_BARU_PER_HARI. Tanpa
-#     ini, 40 akun baru sehari langsung menghabiskan penyedia A.
-JATAH_AKUN_DASAR = int(os.getenv("JATAH_REQUEST_PER_AKUN", "16") or 16)
-JATAH_SAAT_KUOTA_TIPIS = int(os.getenv("JATAH_KUOTA_TIPIS", "5") or 5)
-MAX_AKUN_BARU_PER_HARI = int(os.getenv("MAKS_AKUN_BARU", "40") or 40)
+#     ini, 40 akun baru sehari langsung menghabiskan kuota.
+JATAH_AKUN_DASAR = int(os.getenv("JATAH_REQUEST_PER_AKUN", "40") or 40)
+JATAH_SAAT_KUOTA_TIPIS = int(os.getenv("JATAH_KUOTA_TIPIS", "8") or 8)
+# Akun baru per hari: 40 akun x 40 pesan = 1.600 pesan, jauh di atas
+# kapasitas 400 pesan/hari. Karena itu batasnya diturunkan ke 25 agar
+# jumlah akun baru tidak melampaui kapasitas token harian.
+MAX_AKUN_BARU_PER_HARI = int(os.getenv("MAKS_AKUN_BARU", "25") or 25)
 
 # Persentase sisa kuota bersama yang dianggap "tipis".
 AMBANG_KUOTA_TIPIS = 0.15
@@ -417,18 +452,45 @@ async def baca_harian(sub: Optional[str] = None) -> Dict[str, int]:
 # ---------------------------------------------------------------------
 # JATAH BERJALAN: dasar per akun, dipangkas bila kuota bersama menipis
 # ---------------------------------------------------------------------
+async def sisa_pesan_situs() -> int:
+    """
+    Berapa pesan lagi yang muat di kuota gabungan HARI INI.
+
+    Dipakai hanya di dalam server (indikator layanan & pemangkasan
+    jatah). Angka ini TIDAK pernah dikirim ke pengguna — pengguna hanya
+    melihat jatahnya sendiri.
+
+    Kendala diambil dari yang lebih dulu habis:
+      - request : 3.050/hari (3 model Groq + OpenRouter)
+      - token   : 600.000/hari -> 400 pesan
+    """
+    try:
+        harian = await baca_harian()
+    except Exception:  # noqa: BLE001
+        return KAPASITAS_HARIAN["request"]
+
+    terpakai_request = max(0, int(harian.get("requests", 0)))
+    terpakai_token = max(0, int(harian.get("tokens", 0)))
+
+    sisa_request = KAPASITAS_HARIAN["request"] - terpakai_request
+    sisa_token = KAPASITAS_HARIAN["token"] - terpakai_token
+    sisa_dari_token = sisa_token // max(1, KUOTA_BERSAMA["token_per_pesan"])
+
+    return max(0, min(sisa_request, sisa_dari_token))
+
+
 async def jatah_berjalan() -> int:
     """
     Jatah pesan per akun yang BERLAKU SEKARANG (24 jam bergulir).
 
     Kenapa tidak hanya memakai angka tetap?
 
-    Jatah dihitung untuk ~8 akun aktif. Bila kenyataannya datang 30 akun
+    Jatah dihitung untuk ~10 akun aktif. Bila kenyataannya datang 40 akun
     sekaligus, kuota bersama akan habis di tengah hari dan semua orang
     (termasuk yang baru masuk) ikut kecewa. Karena itu:
 
-      - kuota masih lega  -> jatah penuh (JATAH_AKUN_DASAR, mis. 16)
-      - kuota < 15% sisa  -> jatah dipangkas (JATAH_SAAT_KUOTA_TIPIS, 5)
+      - kuota masih lega  -> jatah penuh (JATAH_AKUN_DASAR, 40)
+      - kuota < 15% sisa  -> jatah dipangkas (JATAH_SAAT_KUOTA_TIPIS, 8)
 
     Pemangkasan hanya MEMBATASI lebih awal, tidak pernah menambah dan
     tidak pernah menghapus pemakaian yang sudah tercatat. Pengguna yang
@@ -438,23 +500,14 @@ async def jatah_berjalan() -> int:
     Angkanya tetap per akun; pengguna tidak pernah melihat kuota situs.
     """
     try:
-        harian = await baca_harian()
+        sisa = await sisa_pesan_situs()
     except Exception:  # noqa: BLE001
         return JATAH_AKUN_DASAR
 
-    terpakai = max(0, int(harian.get("requests", 0)))
-    # Hitung dari kendala yang LEBIH DULU habis: request penyedia langka
-    # atau token penyedia lega.
-    sisa_request = KUOTA_BERSAMA["rpd_penyedia_langka"] - terpakai
-    token_terpakai = max(0, int(harian.get("tokens", 0)))
-    sisa_token = KUOTA_BERSAMA["tpd_penyedia_lega"] - token_terpakai
-    batas_token_pesan = sisa_token // max(1, KUOTA_BERSAMA["token_per_pesan"])
-
-    sisa_pesan = min(sisa_request, batas_token_pesan)
-    batas_tipis = int(
-        KUOTA_BERSAMA["rpd_penyedia_langka"] * AMBANG_KUOTA_TIPIS
-    )
-    if sisa_pesan <= batas_tipis:
+    # Pesan yang muat per hari = kapasitas token. Dianggap "tipis" bila
+    # sisa pesan situs tinggal < 15% dari kapasitas harian.
+    batas_tipis = int(PESAN_PER_HARI * AMBANG_KUOTA_TIPIS)
+    if sisa <= batas_tipis:
         return min(JATAH_AKUN_DASAR, JATAH_SAAT_KUOTA_TIPIS)
     return JATAH_AKUN_DASAR
 
@@ -877,15 +930,8 @@ async def ringkasan(
     # ada angka request/token penyedia yang keluar dari server.
     # ------------------------------------------------------------------
     jatah_kini = await jatah_berjalan()
-    sisa_pesan_situs = min(
-        max(0, KUOTA_BERSAMA["rpd_penyedia_langka"] - harian["requests"]),
-        max(
-            0,
-            (KUOTA_BERSAMA["tpd_penyedia_lega"] - harian["tokens"])
-            // max(1, KUOTA_BERSAMA["token_per_pesan"]),
-        ),
-    )
-    porsi_sisa = sisa_pesan_situs / max(1, KUOTA_BERSAMA["rpd_penyedia_langka"])
+    sisa_pesan_kini = await sisa_pesan_situs()
+    porsi_sisa = sisa_pesan_kini / max(1, PESAN_PER_HARI)
     if porsi_sisa <= AMBANG_KUOTA_TIPIS:
         status_layanan = "dikurangi"
     elif porsi_sisa <= 0.4:
@@ -978,9 +1024,16 @@ async def ringkasan(
             "habis": terpakai_req >= jatah_req,
             # Reset memakai JENDELA AKUN INI SENDIRI (24 jam bergulir
             # sejak pesan pertamanya), bukan jam dinding bersama.
+            #
+            # `pada` adalah waktu absolut (detik epoch, UTC) saat jatah
+            # pulih. Frontend memakai angka ini untuk menghitung mundur
+            # SENDIRI setiap detik, sehingga hitung mundur tetap berjalan
+            # tanpa perlu bertanya ulang ke server (hemat kuota, dan tetap
+            # real time).
             "reset": {
                 "detik": sisa_akun,
                 "jam": round(sisa_akun / 3600, 1),
+                "pada": int(jendela["akhir"]),
                 "waktu_utc": datetime.fromtimestamp(
                     jendela["akhir"], tz=timezone.utc
                 ).strftime("%Y-%m-%dT%H:%M:%SZ"),

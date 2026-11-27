@@ -158,27 +158,34 @@ export default function ChatArea({
         </div>
 
         <div className="chat__header-actions">
-          {/* Indikator jatah akun — hanya muncul bila data akun tersedia,
-              sehingga tidak mengganggu tampilan lama saat backend lama.
-              Angka ini jatah MILIK AKUN INI, bukan kapasitas layanan. */}
-          {usageRingkas && (
-            <button
-              type="button"
-              className={`chat__quota ${
-                usageRingkas.persen >= 90
+          {/* Indikator jatah akun / pintu masuk panel "Jatah Saya".
+              SELALU tampil — termasuk untuk tamu dan saat data belum
+              termuat — supaya panel tidak pernah "hilang" bagi pengguna.
+              Bila angka belum tersedia, tampil sebagai "Jatah" saja. */}
+          <button
+            type="button"
+            className={`chat__quota ${
+              usageRingkas
+                ? usageRingkas.persen >= 90
                   ? 'is-danger'
                   : usageRingkas.persen >= 70
                     ? 'is-warning'
                     : ''
-              }`}
-              onClick={onOpenUsage}
-              title={`Jatah Anda: ${usageRingkas.persen}% terpakai. Klik untuk rincian.`}
-              aria-label="Lihat jatah dan pemakaian saya"
-            >
-              <span className="chat__quota-dot" aria-hidden="true" />
-              <span>{usageRingkas.persen}% jatah</span>
-            </button>
-          )}
+                : ''
+            }`}
+            onClick={onOpenUsage}
+            title={
+              usageRingkas
+                ? `Jatah Anda: ${usageRingkas.persen}% terpakai. Klik untuk rincian.`
+                : 'Lihat jatah dan pemakaian saya'
+            }
+            aria-label="Lihat jatah dan pemakaian saya"
+          >
+            <span className="chat__quota-dot" aria-hidden="true" />
+            <span>
+              {usageRingkas ? `${usageRingkas.persen}% jatah` : 'Jatah'}
+            </span>
+          </button>
 
           <button
             type="button"

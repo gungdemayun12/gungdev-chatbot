@@ -24,7 +24,7 @@ const SUB_B = '200000000000000002'
 async function bacaJatah() {
   const res = await fetch(`${API}/usage`)
   const data = await res.json()
-  return Number(data?.jatah_penuh || data?.tamu?.jatah_akun || 16)
+  return Number(data?.jatah_penuh || data?.tamu?.jatah_akun || 40)
 }
 
 const HASIL = []
@@ -62,23 +62,27 @@ async function resetAkun(sub) {
   }
 }
 
-async function bukaSebagai(browser, { sub, name, token }) {
+async function bukaSebagai(browser, { sub, name, token, tamu = false }) {
   const ctx = await browser.newContext()
-  await ctx.addInitScript(
-    ({ sub, name }) => {
-      localStorage.setItem(
-        'gungdev:auth',
-        JSON.stringify({ sub, name, email: `${sub}@uji.local`, loginPada: Date.now() }),
-      )
-    },
-    { sub, name },
-  )
+  if (!tamu) {
+    await ctx.addInitScript(
+      ({ sub, name }) => {
+        localStorage.setItem(
+          'gungdev:auth',
+          JSON.stringify({ sub, name, email: `${sub}@uji.local`, loginPada: Date.now() }),
+        )
+      },
+      { sub, name },
+    )
+  }
   const page = await ctx.newPage()
   await page.goto(URL_APP, { waitUntil: 'domcontentloaded' })
-  await page.evaluate(async (t) => {
-    const mod = await import('/src/lib/riwayat.js')
-    mod.setTokenRiwayat(t)
-  }, token)
+  if (!tamu) {
+    await page.evaluate(async (t) => {
+      const mod = await import('/src/lib/riwayat.js')
+      mod.setTokenRiwayat(t)
+    }, token)
+  }
   await page.waitForSelector('.composer__input', { timeout: 20000 })
   return { ctx, page }
 }
@@ -130,6 +134,22 @@ async function jalankan() {
     'TIDAK lagi menyebut reset pukul 07:00 WIB',
     !/07:00/.test(teksAkun),
     teksAkun.slice(0, 160),
+  )
+
+  /* ---- HITUNG MUNDUR RESET: harus BERDETAK (real time) ---- */
+  const hitung1 = (await p1.textContent('[data-uji="hitung"]')) || ''
+  cek(
+    'Hitung mundur reset tampil dalam format jam:menit:detik',
+    /^\d+:\d{2}(:\d{2})?$/.test(hitung1.trim()),
+    hitung1,
+  )
+  // Tunggu >1 detik: angka DETIK harus berubah sendiri tanpa klik.
+  await p1.waitForTimeout(2200)
+  const hitung2 = (await p1.textContent('[data-uji="hitung"]')) || ''
+  cek(
+    'Hitung mundur BERDETAK sendiri (real time, tanpa klik)',
+    hitung1.length > 0 && hitung2.length > 0 && hitung1 !== hitung2,
+    `${hitung1} -> ${hitung2}`,
   )
 
   /* Kapasitas layanan (request/token global, batas per menit) TIDAK
@@ -215,6 +235,36 @@ async function jalankan() {
     /Jawaban untuk/i.test(teksB),
     teksB.slice(0, 100).replace(/\n/g, ' | '),
   )
+
+  /* ================= 4. PANEL SELALU BISA DIBUKA ================= */
+  console.log('\n=== 4. PANEL TIDAK PERNAH "HILANG" ===')
+  // (a) Pengguna login: tombol jatah ada di header.
+  const tombolLogin = await p2.$('[aria-label="Lihat jatah dan pemakaian saya"]')
+  cek('Tombol panel jatah ada untuk pengguna login', Boolean(tombolLogin))
+
+  // (b) TAMU: dulu tombol ini hilang karena hanya muncul bila ada angka
+  //     akun. Sekarang harus tetap ada supaya panel selalu bisa dibuka.
+  const tamu = await bukaSebagai(browser, { sub: '', name: '', token: '', tamu: true })
+  const p3 = tamu.page
+  await p3.waitForTimeout(1500)
+  const tombolTamu = await p3.$('[aria-label="Lihat jatah dan pemakaian saya"]')
+  cek('Tombol panel jatah TETAP ADA untuk tamu', Boolean(tombolTamu))
+
+  let panelTamuTampil = false
+  if (tombolTamu) {
+    await tombolTamu.click()
+    panelTamuTampil = Boolean(
+      await p3.waitForSelector('.usage__akun', { timeout: 15000 }).catch(() => null),
+    )
+  }
+  cek('Panel jatah bisa DIBUKA oleh tamu (tidak hilang)', panelTamuTampil)
+  const teksTamu = (await p3.textContent('.usage').catch(() => '')) || ''
+  cek(
+    'Tamu melihat penjelasan jatah setelah login',
+    /Masuk dengan Google/i.test(teksTamu),
+    teksTamu.slice(0, 130).replace(/\n/g, ' | '),
+  )
+  await p3.close()
 
   await browser.close()
 
