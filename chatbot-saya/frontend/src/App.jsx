@@ -22,6 +22,7 @@ import { useSettings, resolveApiUrl } from './hooks/useSettings.js'
 import { useSessions } from './hooks/useSessions.js'
 import { useToasts } from './hooks/useToasts.js'
 import { useAuth } from './hooks/useAuth.js'
+import { LogOut } from './components/icons.jsx'
 import { checkHealth, streamChat, fetchUsage, fetchCapabilities } from './lib/api.js'
 import { getTokenRiwayat } from './lib/riwayat.js'
 import { gabungKemampuan, modelUntukGambar, cariModel } from './lib/models.js'
@@ -124,6 +125,7 @@ export default function App() {
   const [renameValue, setRenameValue] = useState('')
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [clearAllOpen, setClearAllOpen] = useState(false)
+  const [logoutOpen, setLogoutOpen] = useState(false)
 
   const abortRef = useRef(null)
   const lastRequestRef = useRef(null) // untuk "Coba lagi" & regenerasi
@@ -480,13 +482,25 @@ export default function App() {
   )
 
   /**
-   * Keluar: kembali ke mode tamu.
+   * Tombol "Keluar" hanya MEMBUKA konfirmasi.
+   *
+   * Keluar tanpa sengaja dulu berarti kembali ke mode tamu (jatah 3 pesan,
+   * riwayat tidak tersimpan) hanya karena salah klik. Sekarang pengguna
+   * sempat membaca apa yang terjadi dan memilih Batal.
+   */
+  const mintaKeluar = useCallback(() => {
+    setLogoutOpen(true)
+  }, [])
+
+  /**
+   * Keluar (setelah dikonfirmasi): kembali ke mode tamu.
    *
    * Riwayat akun TETAP tersimpan di server (dan salinan perangkat),
    * sehingga saat masuk lagi dengan akun yang sama — dari perangkat mana
    * pun — percakapan lama muncul kembali.
    */
   const handleLogout = useCallback(() => {
+    setLogoutOpen(false)
     keluar()
     setInput('')
     setError(null)
@@ -688,7 +702,7 @@ export default function App() {
         user={user}
         inisialAkun={inisialNama}
         onOpenLogin={() => openLogin(tamu.habis ? 'batas' : 'info')}
-        onLogout={handleLogout}
+        onLogout={mintaKeluar}
         guestSisa={masuk ? null : tamu.sisa}
         guestHabis={tamu.habis}
         statusSimpan={statusSimpan}
@@ -735,10 +749,12 @@ export default function App() {
            generationPhase={generationPhase}
           onResearchChange={handleResearchChange}
           onLampiranBerubah={handleLampiranBerubah}
+          sendWithEnter={settings.sendWithEnter}
+          autoScrollAktif={settings.autoScroll}
           masuk={masuk}
           guestSisa={masuk ? null : tamu.sisa}
           onOpenLogin={() => openLogin(tamu.habis ? 'batas' : 'info')}
-          onLogout={handleLogout}
+          onLogout={mintaKeluar}
         />
       </main>
 
@@ -758,6 +774,7 @@ export default function App() {
           setSettingsOpen(false)
           openLogin('info')
         }}
+        onLogout={mintaKeluar}
       />
 
       {/* Panel pemakaian & kuota */}
@@ -810,6 +827,38 @@ export default function App() {
             if (e.key === 'Enter') submitRename()
           }}
         />
+      </Modal>
+
+      {/* Konfirmasi keluar — mencegah salah klik yang membuat pengguna
+          kembali ke mode tamu (jatah 3 pesan, riwayat tidak tersimpan). */}
+      <Modal
+        open={logoutOpen}
+        onClose={() => setLogoutOpen(false)}
+        title="Keluar dari akun?"
+        size="sm"
+        footer={
+          <>
+            <button
+              type="button"
+              className="btn btn--ghost"
+              onClick={() => setLogoutOpen(false)}
+            >
+              Batal
+            </button>
+            <button type="button" className="btn btn--primary" onClick={handleLogout}>
+              <LogOut size={15} /> Ya, keluar
+            </button>
+          </>
+        }
+      >
+        <p className="modal__text">
+          Percakapan Anda <strong>tetap tersimpan</strong> dan akan muncul lagi saat
+          Anda masuk dengan akun yang sama.
+        </p>
+        <p className="modal__text modal__text--muted">
+          Setelah keluar Anda memakai mode tamu: riwayat tidak tersimpan dan jatah
+          pesan lebih sedikit.
+        </p>
       </Modal>
 
       {/* Konfirmasi hapus satu sesi */}

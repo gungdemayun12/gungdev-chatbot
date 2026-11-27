@@ -5,8 +5,10 @@
  *   1. HANYA JATAH AKUN — pengguna melihat bagiannya sendiri (berapa
  *      pesan terpakai, sisa, kapan pulih). Kapasitas layanan secara
  *      keseluruhan adalah urusan pemilik situs dan tidak ditampilkan.
- *   2. TENANG — jatah bukan hal yang perlu dicemaskan pengguna biasa.
- *      Warna hanya berubah saat benar-benar mendekati batas.
+ *   2. TENANG SEPERTI UANG BEKAL — jatah bukan hal yang perlu
+ *      dicemaskan. Bahasanya sederhana, tidak menakut-nakuti, tidak
+ *      berlebihan ("alay"), dan tidak menampilkan peringatan merah
+ *      kecuali benar-benar habis.
  *   3. TIDAK MENGHABISKAN KUOTA — panel ini hanya membaca /usage,
  *      tidak memanggil model AI sama sekali.
  *
@@ -204,20 +206,20 @@ export function UsageContent({ apiUrl, apiOnline, aktif = true }) {
     <div className="usage">
       {!apiOnline && (
         <div className="usage__notice is-danger">
-          Server tidak terhubung. Angka di bawah mungkin sudah usang.
+          Server belum terhubung. Angka di bawah mungkin sudah tidak terbaru.
         </div>
       )}
 
       {memuat && !data && (
         <div className="usage__loading">
           <RefreshCw size={16} className="spin" />
-          <span>Memuat data pemakaian…</span>
+          <span>Memuat jatah Anda…</span>
         </div>
       )}
 
       {galat && !memuat && (
         <div className="usage__notice is-danger">
-          Data pemakaian belum bisa diambil. Coba lagi sebentar lagi.
+          Jatah belum bisa dimuat saat ini. Coba lagi sebentar lagi, ya.
         </div>
       )}
 
@@ -233,20 +235,24 @@ export function UsageContent({ apiUrl, apiOnline, aktif = true }) {
               <div className="usage__hero-sub">
                 {akun ? (
                   <>
-                    {akun.habis ? (
-                      <>Pulih dalam <strong>{durasi(sisaDetik)}</strong></>
-                    ) : (
+                    {akun.requests?.sisa > 0 ? (
                       <>
-                        Sisa <strong>{angkaRingkas(akun.requests?.sisa || 0)}</strong>{' '}
+                        Masih ada{' '}
+                        <strong>{angkaRingkas(akun.requests?.sisa || 0)}</strong>{' '}
                         pesan
                         {sisaDetik > 0 && (
-                          <> · pulih dalam <strong>{durasi(sisaDetik)}</strong></>
+                          <> · diperbarui dalam {durasi(sisaDetik)}</>
                         )}
+                      </>
+                    ) : (
+                      <>
+                        Jatah sudah terpakai semua · kembali dalam{' '}
+                        <strong>{durasi(sisaDetik)}</strong>
                       </>
                     )}
                   </>
                 ) : (
-                  <>Mode tamu</>
+                  <>Anda sedang memakai mode tamu</>
                 )}
               </div>
             </div>
@@ -289,15 +295,13 @@ export function UsageContent({ apiUrl, apiOnline, aktif = true }) {
               </div>
 
               <div className="usage__akun-note">
-                Sisa <strong>{angkaRingkas(akun.requests?.sisa || 0)}</strong> pesan
-                pada jendela ini
-                {sisaDetik > 0 && (
-                  <> · pulih dalam {durasi(sisaDetik)}</>
-                )}
+                Sudah dipakai <strong>{angkaRingkas(akun.requests?.terpakai || 0)}</strong>{' '}
+                dari {angkaRingkas(akun.requests?.batas || 0)} pesan · sisa{' '}
+                <strong>{angkaRingkas(akun.requests?.sisa || 0)}</strong>
                 {(akun.tokens?.terpakai || 0) > 0 && (
                   <>
                     <span className="usage__akun-sep">·</span>
-                    {angkaRingkas(akun.tokens.terpakai)} token terpakai
+                    {angkaRingkas(akun.tokens.terpakai)} token
                   </>
                 )}
               </div>
@@ -306,7 +310,7 @@ export function UsageContent({ apiUrl, apiOnline, aktif = true }) {
                   dihitung di browser sehingga tidak memakai kuota. */}
               {akun.reset?.bergulir && sisaDetik > 0 && (
                 <div className="usage__hitung" aria-live="polite">
-                  <span className="usage__hitung-label">Jatah pulih dalam</span>
+                  <span className="usage__hitung-label">Diperbarui dalam</span>
                   <span className="usage__hitung-nilai" data-uji="hitung">
                     {durasiDetik(sisaDetik)}
                   </span>
@@ -325,28 +329,29 @@ export function UsageContent({ apiUrl, apiOnline, aktif = true }) {
 
               {akun.reset?.bergulir && (
                 <div className="usage__akun-jendela">
-                  Jendela {Math.round(akun.reset.jendela_jam || 24)} jam milik akun
-                  Anda dimulai saat pesan pertama, lalu jatah kembali penuh.
+                  Jatah ini seperti bekal untuk {Math.round(akun.reset.jendela_jam || 24)}{' '}
+                  jam ke depan, dihitung sejak pesan pertama Anda.
                   {akun.requests?.terpakai === 0 && (
-                    <> Jendela baru dimulai saat Anda mengirim pesan.</>
+                    <> Hitungannya baru mulai saat Anda mengirim pesan.</>
                   )}
                 </div>
               )}
 
               {akun.requests?.dikurangi && (
                 <div className="usage__akun-jendela">
-                  Layanan sedang ramai, jadi jatah hari ini sementara lebih
-                  kecil ({angkaRingkas(akun.requests?.batas || 0)} dari biasanya{' '}
-                  {angkaRingkas(jatahPenuh)} pesan). Jatah kembali normal otomatis.
+                  Hari ini jatahnya sedikit lebih kecil karena sedang banyak yang
+                  memakai — {angkaRingkas(akun.requests?.batas || 0)} pesan (biasanya{' '}
+                  {angkaRingkas(jatahPenuh)}). Kembali normal sendiri, tidak perlu
+                  melakukan apa pun.
                 </div>
               )}
 
               {akun.habis && (
                 <div className="usage__akun-habis">
-                  Jatah Anda habis. Chat bisa dipakai lagi saat jendela ini
-                  berakhir
-                  {sisaDetik > 0 && <> (dalam {durasi(sisaDetik)})</>} —
-                  riwayat lama tetap bisa dibaca.
+                  Jatah Anda sudah terpakai semua. Bisa chat lagi dalam{' '}
+                  {durasi(sisaDetik)}
+                  {sisaDetik <= 0 && 'sebentar lagi'} — sementara itu, percakapan
+                  lama tetap bisa dibaca.
                 </div>
               )}
             </div>
@@ -361,33 +366,30 @@ export function UsageContent({ apiUrl, apiOnline, aktif = true }) {
                 </span>
               </div>
               <div className="usage__akun-note">
-                Masuk dengan Google untuk mendapat jatah{' '}
+                Masuk dengan Google untuk mendapat{' '}
                 <strong>
-                  {angkaRingkas(data.tamu.jatah_akun || jatahPenuh)} pesan per
-                  jendela 24 jam
+                  {angkaRingkas(data.tamu.jatah_akun || jatahPenuh)} pesan
                 </strong>{' '}
-                milik akun Anda sendiri.
+                untuk akun Anda sendiri, dan riwayat tersimpan.
               </div>
             </div>
           )}
 
           {hampirHabis && !akun?.habis && (
             <div className="usage__notice is-warning">
-              Jatah Anda hampir habis. Jatah pulih otomatis saat jendela
-              24 jam Anda berakhir.
+              Jatah Anda tinggal sedikit. Tidak masalah — akan kembali sendiri
+              dalam {durasi(sisaDetik)}.
             </div>
           )}
 
           {/* --- Penjelasan jujur, tanpa membuka kapasitas layanan --- */}
           <p className="usage__fineprint">
-            Jatah <strong>Pemakaian saya</strong> adalah milik akun Anda sendiri
-            ({angkaRingkas(akun?.requests?.batas || jatahPenuh)} pesan per jendela{' '}
-            {Math.round(akun?.reset?.jendela_jam || 24)} jam) dan terpisah dari akun
-            lain. Jendelanya dimulai saat pesan pertama Anda, dan jatah kembali
-            penuh saat jendela itu berakhir — jadi waktu pulih tiap akun berbeda.
-            Bila jatah tidak habis, Anda tidak pernah dibatasi. Setiap pesan
-            dihitung sama, baik jawabannya pendek maupun panjang. Panel ini tidak
-            memakai jatah saat dibuka.
+            Angka ini hanya milik akun Anda (
+            {angkaRingkas(akun?.requests?.batas || jatahPenuh)} pesan per{' '}
+            {Math.round(akun?.reset?.jendela_jam || 24)} jam) dan tidak memengaruhi akun
+            lain. Hitungannya mulai dari pesan pertama Anda, jadi waktu perbarui tiap
+            akun berbeda. Setiap pesan dihitung sama, baik jawabannya panjang maupun
+            pendek. Membuka panel ini tidak memakai jatah.
           </p>
 
           <button

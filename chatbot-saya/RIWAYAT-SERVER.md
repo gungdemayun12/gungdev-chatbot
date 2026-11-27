@@ -108,6 +108,49 @@ Di dalam panel ada **hitung mundur reset** dalam format `jam:menit:detik`
   sehingga jatah yang baru pulih langsung terlihat.
 - Angka juga disegarkan saat tab kembali aktif (pindah tab → kembali).
 
+### Bahasa: tenang, seperti uang bekal
+
+Jatah dibahas seperti **bekal** yang cukup untuk 24 jam ke depan, bukan
+seperti peringatan. Panduannya:
+
+- Tidak ada kata yang menakut-nakuti ("segera habis", "hati-hati",
+  "kritis", "jangan"). Warna peringatan hanya muncul bila benar-benar
+  hampir habis, dan kalimatnya tetap menenangkan.
+- Kata "pulih" diganti **"diperbarui"**, supaya terasa seperti bekal yang
+  diisi ulang, bukan hukuman yang berakhir.
+- Saat jatah habis: "Jatah Anda sudah terpakai semua. Bisa chat lagi dalam
+  …" — plus pengingat bahwa percakapan lama tetap bisa dibaca.
+
+### Konfirmasi sebelum keluar
+
+Klik **Keluar** (dari header chat, menu akun di sidebar, atau Pengaturan →
+Akun) tidak langsung mengeluarkan pengguna. Muncul dialog:
+
+> **Keluar dari akun?**
+> Percakapan Anda **tetap tersimpan** dan akan muncul lagi saat Anda masuk
+> dengan akun yang sama.
+> Setelah keluar Anda memakai mode tamu: riwayat tidak tersimpan dan jatah
+> pesan lebih sedikit.
+>
+> [Batal] [Ya, keluar]
+
+"Membatalkan" bisa lewat tombol **Batal**, tombol silang, klik latar, atau
+**Esc** — pengguna tetap masuk.
+
+### Pengaturan
+
+Tujuh tab, semua tersimpan otomatis di perangkat:
+
+| Tab | Isi |
+|---|---|
+| **Umum** | Tema (terang/gelap/sistem), bahasa menu, ukuran font, nama panggilan |
+| **Personalisasi** | Instruksi khusus, gaya jawaban, nada, **bahasa jawaban AI**, **panjang jawaban** |
+| **Percakapan** | Status akun, simpan riwayat, **kirim dengan Enter**, **gulir otomatis**, **tampilkan jam pesan**, **konfirmasi sebelum menghapus**, ekspor, hapus semua |
+| **Akun** | Status login, panel jatah, penjelasan privasi, tombol keluar |
+| **Lanjutan** | Pilihan model, temperature, panjang maksimum jawaban, kembalikan setelan awal |
+| **Pintasan** | Daftar pintasan keyboard |
+| **Tentang** | Versi dan keterangan singkat |
+
 ### Mengapa hanya jumlah pesan yang membatasi?
 
 Panjang jawaban AI sangat bervariasi: jawaban singkat ~100 token,
@@ -242,8 +285,9 @@ Bila belum muncul, buka panel Usage dan lihat pesan di sidebar:
 | `backend/main.py` | Endpoint `/api/sessions`, penegakan jatah di `/chat` |
 | `frontend/src/lib/riwayat.js` | Semua permintaan riwayat + token |
 | `frontend/src/hooks/useSessions.js` | Server sebagai sumber kebenaran, perangkat sebagai cadangan |
+| `frontend/src/hooks/useSettings.js` | Semua preferensi pengguna (tema, bahasa, perilaku chat) |
+| `frontend/src/components/Settings.jsx` | Halaman Pengaturan 7 tab |
 | `frontend/src/components/UsagePanel.jsx` | Panel pemakaian + jatah akun |
-
 ## Menjalankan uji
 
 ```powershell
@@ -259,6 +303,7 @@ python uji_jatah_api.py           # 44 pemeriksaan jatah/reset via HTTP
 cd chatbot-saya/frontend
 node uji_browser.mjs              # 18 pemeriksaan riwayat lintas "perangkat"
 node uji_jatah_browser.mjs        # 23 pemeriksaan jatah/hitung mundur di UI
+node uji_pengaturan_keluar.mjs    # 29 pemeriksaan konfirmasi keluar & pengaturan
 node uji_alur_lengkap.mjs         # 26 pemeriksaan alur ujung-ke-ujung
 ```
 

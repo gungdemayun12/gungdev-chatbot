@@ -50,6 +50,7 @@ export default function Composer({
   research,
   onResearchChange,
   onLampiranBerubah,
+  sendWithEnter = true,
 }) {
   const textareaRef = useRef(null)
   const fileRef = useRef(null)
@@ -84,10 +85,19 @@ export default function Composer({
   }, [lampiran])
 
   const handleKeyDown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-      e.preventDefault()
-      submit()
+    // Pengguna boleh memilih: Enter mengirim, atau Enter hanya baris baru.
+    // Shift+Enter selalu baris baru (tidak pernah mengirim).
+    if (e.nativeEvent.isComposing) return
+    if (e.key !== 'Enter') return
+
+    if (sendWithEnter) {
+      if (e.shiftKey) return
+    } else if (!(e.ctrlKey || e.metaKey)) {
+      // Mode "Enter = baris baru": hanya Ctrl/Cmd+Enter yang mengirim.
+      return
     }
+    e.preventDefault()
+    submit()
   }
 
   const submit = () => {
@@ -319,7 +329,15 @@ export default function Composer({
           GungDev bisa membuat kesalahan. Periksa kembali informasi penting.
         </p>
         <p className="composer__hint" aria-hidden="true">
-          <kbd>Enter</kbd> kirim · <kbd>Shift</kbd>+<kbd>Enter</kbd> baris baru
+          {sendWithEnter ? (
+            <>
+              <kbd>Enter</kbd> kirim · <kbd>Shift</kbd>+<kbd>Enter</kbd> baris baru
+            </>
+          ) : (
+            <>
+              <kbd>Ctrl</kbd>+<kbd>Enter</kbd> kirim · <kbd>Enter</kbd> baris baru
+            </>
+          )}
         </p>
       </div>
     </div>

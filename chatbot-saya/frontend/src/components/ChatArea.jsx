@@ -85,6 +85,9 @@ export default function ChatArea({
   generationPhase = '',
   onResearchChange,
   onLampiranBerubah,
+  /* --- Preferensi (dari Pengaturan) --- */
+  sendWithEnter = true,
+  autoScrollAktif = true,
   /* --- Status login --- */
   masuk = false,
   guestSisa = null,
@@ -93,7 +96,11 @@ export default function ChatArea({
 }) {
   const scrollRef = useRef(null)
   const [showScrollBtn, setShowScrollBtn] = useState(false)
+  // Gulir otomatis hanya berjalan bila (a) preferensi pengguna aktif dan
+  // (b) pengguna sedang berada di dasar percakapan. Digabung dalam satu
+  // state agar tidak perlu efek tambahan.
   const [autoScroll, setAutoScroll] = useState(true)
+  const bolehGulir = autoScrollAktif && autoScroll
 
   const title = session?.title || 'Percakapan baru'
   const isEmpty = messages.length === 0
@@ -111,11 +118,11 @@ export default function ChatArea({
 
   /* Auto-scroll ke pesan terbaru (hanya jika pengguna sedang di dasar). */
   useEffect(() => {
-    if (!autoScroll) return
+    if (!bolehGulir) return
     const el = scrollRef.current
     if (!el) return
     el.scrollTop = el.scrollHeight
-  }, [messages, streamingText, loading, autoScroll])
+  }, [messages, streamingText, loading, bolehGulir])
 
   const scrollToBottom = () => {
     const el = scrollRef.current
@@ -326,6 +333,7 @@ export default function ChatArea({
            generationPhase={generationPhase}
           onResearchChange={onResearchChange}
           onLampiranBerubah={onLampiranBerubah}
+          sendWithEnter={sendWithEnter}
         />
       </div>
 

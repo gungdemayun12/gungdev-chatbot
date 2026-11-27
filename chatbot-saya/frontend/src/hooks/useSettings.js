@@ -25,6 +25,14 @@ export const DEFAULT_SETTINGS = {
 
   // Percakapan
   saveHistory: true,
+  sendWithEnter: true, // Enter kirim, Shift+Enter baris baru
+  autoScroll: true, // gulir otomatis ke pesan terbaru
+  showTimestamps: false, // tampilkan jam pada pesan
+  confirmBeforeDelete: true, // tanya dulu sebelum menghapus percakapan
+
+  // Personalisasi tambahan
+  bahasaJawaban: 'id', // 'id' | 'en' — bahasa jawaban AI (bukan antarmuka)
+  panjangJawaban: 'sedang', // 'pendek' | 'sedang' | 'panjang'
 
   // Lanjutan
   //
@@ -66,11 +74,18 @@ function mergeSettings(raw) {
     ? Math.min(8192, Math.max(16, Number(merged.maxTokens)))
     : DEFAULT_SETTINGS.maxTokens
   merged.saveHistory = Boolean(merged.saveHistory)
+  merged.sendWithEnter = merged.sendWithEnter !== false
+  merged.autoScroll = merged.autoScroll !== false
+  merged.showTimestamps = Boolean(merged.showTimestamps)
+  merged.confirmBeforeDelete = merged.confirmBeforeDelete !== false
   if (!['small', 'medium', 'large'].includes(merged.fontSize)) merged.fontSize = 'medium'
   if (!['light', 'dark', 'system'].includes(merged.theme)) merged.theme = 'system'
   if (!['concise', 'balanced', 'detailed'].includes(merged.responseStyle))
     merged.responseStyle = 'balanced'
   if (!['casual', 'formal'].includes(merged.tone)) merged.tone = 'casual'
+  if (!['id', 'en'].includes(merged.bahasaJawaban)) merged.bahasaJawaban = 'id'
+  if (!['pendek', 'sedang', 'panjang'].includes(merged.panjangJawaban))
+    merged.panjangJawaban = 'sedang'
 
   // --- apiUrl ---
   // Selalu berupa string.
@@ -131,11 +146,29 @@ export function composeSystemPrompt(settings) {
   }
   parts.push(styleMap[settings.responseStyle] || styleMap.balanced)
 
+  // Panjang jawaban dari Pengaturan → Personalisasi. Dipisah dari
+  // responseStyle agar pengguna bisa memilih "Nada santai + panjang".
+  const panjangMap = {
+    pendek: 'Usahakan jawaban pendek: inti saja, tanpa basa-basi.',
+    sedang: 'Panjang jawaban secukupnya: cukup untuk menjawab dengan tuntas.',
+    panjang: 'Beri penjelasan yang panjang dan menyeluruh bila memang membantu.',
+  }
+  if (panjangMap[settings.panjangJawaban]) parts.push(panjangMap[settings.panjangJawaban])
+
   const toneMap = {
     casual: 'Gunakan nada santai, hangat, dan akrab seperti teman yang membantu.',
     formal: 'Gunakan nada formal, sopan, dan profesional.',
   }
   parts.push(toneMap[settings.tone] || toneMap.casual)
+
+  // Bahasa jawaban (terpisah dari bahasa antarmuka). Dipilih pengguna di
+  // Pengaturan → Personalisasi: kadang orang ingin jawaban Inggris walau
+  // menunya berbahasa Indonesia.
+  parts.push(
+    settings.bahasaJawaban === 'en'
+      ? 'Selalu jawab dalam bahasa Inggris, kecuali pengguna meminta bahasa lain secara eksplisit.'
+      : 'Selalu jawab dalam bahasa Indonesia yang baik dan mudah dipahami, kecuali pengguna meminta bahasa lain secara eksplisit.',
+  )
 
   if (settings.customInstructions?.trim()) {
     parts.push(`Preferensi pengguna yang perlu diperhatikan:\n${settings.customInstructions.trim()}`)

@@ -118,7 +118,7 @@ async function jalankan() {
     teksAkun.includes(String(JATAH)),
     teksAkun.slice(0, 90),
   )
-  cek('Menampilkan sisa pesan', /Sisa/i.test(teksAkun), teksAkun.slice(0, 120))
+  cek('Menampilkan sisa pesan', /sisa/i.test(teksAkun), teksAkun.slice(0, 120))
   cek('Menampilkan token terpakai', /token/i.test(teksAkun), teksAkun.slice(0, 140))
   cek(
     'TIDAK menyebut batas global 1.000 di blok akun',
@@ -126,8 +126,8 @@ async function jalankan() {
     teksAkun.slice(0, 100),
   )
   cek(
-    'Menjelaskan jendela bergulir (bukan jam dinding)',
-    /jendela\s*24\s*jam/i.test(teksAkun),
+    'Menjelaskan jatah seperti bekal 24 jam (bahasa tenang)',
+    /bekal untuk\s*24\s*jam/i.test(teksAkun),
     teksAkun.slice(0, 200),
   )
   cek(

@@ -1,6 +1,6 @@
 /**
- * Settings.jsx — panel pengaturan dengan 6 tab:
- * Umum, Personalisasi, Percakapan, Lanjutan, Pintasan, Tentang.
+ * Settings.jsx — panel pengaturan dengan tab:
+ * Umum, Personalisasi, Percakapan, Akun, Lanjutan, Pintasan, Tentang.
  *
  * Semua nilai disimpan di localStorage lewat useSettings dan langsung
  * diterapkan (tema, ukuran font, dsb).
@@ -14,11 +14,13 @@ import {
   Download,
   Info,
   Keyboard,
+  LogOut,
   Monitor,
   Moon,
   MessagesSquare,
   Palette,
   RotateCcw,
+  ShieldCheck,
   SlidersHorizontal,
   Sun,
   Type,
@@ -31,6 +33,7 @@ const TABS = [
   { key: 'umum', label: 'Umum', icon: SlidersHorizontal },
   { key: 'personalisasi', label: 'Personalisasi', icon: Wand2 },
   { key: 'percakapan', label: 'Percakapan', icon: MessagesSquare },
+  { key: 'akun', label: 'Akun', icon: User },
   { key: 'lanjutan', label: 'Lanjutan', icon: Palette },
   { key: 'pintasan', label: 'Pintasan', icon: Keyboard },
   { key: 'tentang', label: 'Tentang', icon: Info },
@@ -84,6 +87,7 @@ export default function Settings({
   apiUrl,
   user,
   onOpenLogin,
+  onLogout,
 }) {
   const [tab, setTab] = useState('umum')
 
@@ -212,6 +216,38 @@ export default function Settings({
                   ]}
                 />
               </Field>
+
+              <Field
+                label="Bahasa jawaban AI"
+                hint="Bahasa yang dipakai AI saat menjawab. Bisa berbeda dari bahasa menu."
+                htmlFor="set-bahasa-jawaban"
+              >
+                <select
+                  id="set-bahasa-jawaban"
+                  className="input"
+                  value={settings.bahasaJawaban}
+                  onChange={(e) => updateSettings({ bahasaJawaban: e.target.value })}
+                >
+                  <option value="id">Bahasa Indonesia</option>
+                  <option value="en">English</option>
+                </select>
+              </Field>
+
+              <Field
+                label="Panjang jawaban"
+                hint="Perkiraan panjang jawaban yang Anda inginkan."
+              >
+                <Segmented
+                  name="Panjang jawaban"
+                  value={settings.panjangJawaban}
+                  onChange={(v) => updateSettings({ panjangJawaban: v })}
+                  options={[
+                    { value: 'pendek', label: 'Pendek' },
+                    { value: 'sedang', label: 'Sedang' },
+                    { value: 'panjang', label: 'Panjang' },
+                  ]}
+                />
+              </Field>
             </>
           )}
 
@@ -267,6 +303,73 @@ export default function Settings({
                 </label>
               </Field>
 
+              <Field
+                label="Kirim dengan Enter"
+                hint="Aktif: Enter mengirim pesan, Shift+Enter membuat baris baru. Nonaktif: Enter membuat baris baru."
+              >
+                <label className="switch">
+                  <input
+                    type="checkbox"
+                    checked={settings.sendWithEnter}
+                    onChange={(e) => updateSettings({ sendWithEnter: e.target.checked })}
+                  />
+                  <span className="switch__track" aria-hidden="true" />
+                  <span className="switch__label">
+                    {settings.sendWithEnter ? 'Aktif' : 'Nonaktif'}
+                  </span>
+                </label>
+              </Field>
+
+              <Field
+                label="Gulir otomatis"
+                hint="Selalu gulir ke pesan terbaru saat jawaban AI sedang berjalan."
+              >
+                <label className="switch">
+                  <input
+                    type="checkbox"
+                    checked={settings.autoScroll}
+                    onChange={(e) => updateSettings({ autoScroll: e.target.checked })}
+                  />
+                  <span className="switch__track" aria-hidden="true" />
+                  <span className="switch__label">
+                    {settings.autoScroll ? 'Aktif' : 'Nonaktif'}
+                  </span>
+                </label>
+              </Field>
+
+              <Field label="Tampilkan jam pesan" hint="Menampilkan waktu kirim di setiap pesan.">
+                <label className="switch">
+                  <input
+                    type="checkbox"
+                    checked={settings.showTimestamps}
+                    onChange={(e) => updateSettings({ showTimestamps: e.target.checked })}
+                  />
+                  <span className="switch__track" aria-hidden="true" />
+                  <span className="switch__label">
+                    {settings.showTimestamps ? 'Aktif' : 'Nonaktif'}
+                  </span>
+                </label>
+              </Field>
+
+              <Field
+                label="Konfirmasi sebelum menghapus"
+                hint="Menampilkan dialog tanya dulu sebelum percakapan dihapus."
+              >
+                <label className="switch">
+                  <input
+                    type="checkbox"
+                    checked={settings.confirmBeforeDelete}
+                    onChange={(e) =>
+                      updateSettings({ confirmBeforeDelete: e.target.checked })
+                    }
+                  />
+                  <span className="switch__track" aria-hidden="true" />
+                  <span className="switch__label">
+                    {settings.confirmBeforeDelete ? 'Aktif' : 'Nonaktif'}
+                  </span>
+                </label>
+              </Field>
+
               <Field label="Ekspor semua percakapan" hint="Unduh seluruh riwayat sebagai file.">
                 <div className="btn-row">
                   <button
@@ -294,18 +397,74 @@ export default function Settings({
             </>
           )}
 
-          {/* ---------------- LANJUTAN ---------------- */}
-          {tab === 'lanjutan' && (
+          {/* ---------------- AKUN ---------------- */}
+          {tab === 'akun' && (
             <>
               <Field
-                label="Pemakaian & jatah saya"
-                hint="Berapa jatah pesan Anda hari ini, sisa berapa, dan kapan jatah pulih. Panel ini tidak memakai jatah saat dibuka."
+                label="Status akun"
+                hint={
+                  user
+                    ? 'Anda masuk. Percakapan tersimpan ke akun Google Anda dan bisa dibuka di perangkat lain.'
+                    : 'Anda memakai mode tamu. Masuk agar percakapan tersimpan dan jatah lebih besar.'
+                }
+              >
+                {user ? (
+                  <div className="set-account">
+                    <span className="set-account__avatar" aria-hidden="true">
+                      {user.name.charAt(0).toUpperCase()}
+                    </span>
+                    <span className="set-account__text">
+                      <span className="set-account__name">{user.name}</span>
+                      <span className="set-account__mail">{user.email}</span>
+                    </span>
+                    <span className="set-account__ok">Terhubung</span>
+                  </div>
+                ) : (
+                  <button type="button" className="btn btn--primary" onClick={onOpenLogin}>
+                    <User size={15} /> Masuk dengan Google
+                  </button>
+                )}
+              </Field>
+
+              <Field
+                label="Jatah saya"
+                hint="Berapa pesan yang masih tersisa dan kapan jatah diperbarui. Membuka panel ini tidak memakai jatah."
               >
                 <div className="settings-usage">
                   <UsageContent apiUrl={apiUrl} apiOnline={apiOnline} aktif={open} />
                 </div>
               </Field>
 
+              <Field
+                label="Privasi"
+                hint="Percakapan hanya bisa dibuka oleh akun Anda sendiri. Data disimpan di penyimpanan server yang terenkripsi saat transit."
+              >
+                <div className="set-privacy">
+                  <ShieldCheck size={15} aria-hidden="true" />
+                  <span>
+                    {user
+                      ? 'Riwayat terikat ke akun Anda dan tidak dibagikan ke akun lain.'
+                      : 'Mode tamu: riwayat hanya ada di perangkat ini.'}
+                  </span>
+                </div>
+              </Field>
+
+              {user && (
+                <Field
+                  label="Keluar dari akun"
+                  hint="Percakapan tetap tersimpan dan akan muncul lagi saat Anda masuk kembali."
+                >
+                  <button type="button" className="btn btn--danger" onClick={onLogout}>
+                    <LogOut size={15} /> Keluar
+                  </button>
+                </Field>
+              )}
+            </>
+          )}
+
+          {/* ---------------- LANJUTAN ---------------- */}
+          {tab === 'lanjutan' && (
+            <>
               <Field
                 label="Model AI"
                 hint="Pilih model yang ingin dipakai. Bisa juga diganti kapan saja dari kotak pesan."
