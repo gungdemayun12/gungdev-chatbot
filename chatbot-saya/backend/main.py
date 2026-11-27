@@ -402,8 +402,28 @@ logger = logging.getLogger("gungdev-backend")
 # 3. PEMILIHAN PROVIDER
 # ---------------------------------------------------------------------
 def pilih_provider() -> str:
-    """Menentukan provider aktif dari environment atau ketersediaan key."""
+    """
+    Menentukan provider aktif dari environment atau ketersediaan key.
+
+    AI_PROVIDER (bila diisi) MENANG atas segalanya — ini disengaja agar
+    pemilik situs bisa mengunci pilihan. Tetapi kalau nilai itu menunjuk
+    penyedia yang kuncinya tidak ada, situs akan mati. Karena itu nilai
+    yang tidak mungkin dijalankan DIABAIKAN, dan penyedia yang kuncinya
+    benar-benar tersedia yang dipakai.
+    """
     dipaksa = _env("AI_PROVIDER").lower()
+    if dipaksa == "groq" and not GROQ_API_KEY:
+        logger.warning(
+            "AI_PROVIDER=groq tetapi GROQ_API_KEY kosong; pilihan diabaikan."
+        )
+        dipaksa = ""
+    elif dipaksa == "openrouter" and not OPENROUTER_API_KEY:
+        logger.warning(
+            "AI_PROVIDER=openrouter tetapi OPENROUTER_API_KEY kosong; "
+            "pilihan diabaikan."
+        )
+        dipaksa = ""
+
     if dipaksa in ("groq", "openrouter", "ollama"):
         return dipaksa
     if GROQ_API_KEY:
@@ -1701,6 +1721,11 @@ async def diagnostik():
         # Ini membedakan "variabel tidak ada" dari "variabel ada tapi salah
         # isi" (mis. terpotong saat menempel). Tidak membocorkan key.
         "format_key_openrouter": _format_key(OPENROUTER_API_KEY),
+        # Petunjuk aman: kunci OpenRouter terpasang tetapi TIDAK dipakai,
+        # biasanya karena AI_PROVIDER mengunci penyedia lain. Tanpa
+        # petunjuk ini, pemilik situs bisa bingung kenapa penggunaan
+        # OpenRouter tetap nol walau kuncinya sudah diisi.
+        "key_openrouter_dipakai": PROVIDER == "openrouter",
     }
 
 
