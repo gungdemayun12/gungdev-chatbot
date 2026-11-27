@@ -662,6 +662,35 @@ def ada_hasil(hasil: dict) -> bool:
     return bool(((hasil or {}).get("teks") or "").strip())
 
 
+def daftar_sumber(hasil: dict) -> List[dict]:
+    """
+    Menyusun daftar sumber RINGKAS untuk ditampilkan di UI (kartu sumber).
+
+    Yang dikirim hanya hal yang memang boleh dilihat pengguna: nomor,
+    judul, alamat situs, dan tautan. Isi halaman TIDAK dikirim balik ke
+    browser karena sudah dipakai model dan akan membuat respons bengkak
+    (bisa puluhan ribu karakter per jawaban).
+
+    Nomor di sini SAMA dengan nomor `[Sumber n]` yang dibaca model, agar
+    penanda `[1]` di jawaban menunjuk kartu yang benar.
+    """
+    keluaran: List[dict] = []
+    for i, s in enumerate((hasil or {}).get("sumber") or [], start=1):
+        url = (s.get("url") or "").strip()
+        if not url:
+            continue
+        keluaran.append(
+            {
+                "nomor": i,
+                "judul": (s.get("judul") or url).strip()[:200],
+                "url": url,
+                "situs": (s.get("situs") or urlparse(url).hostname or "")[:120],
+                "tanggal": (s.get("tanggal") or "")[:60],
+            }
+        )
+    return keluaran
+
+
 def konteks_untuk_model(hasil: dict) -> Optional[str]:
     """
     Membungkus hasil riset menjadi pesan sistem siap kirim.
@@ -678,13 +707,18 @@ def konteks_untuk_model(hasil: dict) -> Optional[str]:
         f"{teks}\n\n"
         "ATURAN MENJAWAB:\n"
         "1. Jawab langsung ke inti pertanyaan pengguna.\n"
-        "2. Sebutkan sumber dengan penanda [1], [2] sesuai nomor di atas, "
-        "dan tuliskan tautannya di akhir bila relevan.\n"
-        "3. Bila sumber saling bertentangan, sebutkan perbedaannya.\n"
-        "4. Bila sumber tidak memuat jawabannya, katakan terus terang, lalu "
+        "2. Tempelkan penanda sumber TEPAT pada kalimat yang memakainya, "
+        "misalnya: 'Harga mulai Rp400.000 [1].' JANGAN mengumpulkan semua "
+        "penanda di akhir jawaban.\n"
+        "3. JANGAN menulis daftar tautan di akhir jawaban: pengguna sudah "
+        "melihat daftar sumbernya otomatis di bawah jawabanmu.\n"
+        "4. Bila satu kalimat memakai beberapa sumber, tulis berurutan: "
+        "[1][3].\n"
+        "5. Bila sumber saling bertentangan, sebutkan perbedaannya.\n"
+        "6. Bila sumber tidak memuat jawabannya, katakan terus terang, lalu "
         "jawab sebisamu dari pengetahuan sendiri dan tandai bagian itu.\n"
-        "5. Jangan menyebut kata 'konteks', 'sistem', atau 'prompt'.\n"
-        "6. DILARANG berkata bahwa kamu tidak bisa membuka web atau tidak "
+        "7. Jangan menyebut kata 'konteks', 'sistem', atau 'prompt'.\n"
+        "8. DILARANG berkata bahwa kamu tidak bisa membuka web atau tidak "
         "bisa menelusuri internet: sumber di atas SUDAH dibaca untukmu. "
         "Kalau ada yang belum terjawab, cukup sebutkan bagian mana yang "
         "belum ada di sumber."

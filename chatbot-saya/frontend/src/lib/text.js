@@ -170,6 +170,15 @@ export function sessionToMarkdown(session) {
       const { thinking, answer } = splitThinking(m.content || '')
       if (thinking) lines.push('<details><summary>Proses berpikir</summary>', '', thinking, '', '</details>', '')
       lines.push('## GungDev', '', answer || m.content || '', '')
+      // Sumber riset ikut diekspor, supaya catatan yang dibagikan tetap
+      // bisa diperiksa asalnya (nomornya sama dengan penanda [1], [2]).
+      if (Array.isArray(m.sumber) && m.sumber.length) {
+        lines.push('**Sumber:**', '')
+        for (const s of m.sumber) {
+          lines.push(`${s.nomor}. [${s.judul || s.url}](${s.url})${s.situs ? ` — ${s.situs}` : ''}`)
+        }
+        lines.push('')
+      }
     }
   }
   return lines.join('\n')
@@ -182,6 +191,11 @@ export function sessionToText(session) {
     const who = m.role === 'user' ? 'Pengguna' : 'GungDev'
     const { answer } = splitThinking(m.content || '')
     lines.push(`[${who}]`, answer || m.content || '', '')
+    if (m.role === 'assistant' && Array.isArray(m.sumber) && m.sumber.length) {
+      lines.push('Sumber:')
+      for (const s of m.sumber) lines.push(`  ${s.nomor}. ${s.judul || s.url} (${s.url})`)
+      lines.push('')
+    }
   }
   return lines.join('\n')
 }

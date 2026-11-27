@@ -85,6 +85,21 @@ function sanitizeSessions(value) {
           content: typeof m.content === 'string' ? m.content : '',
           createdAt: m.createdAt || Date.now(),
           feedback: m.feedback || null,
+          // Sumber riset ikut disimpan agar kartu sumber tetap terlihat
+          // setelah halaman dimuat ulang / dibuka di perangkat lain.
+          ...(Array.isArray(m.sumber) && m.sumber.length
+            ? {
+                sumber: m.sumber
+                  .filter((s) => s && typeof s.url === 'string')
+                  .map((s) => ({
+                    nomor: Number(s.nomor) || 0,
+                    judul: String(s.judul || '').slice(0, 200),
+                    url: String(s.url),
+                    situs: String(s.situs || '').slice(0, 120),
+                    tanggal: String(s.tanggal || '').slice(0, 60),
+                  })),
+              }
+            : {}),
         })),
       createdAt: s.createdAt || Date.now(),
       updatedAt: s.updatedAt || s.createdAt || Date.now(),
@@ -527,6 +542,24 @@ export function useSessions(settings, akunSub = null, apiUrl = '') {
     [updateSession],
   )
 
+  /**
+   * Menyimpan daftar sumber riset pada satu pesan asisten.
+   *
+   * Dipakai agar kartu sumber tetap terlihat setelah halaman dimuat ulang
+   * (ikut tersimpan bersama riwayat), bukan hanya selama streaming.
+   */
+  const setMessageSources = useCallback(
+    (sessionId, messageId, sumber) => {
+      updateSession(sessionId, (s) => ({
+        ...s,
+        messages: s.messages.map((m) =>
+          m.id === messageId ? { ...m, sumber: Array.isArray(sumber) ? sumber : [] } : m,
+        ),
+      }))
+    },
+    [updateSession],
+  )
+
   /** Memberi tanda suka / tidak suka pada pesan asisten. */
   const setFeedback = useCallback(
     (sessionId, messageId, feedback) => {
@@ -649,6 +682,7 @@ export function useSessions(settings, akunSub = null, apiUrl = '') {
     ensureSession,
     addMessage,
     setMessageContent,
+    setMessageSources,
     setFeedback,
     truncateMessages,
     newSession,

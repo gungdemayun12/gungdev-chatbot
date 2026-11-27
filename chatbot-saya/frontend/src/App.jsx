@@ -67,6 +67,7 @@ export default function App() {
     ensureSession,
     addMessage,
     setMessageContent,
+    setMessageSources,
     setFeedback,
     truncateMessages,
     newSession,
@@ -204,6 +205,7 @@ export default function App() {
       let buffer = ''
       let catatanModel = null
       let terpotong = false
+      let sumberRiset = []
 
       try {
         await streamChat({
@@ -227,6 +229,12 @@ export default function App() {
                (mis. gambar butuh model vision). Disimpan dulu, lalu
                ditampilkan bersama jawaban agar tidak mendahului teks. */
             if (meta?.penyesuaian) catatanModel = meta.penyesuaian
+            /* Sumber riset web: nomornya sama dengan penanda [1], [2] di
+               jawaban, jadi kartu sumber bisa ditampilkan di bawahnya
+               (gaya ChatGPT). */
+            if (Array.isArray(meta?.sumber) && meta.sumber.length) {
+              sumberRiset = meta.sumber
+            }
           },
           onDelta: (delta) => {
             setGenerationPhase('writing')
@@ -250,6 +258,9 @@ export default function App() {
             }
             if (catatanModel) akhir += `\n\n> ℹ️ ${catatanModel}`
             setMessageContent(session.id, id, akhir)
+            if (sumberRiset.length) {
+              setMessageSources(session.id, id, sumberRiset)
+            }
             buffer = akhir
           },
         })
@@ -311,6 +322,7 @@ export default function App() {
       systemPromptFinal,
       addMessage,
       setMessageContent,
+      setMessageSources,
       truncateMessages,
       activeSession,
       segarkanUsage,

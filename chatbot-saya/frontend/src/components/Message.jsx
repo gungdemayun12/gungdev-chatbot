@@ -9,6 +9,7 @@
 import { memo, useState } from 'react'
 import Markdown from './Markdown.jsx'
 import Berpikir from './Berpikir.jsx'
+import SumberRiset from './SumberRiset.jsx'
 import {
   Brain,
   Check,
@@ -121,6 +122,10 @@ function Message({
             {isStreaming && <span className="caret" aria-hidden="true" />}
           </div>
         )}
+
+        {/* Kartu sumber riset: nomornya sama dengan penanda [1], [2] di
+            jawaban. Ditampilkan setelah jawaban selesai mengalir. */}
+        {!isStreaming && <SumberRiset sumber={message.sumber} />}
 
         {!isStreaming && message.content && (
           <div className="msg__actions">

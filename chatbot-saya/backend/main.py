@@ -726,8 +726,15 @@ class ChatRequest(BaseModel):
 
 
 class ChatResponse(BaseModel):
-    """Response /chat (kontrak lama, tidak berubah): {"reply": "..."}"""
+    """
+    Response /chat (kontrak lama, tidak berubah): {"reply": "..."}
+
+    `sumber` adalah field TAMBAHAN yang hanya muncul bila AI melakukan
+    riset web. Isinya daftar sumber ringkas untuk kartu sumber di UI.
+    Klien lama yang hanya membaca `reply` tidak terpengaruh.
+    """
     reply: str
+    sumber: Optional[List[dict]] = None
 
 
 class HealthResponse(BaseModel):
@@ -2990,7 +2997,7 @@ async def lakukan_riset_server(
     permintaan: str,
     opsi: dict,
     messages: List[dict],
-) -> Optional[str]:
+) -> tuple[Optional[str], List[dict]]:
     """
     Menjalankan riset web DI SERVER, berlaku untuk semua model/penyedia.
 
@@ -3008,14 +3015,20 @@ async def lakukan_riset_server(
          dilanjutkan satu putaran lagi untuk menutup bagian yang belum
          terjawab (riset berlapis).
 
-    Mengembalikan teks konteks, atau None bila tidak ada hasil. TIDAK
-    pernah melempar exception: kegagalan riset tidak boleh menggagalkan
-    chat — model tetap menjawab dari pengetahuannya sendiri, dan instruksi
-    kejujuran di prompt membuatnya tidak mengaku-ngaku sudah menelusuri
-    web.
+    Mengembalikan (teks_konteks, daftar_sumber):
+
+      - `teks_konteks` None bila tidak ada hasil;
+      - `daftar_sumber` berupa list ringkas ({nomor, judul, url, situs,
+        tanggal}) untuk kartu sumber di UI. Nomornya sama dengan penanda
+        `[1]`, `[2]` yang ditulis model.
+
+    TIDAK pernah melempar exception: kegagalan riset tidak boleh
+    menggagalkan chat — model tetap menjawab dari pengetahuannya sendiri,
+    dan instruksi kejujuran di prompt membuatnya tidak mengaku-ngaku sudah
+    menelusuri web.
     """
     if not opsi.get("perlu_riset"):
-        return None
+        return None, []
 
     dalam = bool(opsi.get("riset_dalam"))
     maunya_banyak = dalam or bool(opsi.get("penelitian"))
@@ -3078,10 +3091,13 @@ async def lakukan_riset_server(
             len(kueri_dipakai),
             dalam,
         )
-        return riset.konteks_untuk_model(hasil)
+        # Sumber ikut dikembalikan agar UI bisa menampilkan kartu sumber
+        # bernomor (seperti ChatGPT). Hanya ringkasannya yang dikirim ke
+        # browser, bukan isi halaman.
+        return riset.konteks_untuk_model(hasil), riset.daftar_sumber(hasil)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Riset web gagal, chat tetap dilanjutkan: %s", exc)
-        return None
+        return None, []
 
 
 async def siapkan_permintaan(request: ChatRequest) -> tuple[List[dict], dict]:
@@ -3137,7 +3153,14 @@ async def siapkan_permintaan(request: ChatRequest) -> tuple[List[dict], dict]:
 
     # Riset dijalankan SETELAH model dipilih: query dirumuskan model
     # yang sama dengan yang akan menjawab, agar relevan.
-    konteks_riset = await lakukan_riset_server(user_message, opsi, messages_awal)
+    konteks_riset, sumber = await lakukan_riset_server(
+        user_message, opsi, messages_awal
+    )
+
+    # Sumber disimpan di `opsi` agar endpoint bisa mengirimnya ke UI
+    # (kartu sumber). Ini TIDAK mengubah kontrak lama: field baru hanya
+    # ditambahkan pada objek meta/done di SSE, dan klien lama mengabaikannya.
+    opsi["sumber"] = sumber
 
     if konteks_riset:
         # penelitian=True di sini WAJIB: instruksi "jangan mengaku tidak
@@ -3249,7 +3272,12 @@ async def chat(request: ChatRequest, authorization: Optional[str] = Header(None)
             model=opsi["model"],
             sub=jatah.get("sub"),
         )
-        return {"reply": isi}
+        # `sumber` hanya ditambahkan bila riset benar-benar dipakai, agar
+        # kontrak lama {reply} tetap utuh untuk chat biasa.
+        hasil: dict = {"reply": isi}
+        if opsi.get("sumber"):
+            hasil["sumber"] = opsi["sumber"]
+        return hasil
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001
@@ -3312,15 +3340,16 @@ async def chat_stream(request: ChatRequest, authorization: Optional[str] = Heade
 
             # Beri tahu lebih dulu bila model berbeda dari pilihan
             # pengguna, supaya UI bisa menjelaskannya dengan jujur.
+            # Sumber riset ikut dikirim di sini agar UI bisa menyiapkan
+            # kartu sumber sejak awal (nomornya sama dengan [1], [2] yang
+            # ditulis model). Klien lama mengabaikan field tambahan ini.
+            meta: dict = {"model": opsi["model"]}
             if opsi.get("penyesuaian"):
-                yield sse(
-                    {
-                        "meta": {
-                            "model": opsi["model"],
-                            "penyesuaian": opsi["penyesuaian"],
-                        }
-                    }
-                )
+                meta["penyesuaian"] = opsi["penyesuaian"]
+            if opsi.get("sumber"):
+                meta["sumber"] = opsi["sumber"]
+            if opsi.get("penyesuaian") or opsi.get("sumber"):
+                yield sse({"meta": meta})
 
             ada_isi = False
             jawaban = []

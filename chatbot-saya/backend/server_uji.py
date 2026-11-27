@@ -302,6 +302,11 @@ async def chat_stream_uji(request: main.ChatRequest, authorization: str | None =
 
     async def aliran():
         teks = f"Jawaban untuk: {request.message[:40]}"
+        # Sumber riset tiruan: dikirim lewat event `meta` persis seperti
+        # produksi, supaya kartu sumber di UI bisa diuji tanpa jaringan.
+        if _SUMBER_UJI["sumber"]:
+            yield sse({"meta": {"model": "openai/gpt-oss-120b", "sumber": _SUMBER_UJI["sumber"]}})
+            teks = "Harga mulai Rp400.000 [1] dan Rp350.000 [2]."
         # Jeda buatan agar animasi "berpikir" bisa diamati/diuji.
         if _JEDA_UJI["detik"] > 0:
             await asyncio.sleep(_JEDA_UJI["detik"])
@@ -314,6 +319,20 @@ async def chat_stream_uji(request: main.ChatRequest, authorization: str | None =
         yield sse({"done": True})
 
     return StreamingResponse(aliran(), media_type="text/event-stream")
+
+
+# ---------------------------------------------------------------------
+# Sumber riset tiruan untuk uji kartu sumber di UI.
+# Bawaannya kosong, jadi semua uji lain tidak terpengaruh.
+# ---------------------------------------------------------------------
+_SUMBER_UJI = {"sumber": []}
+
+
+@main.app.post("/__uji/sumber")
+async def atur_sumber(payload: dict):
+    """Mengisi/mengosongkan daftar sumber tiruan untuk uji UI."""
+    _SUMBER_UJI["sumber"] = payload.get("sumber") or []
+    return {"ok": True, "jumlah": len(_SUMBER_UJI["sumber"])}
 
 
 @main.app.get("/__uji/db")

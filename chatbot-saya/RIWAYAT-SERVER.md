@@ -767,6 +767,39 @@ Riset biasa sudah otomatis. Tombol globe (dan kata "riset", "research",
   pengetahuannya, dan prompt kejujuran membuatnya tidak mengaku-ngaku
   sudah menelusuri web.
 
+### Kartu sumber di bawah jawaban (gaya ChatGPT)
+
+Setiap jawaban riset menampilkan baris ringkas **"Sumber: contoh.com +2"**
+di bawahnya. Bila diklik, terbuka daftar sumber bernomor — judul, nama
+situs, dan tautan yang bisa diklik. Nomornya **sama** dengan penanda
+`[1]`, `[2]` di dalam jawaban, jadi pengguna bisa mencocokkan kalimat
+dengan sumbernya.
+
+Yang dikirim ke browser hanya ringkasan sumber (nomor, judul, URL, situs,
+tanggal) — **isi halaman tidak ikut dikirim**, karena sudah dipakai model
+dan akan membuat respons membengkak. Ukurannya sekitar 60 byte per sumber.
+
+Kartu sumber **ikut tersimpan bersama riwayat**, jadi tetap terlihat
+setelah halaman dimuat ulang atau dibuka di perangkat lain.
+
+Bila model lupa menulis penanda, kartu sumber tetap ditampilkan —
+pengguna tetap tahu dari mana jawaban itu diambil.
+
+### Jatah: satu permintaan riset = SATU pesan
+
+Ini perlu ditegaskan karena riset memanggil model beberapa kali:
+
+| Jenis pesan | Panggilan ke AI | Jatah terpakai |
+|---|---|---|
+| Sapaan singkat ("halo") | 1 | **1 pesan** |
+| Pertanyaan biasa | 1 | **1 pesan** |
+| Riset otomatis | 2 (rumuskan kata kunci + jawab) | **1 pesan** |
+| Riset mendalam / tombol globe | 3 (dua kata kunci + jawab) | **1 pesan** |
+
+Yang bertambah hanyalah **token** yang tercatat di panel Usage (karena
+konteks sumber ikut dibaca model), **bukan jumlah pesan**. Pencatatan
+jatah dilakukan sekali di akhir, setelah seluruh proses selesai.
+
 ## Menjalankan uji
 
 ```powershell
@@ -797,6 +830,7 @@ node uji_pengaturan_keluar.mjs    # 29 pemeriksaan konfirmasi keluar & pengatura
 node uji_berpikir.mjs             # 20 pemeriksaan animasi "berpikir"
 node uji_alur_lengkap.mjs         # 26 pemeriksaan alur ujung-ke-ujung
 node uji_menu_model.mjs           # 17 pemeriksaan menu model ringkas & rapi
+node uji_sumber_ui.mjs            # 15 pemeriksaan kartu sumber riset (gaya ChatGPT)
 ```
 
 > **Penting:** `server_uji.py` menyimpan state di memori proses. Restart
