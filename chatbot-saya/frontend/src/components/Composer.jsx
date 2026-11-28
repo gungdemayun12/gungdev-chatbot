@@ -18,6 +18,7 @@ import {
   ArrowUp,
   FileText,
   Globe,
+  Image as ImageIcon,
   Loader2,
   Paperclip,
   Square,
@@ -50,6 +51,8 @@ export default function Composer({
   daftarModel,
   research,
   onResearchChange,
+  buatGambar = false,
+  onBuatGambarChange,
   onLampiranBerubah,
   sendWithEnter = true,
 }) {
@@ -122,11 +125,15 @@ export default function Composer({
         .filter((l) => l.jenis === 'teks')
         .map((l) => ({ name: l.nama, text: l.teks, type: l.tipe })),
       research: Boolean(research),
+      buatGambar: Boolean(buatGambar),
       // Label yang tampil di gelembung pesan pengguna.
       ringkas: lampiran.map((l) => l.nama),
     })
     setLampiran([])
     setGalat(null)
+    if (buatGambar && onBuatGambarChange) {
+      onBuatGambarChange(false)
+    }
   }
 
   const handleFiles = async (e) => {
@@ -261,12 +268,37 @@ export default function Composer({
           placeholder={
             lampiran.length
               ? 'Tanya tentang lampiran ini…'
-              : placeholder
+              : buatGambar
+                ? 'Deskripsikan gambar yang ingin dibuat…'
+                : placeholder
           }
           rows={1}
           disabled={disabled}
-          aria-label="Tulis pesan untuk GungDev"
+          aria-label={buatGambar ? 'Deskripsikan gambar yang ingin dibuat' : 'Tulis pesan untuk GungDev'}
         />
+
+        {/* Tombol mode gambar: aktifkan untuk mengubah teks menjadi gambar */}
+        {!loading && onBuatGambarChange && (
+          <button
+            type="button"
+            className={`composer__tool composer__tool--image ${buatGambar ? 'is-active' : ''}`}
+            onClick={() => onBuatGambarChange(!buatGambar)}
+            disabled={disabled}
+            aria-pressed={Boolean(buatGambar)}
+            aria-label={
+              buatGambar
+                ? 'Mode gambar aktif. Klik untuk kembali ke mode chat'
+                : 'Mode buat gambar'
+            }
+            title={
+              buatGambar
+                ? 'Mode gambar AKTIF — teks yang dikirim akan digambar oleh model'
+                : 'Buat gambar (teks akan diubah menjadi gambar)'
+            }
+          >
+            <ImageIcon size={18} />
+          </button>
+        )}
 
         {/* Tombol riset web: hanya di luar mode streaming. */}
         {!loading && onResearchChange && (

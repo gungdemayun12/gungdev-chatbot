@@ -107,6 +107,7 @@ export default function App() {
   // /capabilities, nilai cadangan di models.js yang dipakai.
   const [capabilities, setCapabilities] = useState(null)
   const [research, setResearch] = useState(false)
+  const [buatGambar, setBuatGambar] = useState(false)
 
   const daftarModel = useMemo(() => gabungKemampuan(capabilities), [capabilities])
 
@@ -194,7 +195,16 @@ export default function App() {
 
   /* ---------------- Inti: mengirim pesan ---------------- */
   const runCompletion = useCallback(
-    async ({ session, history, message, assistantMessageId = null, images = [], files = [], pakaiRiset = false }) => {
+    async ({
+      session,
+      history,
+      message,
+      assistantMessageId = null,
+      images = [],
+      files = [],
+      pakaiRiset = false,
+      buatGambar: paksaBuatGambar = false,
+    }) => {
       setLoading(true)
       setError(null)
       setStreamingText('')
@@ -253,6 +263,7 @@ export default function App() {
           images,
           files,
           research: pakaiRiset,
+          buatGambar: paksaBuatGambar,
           // Bila pengguna login, token membuat server mencatat pemakaian
           // atas nama akunnya (usage per akun) — bukan menumpuk ke satu
           // angka global yang dipakai bersama.
@@ -428,6 +439,7 @@ export default function App() {
       const images = data.images || []
       const files = data.files || []
       const pakaiRiset = Boolean(data.research)
+      const paksaBuatGambar = Boolean(data.buatGambar)
 
       if ((!text && !images.length && !files.length) || loading) return
 
@@ -463,6 +475,7 @@ export default function App() {
       if (images.length) penanda.push(`🖼️ ${images.length} gambar`)
       if (files.length) penanda.push(`📎 ${files.map((f) => f.name).join(', ')}`)
       if (pakaiRiset) penanda.push('🌐 riset lebih dalam')
+      if (paksaBuatGambar) penanda.push('🎨 buat gambar')
       const teksTampil = penanda.length
         ? `${text}\n\n_${penanda.join(' · ')}_`
         : text
@@ -476,9 +489,18 @@ export default function App() {
         images,
         files,
         pakaiRiset,
+        buatGambar: paksaBuatGambar,
       }
 
-      await runCompletion({ session, history, message: text, images, files, pakaiRiset })
+      await runCompletion({
+        session,
+        history,
+        message: text,
+        images,
+        files,
+        pakaiRiset,
+        buatGambar: paksaBuatGambar,
+      })
     },
     [input, loading, ensureSession, addMessage, runCompletion, masuk, toast],
   )
@@ -501,6 +523,7 @@ export default function App() {
       images: req.images,
       files: req.files,
       pakaiRiset: req.pakaiRiset,
+      buatGambar: req.buatGambar,
     })
   }, [sessions, runCompletion, ping, apiOnline, toast])
 
@@ -522,12 +545,25 @@ export default function App() {
 
       const history = msgs.slice(0, userIndex).map((m) => ({ role: m.role, content: m.content }))
       const message = msgs[userIndex].content
+      const adalahPesanGambar =
+        Boolean(msgs[assistantIndex]?.gambar) ||
+        Boolean(msgs[userIndex]?.content?.includes('🎨 buat gambar'))
 
       /* Buang jawaban lama (dan apa pun sesudahnya), lalu minta ulang. */
       truncateMessages(activeSession.id, userIndex + 1)
-      lastRequestRef.current = { sessionId: activeSession.id, message, history }
+      lastRequestRef.current = {
+        sessionId: activeSession.id,
+        message,
+        history,
+        buatGambar: adalahPesanGambar,
+      }
 
-      await runCompletion({ session: activeSession, history, message })
+      await runCompletion({
+        session: activeSession,
+        history,
+        message,
+        buatGambar: adalahPesanGambar,
+      })
     },
     [loading, activeSession, truncateMessages, runCompletion],
   )
@@ -793,6 +829,16 @@ export default function App() {
     [],
   )
 
+  const handleBuatGambarChange = useCallback(
+    (aktif) => {
+      setBuatGambar(aktif)
+      if (aktif) {
+        toast('Mode buat gambar aktif — deskripsi Anda akan diubah menjadi gambar.', 'info')
+      }
+    },
+    [toast],
+  )
+
   const handleFeedback = useCallback(
     (messageId, fb) => {
       if (!activeSession) return
@@ -905,8 +951,10 @@ export default function App() {
           onModelChange={(id) => updateSettings({ model: id })}
           daftarModel={daftarModel}
           research={research}
-           generationPhase={generationPhase}
+          generationPhase={generationPhase}
           onResearchChange={handleResearchChange}
+          buatGambar={buatGambar}
+          onBuatGambarChange={handleBuatGambarChange}
           onLampiranBerubah={handleLampiranBerubah}
           sendWithEnter={settings.sendWithEnter}
           autoScrollAktif={settings.autoScroll}

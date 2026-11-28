@@ -160,6 +160,7 @@ export async function streamChat({
   images = [],
   files = [],
   research = false,
+  buatGambar = false,
   token,
   signal,
   onDelta,
@@ -187,6 +188,7 @@ export async function streamChat({
       images: images.length ? images : undefined,
       files: files.length ? files : undefined,
       research: research || undefined,
+      buat_gambar: buatGambar || undefined,
     }),
     signal,
   })
@@ -293,6 +295,10 @@ export async function sendChat({
   systemPrompt,
   temperature,
   maxTokens,
+  model,
+  images = [],
+  files = [],
+  buatGambar = false,
   signal,
 }) {
   const res = await fetch(`${normalizeUrl(baseUrl)}/chat`, {
@@ -304,6 +310,10 @@ export async function sendChat({
       system_prompt: systemPrompt || undefined,
       temperature: typeof temperature === 'number' ? temperature : undefined,
       max_tokens: typeof maxTokens === 'number' ? maxTokens : undefined,
+      model: model || undefined,
+      images: images.length ? images : undefined,
+      files: files.length ? files : undefined,
+      buat_gambar: buatGambar || undefined,
     }),
     signal,
   })

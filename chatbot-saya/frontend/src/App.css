@@ -2202,6 +2202,12 @@
   background-color: var(--accent-ring);
 }
 
+/* Tombol buat gambar aktif */
+.composer__tool--image.is-active {
+  color: var(--accent);
+  background-color: var(--accent-ring);
+}
+
 .composer__tool:disabled {
   opacity: 0.5;
 }

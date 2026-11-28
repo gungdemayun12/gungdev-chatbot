@@ -86,6 +86,8 @@ export default function ChatArea({
   research,
   generationPhase = '',
   onResearchChange,
+  buatGambar = false,
+  onBuatGambarChange,
   onLampiranBerubah,
   /* --- Preferensi (dari Pengaturan) --- */
   sendWithEnter = true,
@@ -422,8 +424,10 @@ export default function ChatArea({
           onModelChange={onModelChange}
           daftarModel={daftarModel}
           research={research}
-           generationPhase={generationPhase}
+          generationPhase={generationPhase}
           onResearchChange={onResearchChange}
+          buatGambar={buatGambar}
+          onBuatGambarChange={onBuatGambarChange}
           onLampiranBerubah={onLampiranBerubah}
           sendWithEnter={sendWithEnter}
         />
