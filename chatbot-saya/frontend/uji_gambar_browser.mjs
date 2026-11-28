@@ -150,6 +150,142 @@ cek('gambar benar-benar termuat', hasilGambar.lebarAsli > 0, `lebar=${hasilGamba
 cek('ada tombol unduh', hasilGambar.adaUnduh)
 
 /* ================================================================ */
+console.log('\n=== 1b. ANIMASI "SEDANG MENGGAMBAR" ===')
+// Animasi ini harus muncul SEBELUM gambar selesai, dengan kisi titik,
+// persen, dan judul yang jelas. Tanpa ini pengguna hanya melihat layar
+// diam selama puluhan detik.
+{
+  // Jatah gambar akun hanya 3 per 24 jam, dan bagian 1 di atas sudah
+  // memakainya. Tanpa dikosongkan, permintaan di bagian ini dijawab
+  // "jatah habis" — bukan gambar — sehingga `meta.gambar_dimulai` tidak
+  // pernah dikirim dan animasinya tidak bisa diuji sama sekali.
+  await fetch(`${API}/__uji/jatah-gambar-bebaskan`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sub: SUB_A }),
+  })
+
+  // Jeda buatan di server uji supaya animasinya sempat diamati.
+  await fetch(`${API}/__uji/jeda`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ detik: 3 }),
+  })
+
+  const ctxA = await browser.newContext()
+  await ctxA.addInitScript(
+    ({ sub, token }) => {
+      localStorage.setItem(
+        'gungdev:auth',
+        JSON.stringify({ sub, name: 'Gungde Mayun', email: 'g@x.com', loginPada: Date.now() }),
+      )
+      localStorage.setItem('gungdev:token-riwayat', JSON.stringify({ token, pada: Date.now() }))
+    },
+    { sub: SUB_A, token: TOKEN_UJI },
+  )
+  const pageA = await ctxA.newPage()
+  await pageA.goto(URL_APP, { waitUntil: 'domcontentloaded' })
+  await pageA.waitForSelector('.composer__input', { timeout: 20000 })
+  await pageA.waitForTimeout(1200)
+
+  // Riwayat dari bagian sebelumnya bisa sudah berisi gambar. Mencatat
+  // jumlahnya penting: nanti kita harus menunggu gambar BARU, bukan
+  // gambar lama yang sudah ada di layar sejak halaman dimuat.
+  const gambarAwal = await pageA.locator('.hasil-gambar__img').count()
+
+  await pageA.fill('.composer__input', 'buatkan gambar kucing tidur di sofa')
+  await pageA.press('.composer__input', 'Enter')
+
+  // Tunggu animasi muncul (harus cepat, sebelum gambar selesai).
+  let adaAnimasi = false
+  try {
+    await pageA.waitForSelector('[data-uji="menggambar"]', { timeout: 8000 })
+    adaAnimasi = true
+  } catch {
+    adaAnimasi = false
+  }
+  cek('animasi "Sedang menggambar" muncul', adaAnimasi)
+
+  if (adaAnimasi) {
+    // Beri waktu animasi berjalan sebentar: kisi terisi bertahap, jadi
+    // pemeriksaan "ada titik terisi" harus dilakukan setelah beberapa
+    // ratus milidetik, bukan pada frame pertama.
+    await pageA.waitForTimeout(900)
+    const info = await pageA.evaluate(() => {
+      const el = document.querySelector('[data-uji="menggambar"]')
+      const titik = el.querySelectorAll('.menggambar__titik').length
+      const terisi = el.querySelectorAll('.menggambar__titik.is-terisi').length
+      const persen = el.querySelector('.menggambar__persen')?.textContent || ''
+      return {
+        judul: el.querySelector('.menggambar__judul')?.textContent || '',
+        titik,
+        terisi,
+        persen,
+        adaKisi: Boolean(el.querySelector('.menggambar__kisi')),
+        adaDeskripsi: Boolean(el.querySelector('.menggambar__deskripsi')),
+      }
+    })
+    cek('judul berbunyi "Sedang menggambar"', /sedang menggambar/i.test(info.judul), info.judul)
+    cek('kisi titik tampil', info.adaKisi && info.titik > 50, `${info.titik} titik`)
+    cek('sebagian titik sudah terisi', info.terisi > 0, `${info.terisi} terisi`)
+    cek('persen ditampilkan', /%$/.test(info.persen.trim()), info.persen)
+    // Persen TIDAK boleh 100% sebelum gambar tiba (itu akan menipu).
+    const angkaPersen = Number(info.persen.replace('%', ''))
+    cek('persen belum 100% saat masih proses', angkaPersen < 100, info.persen)
+    cek('deskripsi proses tampil', info.adaDeskripsi)
+
+    // Animasi "Berpikir" TIDAK boleh muncul di dalam jawaban asisten yang
+    // sedang menggambar. Diperiksa di dalam `.msg--assistant` saja, karena
+    // petunjuk di bawah composer memang memakai komponen lain.
+    const adaBerpikir = await pageA
+      .locator('.msg--assistant [data-uji="berpikir"]')
+      .count()
+    cek('animasi "Berpikir" tidak dipakai untuk gambar', adaBerpikir === 0, String(adaBerpikir))
+
+    // Indikator "Berpikir" di bawah composer juga harus diam.
+    const adaHintBerpikir = await pageA.locator('.chat__streaming-hint').count()
+    cek('petunjuk "Berpikir" di bawah composer tidak tampil', adaHintBerpikir === 0, String(adaHintBerpikir))
+
+    // Tunggu selesai: animasi hilang, gambar BARU muncul.
+    //
+    // Kenapa menunggu jumlah bertambah, bukan sekadar `waitForSelector`:
+    // riwayat dari bagian sebelumnya bisa sudah menampilkan gambar, jadi
+    // selector itu langsung cocok dan pemeriksaan di bawah berjalan
+    // sebelum prosesnya benar-benar selesai.
+    await pageA.waitForFunction(
+      (n) => document.querySelectorAll('.hasil-gambar__img').length > n,
+      gambarAwal,
+      { timeout: 60000 },
+    )
+    await pageA.waitForTimeout(500)
+    const sisa = await pageA.locator('[data-uji="menggambar"]').count()
+    cek('animasi hilang setelah gambar jadi', sisa === 0, String(sisa))
+  } else {
+    for (const n of [
+      'judul berbunyi "Sedang menggambar"',
+      'kisi titik tampil',
+      'sebagian titik sudah terisi',
+      'persen ditampilkan',
+      'persen belum 100% saat masih proses',
+      'deskripsi proses tampil',
+      'animasi "Berpikir" tidak dipakai untuk gambar',
+      'petunjuk "Berpikir" di bawah composer tidak tampil',
+      'animasi hilang setelah gambar jadi',
+    ]) {
+      cek(n, false, 'animasi tidak muncul')
+    }
+  }
+
+  // Kembalikan jeda ke nol agar bagian berikutnya tidak lambat.
+  await fetch(`${API}/__uji/jeda`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ detik: 0 }),
+  })
+  await ctxA.close()
+}
+
+/* ================================================================ */
 console.log('\n=== 2. JATAH CHAT TIDAK BERKURANG OLEH GAMBAR ===')
 const chatAkhir = await jatahChatServer()
 if (chatAwal >= 0 && chatAkhir >= 0) {

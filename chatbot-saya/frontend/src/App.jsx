@@ -70,6 +70,7 @@ export default function App() {
     setMessageContent,
     setMessageSources,
     setMessageImage,
+    setMessageImagePhase,
     setFeedback,
     segarkanJudul,
     truncateMessages,
@@ -210,6 +211,14 @@ export default function App() {
       let terpotong = false
       let sumberRiset = []
       let gambarHasil = null
+      /* Sinyal dari server bahwa ini permintaan GAMBAR dan pembuatannya
+         sedang berjalan. Dipakai untuk memilih animasi yang tepat. */
+      let sedangMenggambar = false
+      let deskripsiGambar = ''
+      /* ID pesan asisten yang sedang menampilkan animasi "Sedang
+         menggambar". Disimpan supaya tanda itu bisa DILEPAS lagi saat
+         selesai — kalau tidak, animasinya tertinggal di layar. */
+      let slotGambar = null
 
       /* Token yang hilang/kedaluwarsa TIDAK boleh membuat pesan tercatat
          sebagai tamu. Sebelum mengirim, pastikan token tersedia; bila
@@ -258,6 +267,24 @@ export default function App() {
                teks pendampingnya menyusul sebagai delta biasa. */
             if (meta?.gambar?.data_url) {
               gambarHasil = meta.gambar
+              /* Gambarnya sudah tiba: animasi "Sedang menggambar" tidak
+                 boleh tersisa di layar. */
+              if (slotGambar) {
+                setMessageImagePhase(session.id, slotGambar, null)
+                slotGambar = null
+              }
+            }
+            /* Proses gambar DIMULAI. Server mengirim ini sebelum gambar
+               dibuat, sehingga UI bisa menampilkan animasi "Sedang
+               menggambar" sejak detik pertama — bukan setelah menunggu
+               lama tanpa tanda apa pun. */
+            if (meta?.gambar_dimulai) {
+              sedangMenggambar = true
+              deskripsiGambar = String(meta.gambar_dimulai.deskripsi || '')
+              const id = ensureAssistantSlot()
+              setStreamingId(id)
+              slotGambar = id
+              setMessageImagePhase(session.id, id, deskripsiGambar)
             }
           },
           onDelta: (delta) => {
@@ -290,6 +317,14 @@ export default function App() {
             if (gambarHasil) {
               setMessageImage(session.id, id, gambarHasil)
             }
+            /* Proses gambar sudah selesai (berhasil, jatah habis, atau
+               gagal). Animasi "Sedang menggambar" harus dilepas, apa pun
+               hasilnya — layar tidak boleh terus menampilkan seolah
+               aplikasi masih bekerja. */
+            if (slotGambar) {
+              setMessageImagePhase(session.id, slotGambar, null)
+              slotGambar = null
+            }
             buffer = akhir
           },
         })
@@ -301,6 +336,12 @@ export default function App() {
         // Segarkan angka kuota setelah percakapan berhasil.
         segarkanUsage()
       } catch (err) {
+        // Jaringan putus / dibatalkan / galat lain: lepaskan juga animasi
+        // gambar, supaya tidak tertinggal sebagai "proses abadi".
+        if (slotGambar) {
+          setMessageImagePhase(session.id, slotGambar, null)
+          slotGambar = null
+        }
         const isAbort = err?.name === 'AbortError'
 
         if (isAbort) {

@@ -706,6 +706,178 @@
   color: var(--text);
 }
 
+/* --- Animasi "Sedang menggambar" -------------------------------------
+   Muncul selama gambar dibuat: judul kecil, kisi titik yang terisi
+   bertahap, dan lonceng persen di pojok kanan bawah.
+
+   Kenapa kisi titik, bukan progress bar biasa: membuat gambar terasa
+   seperti menyusun piksel, jadi titik yang terisi satu per satu lebih
+   menggambarkan prosesnya. Warnanya memakai aksen aplikasi supaya tetap
+   terasa satu keluarga dengan elemen lain.
+
+   Semua ukuran memakai satuan relatif (fr, px kecil) agar tetap rapi
+   di layar ponsel sempit maupun desktop lebar. */
+.menggambar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 340px;
+  padding: 2px 0 4px;
+}
+
+.menggambar__kepala {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.menggambar__judul {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-secondary, var(--text));
+  letter-spacing: 0.01em;
+}
+
+/* Tiga titik kecil yang berdenyut setelah judul — penanda halus bahwa
+   prosesnya masih berjalan. */
+.menggambar__elipsis {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.menggambar__elipsis i {
+  display: block;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--accent, #4a8cff);
+  opacity: 0.35;
+  animation: mg-elipsis 1.4s ease-in-out infinite;
+}
+
+.menggambar__elipsis i:nth-child(2) {
+  animation-delay: 0.18s;
+}
+
+.menggambar__elipsis i:nth-child(3) {
+  animation-delay: 0.36s;
+}
+
+@keyframes mg-elipsis {
+  0%,
+  70%,
+  100% {
+    opacity: 0.3;
+  }
+  35% {
+    opacity: 1;
+  }
+}
+
+/* Deskripsi yang sedang dikerjakan: satu baris, dipotong dengan elipsis
+   bila panjang. Tujuannya memberi konteks, bukan menampilkan prompt. */
+.menggambar__deskripsi {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--text-tertiary, rgba(255, 255, 255, 0.5));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/* Kanvas: pembungkus kisi + lonceng persen. */
+.menggambar__kanvas {
+  position: relative;
+  display: inline-block;
+  align-self: flex-start;
+}
+
+.menggambar__kisi {
+  display: grid;
+  /* Kolom diatur lewat style inline (repeat(N, 1fr)) agar jumlahnya
+     satu sumber dengan kode JS. */
+  gap: 7px;
+  padding: 4px 2px;
+}
+
+/* Titik individu. Ukurannya tetap kecil; yang berubah hanya warnanya
+   saat terisi. */
+.menggambar__titik {
+  display: block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-tertiary, rgba(255, 255, 255, 0.22));
+  opacity: 0.45;
+  transition:
+    background 0.32s ease,
+    opacity 0.32s ease,
+    transform 0.32s ease;
+}
+
+/* Titik yang sudah "terisi": berwarna aksen dan sedikit lebih besar,
+   sehingga mata melihat gelombang pengisian dari kiri atas. */
+.menggambar__titik.is-terisi {
+  background: var(--accent, #4a8cff);
+  opacity: 1;
+  transform: scale(1.12);
+}
+
+/* Lonceng persen, mengikuti contoh desain: menempel di dalam kanvas
+   bagian bawah, sedikit menonjol keluar dari kisi. */
+.menggambar__persen {
+  position: absolute;
+  right: -6px;
+  bottom: -12px;
+  min-width: 44px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--bg-elevated, rgba(24, 24, 27, 0.92));
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  color: var(--text-secondary, var(--text));
+}
+
+.menggambar__ket {
+  margin: 6px 0 0;
+  font-size: 0.75rem;
+  color: var(--text-tertiary, rgba(255, 255, 255, 0.5));
+}
+
+.menggambar__detik {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Hormati pengguna yang mematikan animasi: titik tetap terisi, tetapi
+   tanpa transisi dan tanpa denyut. */
+@media (prefers-reduced-motion: reduce) {
+  .menggambar__elipsis i {
+    animation: none;
+    opacity: 0.7;
+  }
+
+  .menggambar__titik {
+    transition: none;
+  }
+}
+
+/* Di layar sangat sempit, rapatkan kisi supaya tidak melebar keluar. */
+@media (max-width: 420px) {
+  .menggambar__kisi {
+    gap: 5px;
+  }
+
+  .menggambar__titik {
+    width: 5px;
+    height: 5px;
+  }
+}
+
 /* --- Gambar hasil pembuatan AI --- */
 .hasil-gambar {
   margin: var(--sp-3) 0 0;

@@ -348,18 +348,40 @@ async def chat_stream_uji(request: main.ChatRequest, authorization: str | None =
         return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
 
     # Jalur gambar SAMA dengan produksi (lihat chat_uji di atas).
-    hasil_gambar = await main.siapkan_gambar(request, (akun or {}).get("sub"))
-    if hasil_gambar:
+    #
+    # URUTANNYA JUGA HARUS SAMA: `meta.gambar_dimulai` dikirim LEBIH DULU
+    # sebelum gambar dibuat. Tanpa ini, uji browser tidak akan pernah
+    # melihat animasi "Sedang menggambar" padahal produksinya memakai
+    # urutan itu — uji akan lulus sambil tidak menguji apa pun.
+    if main.perlu_gambar(request):
         async def aliran_gambar():
-            if hasil_gambar["jenis"] == "berhasil":
+            jatah_gambar = await usage.periksa_jatah_gambar((akun or {}).get("sub"))
+            if not jatah_gambar["boleh"]:
+                yield sse({"delta": usage.pesan_jatah_gambar_habis(jatah_gambar)})
+                yield sse({"done": True})
+                return
+
+            yield sse({"meta": {"gambar_dimulai": {
+                "deskripsi": main.deskripsi_untuk_ui(request),
+            }}})
+
+            # Jeda tiruan: meniru layanan gambar yang butuh waktu, supaya
+            # animasi "Sedang menggambar" sempat terlihat dan bisa diuji.
+            if _JEDA_UJI["detik"] > 0:
+                await asyncio.sleep(_JEDA_UJI["detik"])
+
+            hasil_gambar = await main.siapkan_gambar(request, (akun or {}).get("sub"))
+            if hasil_gambar and hasil_gambar["jenis"] == "berhasil":
                 yield sse({"meta": {"gambar": {
                     "data_url": hasil_gambar["data_url"],
                     "deskripsi": hasil_gambar["deskripsi"],
                     "sunting": hasil_gambar["sunting"],
                 }}})
                 yield sse({"delta": hasil_gambar["pesan"]})
-            else:
+            elif hasil_gambar:
                 yield sse({"delta": hasil_gambar["pesan"]})
+            else:
+                yield sse({"delta": main.gambar_mod.pesan_tidak_tersedia()})
             yield sse({"done": True})
 
         return StreamingResponse(aliran_gambar(), media_type="text/event-stream")
@@ -419,6 +441,42 @@ async def jatah_gambar_uji(payload: dict):
     sub = str(payload.get("sub") or "")
     j = await usage.periksa_jatah_gambar(sub or None)
     return {"terpakai": j["terpakai"], "batas": j["batas"], "boleh": j["boleh"]}
+
+
+@main.app.post("/__uji/jatah-gambar-bebaskan")
+async def bebaskan_jatah_gambar_uji(payload: dict):
+    """
+    Mengosongkan jatah GAMBAR satu akun (HANYA untuk pengujian).
+
+    MENGAPA PERLU: jatah gambar akun hanya 3 per 24 jam. Satu berkas uji
+    menjalankan beberapa skenario berurutan, sehingga tanpa ini skenario
+    berikutnya sudah kehabisan jatah — tidak mendapat gambar, tidak
+    mendapat `meta.gambar_dimulai`, dan uji animasi gagal bukan karena
+    ada bug.
+
+    Sengaja memakai jalur yang sama dengan `catat_gambar` (kunci yang
+    sama), supaya yang dibersihkan benar-benar data yang dipakai
+    produksi. Endpoint ini tidak ada di produksi.
+    """
+    sub = str(payload.get("sub") or "")
+    if not sub:
+        return {"ok": False, "alasan": "sub kosong"}
+
+    try:
+        jendela = await usage._jendela_akun(sub)
+        kunci = usage._kunci_gambar(sub, jendela["mulai"])
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "alasan": str(exc)}
+
+    if usage._UPSTASH_URL and usage._UPSTASH_TOKEN:
+        try:
+            await usage._redis_perintah("DEL", kunci)
+            return {"ok": True, "kunci": kunci}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "alasan": str(exc)}
+
+    usage._memori.pop(kunci, None)
+    return {"ok": True, "kunci": kunci}
 
 
 @main.app.post("/__uji/sumber")

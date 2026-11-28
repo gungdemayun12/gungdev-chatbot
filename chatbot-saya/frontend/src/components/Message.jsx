@@ -11,6 +11,7 @@ import Markdown from './Markdown.jsx'
 import Berpikir from './Berpikir.jsx'
 import SumberRiset from './SumberRiset.jsx'
 import GambarHasil from './GambarHasil.jsx'
+import Menggambar from './Menggambar.jsx'
 import {
   Brain,
   Check,
@@ -51,6 +52,7 @@ function Message({
   message,
   isStreaming,
   fase = 'menunggu',
+  faseGambar = false,
   onCopy,
   onRegenerate,
   onFeedback,
@@ -107,6 +109,12 @@ function Message({
   // titik kosong) supaya pengguna tahu tahap yang sedang berjalan.
   const showTyping = isStreaming && !answer && !thinking
 
+  /* Permintaan gambar memakai animasi sendiri ("Sedang menggambar" dengan
+     kisi titik dan persen). Animasinya BUKAN sekadar hiasan: membuat
+     gambar butuh puluhan detik, dan pengguna perlu melihat bahwa proses
+     masih berjalan. */
+  const showMenggambar = showTyping && faseGambar
+
   return (
     <article className="msg msg--assistant" aria-label="Jawaban GungDev">
       <div className="msg__avatar" aria-hidden="true">
@@ -115,7 +123,11 @@ function Message({
       <div className="msg__body">
         <ThinkingPanel text={thinking} streaming={isStreaming} />
 
-        {showTyping && <Berpikir fase={fase} aktif={isStreaming} />}
+        {showMenggambar && (
+          <Menggambar aktif={isStreaming} deskripsi={message.deskripsiGambar} />
+        )}
+
+        {showTyping && !faseGambar && <Berpikir fase={fase} aktif={isStreaming} />}
 
         {answer && (
           <div className="msg__content">

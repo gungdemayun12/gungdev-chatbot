@@ -3353,6 +3353,39 @@ async def buat_judul(request: "JudulRequest"):
 # ---------------------------------------------------------------------
 # 13a. PEMBUATAN GAMBAR (otomatis, tanpa memilih model)
 # ---------------------------------------------------------------------
+def perlu_gambar(request: ChatRequest) -> bool:
+    """
+    Apakah permintaan ini minta gambar? (tanpa membuat gambarnya)
+
+    Dipisah dari `siapkan_gambar` karena UI perlu tahu LEBIH DULU, agar
+    animasi "Sedang menggambar" muncul sejak detik pertama. Kalau sinyal
+    baru dikirim setelah gambar selesai, pengguna terlanjur melihat
+    animasi "Berpikir" selama puluhan detik — animasi yang salah.
+
+    Murah dan tidak menyentuh jaringan.
+    """
+    teks = (request.message or "").strip()
+    niat = gambar_mod.niat_gambar(teks, ada_lampiran_gambar=bool(request.images))
+    return bool(niat["buat"] or request.buat_gambar)
+
+
+def deskripsi_untuk_ui(request: ChatRequest) -> str:
+    """
+    Deskripsi gambar yang ditampilkan kecil selama proses berjalan.
+
+    Hanya untuk memberi gambaran apa yang sedang dibuat; kegagalan di
+    sini tidak boleh mengganggu apa pun, jadi hasilnya selalu aman.
+    """
+    try:
+        niat = gambar_mod.niat_gambar(
+            (request.message or "").strip(),
+            ada_lampiran_gambar=bool(request.images),
+        )
+        return gambar_mod.deskripsi_gambar(request.message or "", sunting=niat["sunting"])[:160]
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 async def siapkan_gambar(
     request: ChatRequest,
     sub: Optional[str],
@@ -3524,19 +3557,41 @@ async def chat_stream(request: ChatRequest, authorization: Optional[str] = Heade
     sub_akun = (akun or {}).get("sub")
 
     # ---- Pembuatan gambar (otomatis, tanpa memilih model) ----
-    # Dibuat SEBELUM streaming dimulai. Gambar tidak bisa "mengalir"
-    # seperti teks, jadi hasilnya dikirim utuh lewat `meta`. Jatah
-    # gambar terpisah, sehingga jatah chat tidak berkurang.
-    hasil_gambar = await siapkan_gambar(request, sub_akun)
+    # Gambar tidak bisa "mengalir" seperti teks, jadi hasilnya dikirim
+    # utuh lewat `meta`. Jatah gambar terpisah, sehingga jatah chat tidak
+    # berkurang.
+    #
+    # PENTING — URUTANNYA: bila niatnya memang minta gambar, `meta`
+    # pembuka dikirim LEBIH DULU, baru gambarnya dibuat. Tanpa ini
+    # pengguna menunggu 30 detik tanpa tanda apa pun, lalu animasi
+    # "Sedang menggambar" baru muncul sesaat sebelum hasilnya tiba —
+    # animasi yang tidak berguna.
+    minta_gambar = perlu_gambar(request)
 
     def sse(obj: dict) -> str:
         return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
 
-    if hasil_gambar:
+    if minta_gambar:
         async def stream_gambar() -> AsyncIterator[str]:
-            """Mengirim hasil gambar sebagai satu jawaban utuh."""
+            """Mengirim penanda proses, lalu hasil gambar sebagai satu jawaban utuh."""
             try:
-                if hasil_gambar["jenis"] == "berhasil":
+                # Jatah diperiksa lebih dulu supaya pengguna tidak melihat
+                # animasi "Sedang menggambar" padahal jatahnya habis.
+                jatah_gambar = await usage.periksa_jatah_gambar(sub_akun)
+                if not jatah_gambar["boleh"]:
+                    yield sse({"delta": usage.pesan_jatah_gambar_habis(jatah_gambar)})
+                    yield sse({"done": True})
+                    return
+
+                # Beri tahu UI bahwa proses gambar DIMULAI, beserta
+                # deskripsi yang sedang dikerjakan.
+                yield sse({"meta": {"gambar_dimulai": {
+                    "deskripsi": deskripsi_untuk_ui(request),
+                }}})
+
+                hasil_gambar = await siapkan_gambar(request, sub_akun)
+
+                if hasil_gambar and hasil_gambar["jenis"] == "berhasil":
                     # Teks pendamping dikirim sebagai delta biasa agar
                     # UI memakai jalur render yang sudah ada.
                     yield sse({"meta": {"gambar": {
@@ -3545,10 +3600,14 @@ async def chat_stream(request: ChatRequest, authorization: Optional[str] = Heade
                         "sunting": hasil_gambar["sunting"],
                     }}})
                     yield sse({"delta": hasil_gambar["pesan"]})
-                else:
-                    # Jatah habis / gagal: cukup pesan jelas, tanpa
+                elif hasil_gambar and hasil_gambar["jenis"] in ("jatah_habis", "gagal"):
+                    # Jatah habis / layanan gagal: pesan jelas, tanpa
                     # memakai jatah chat.
                     yield sse({"delta": hasil_gambar["pesan"]})
+                else:
+                    # Niat berubah (semestinya tidak terjadi) — jangan
+                    # tinggalkan pengguna tanpa jawaban.
+                    yield sse({"delta": gambar_mod.pesan_tidak_tersedia()})
                 yield sse({"done": True})
             except Exception as exc:  # noqa: BLE001
                 logger.error("Streaming gambar gagal: %s", exc)

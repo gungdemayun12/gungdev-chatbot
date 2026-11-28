@@ -94,17 +94,46 @@ for t in BUKAN_PERMINTAAN:
 # =====================================================================
 print("\n=== 3. DESKRIPSI GAMBAR ===")
 # =====================================================================
+# Deskripsi kini DITERJEMAHKAN ke bahasa Inggris. Ini bukan hiasan: model
+# gambar memahami Inggris jauh lebih tepat, dan tanpa terjemahan kata
+# "sedang tidur" diabaikan sehingga kucing digambar BERDIRI.
 d = gambar.deskripsi_gambar("tolong buatkan gambar kucing oranye sedang tidur di sofa")
 cek("kata perintah dibuang", "tolong" not in d and "buatkan" not in d, d)
-cek("isi permintaan tetap ada", "kucing oranye" in d, d)
-cek("gaya bawaan ditambahkan", "high quality" in d, d)
+cek("objek diterjemahkan ke Inggris", "cat" in d, d)
+cek("warna diterjemahkan ke Inggris", "orange" in d, d)
+# INTI PERBAIKAN: pose "tidur" harus muncul eksplisit.
+cek("pose 'tidur' menjadi kata Inggris", "asleep" in d, d)
+cek("pose dipertegas berbaring", "lying down" in d, d)
+cek("mata tertutup disebut", "eyes closed" in d, d)
+cek("latar 'di sofa' ikut terbawa", "sofa" in d, d)
+cek("gaya foto bawaan ditambahkan", "photography" in d, d)
+cek("minta negatif (tanpa teks acak)", "no text" in d, d)
+cek("tidak ada kata Indonesia yang tertinggal", "sedang" not in d and " di " not in d, d)
 
 d2 = gambar.deskripsi_gambar("buatkan gambar pemandangan pantai gaya anime")
-cek("gaya pengguna tidak ditimpa", "anime" in d2 and "high quality" not in d2, d2)
+cek("gaya pengguna tidak ditimpa", "anime" in d2, d2)
+cek("gaya anime tidak diberi gaya foto", "professional photography" not in d2, d2)
 
 d3 = gambar.deskripsi_gambar("gambarkan matahari")
 cek("deskripsi tidak kosong", bool(d3.strip()), d3)
 cek("deskripsi dibatasi panjangnya", len(d3) <= 900)
+cek("deskripsi tetap deskripsi matahari", "sun" in d3, d3)
+
+# Frasa terpanjang harus menang: "anak kucing" -> "kitten", bukan
+# "child" + "cat".
+d4 = gambar.deskripsi_gambar("buatkan gambar anak kucing")
+cek("frasa terpanjang menang (anak kucing)", "kitten" in d4, d4)
+
+# Kata yang tidak dikenal TIDAK boleh hilang begitu saja.
+d5 = gambar.deskripsi_gambar("buatkan gambar zebra ungu berjalan")
+cek("kata tak dikenal tetap dibawa", "zebra" in d5, d5)
+cek("warna 'ungu' diterjemahkan", "purple" in d5, d5)
+cek("pose 'berjalan' diterjemahkan", "walking" in d5 or "jalan" in d5, d5)
+
+# Menyunting gambar: kata "edit" harus menonjol, gaya foto tidak perlu.
+d6 = gambar.deskripsi_gambar("ubah gambar ini jadi hitam putih", sunting=True)
+cek("suntingan menyebut edit", "edit" in d6.lower(), d6)
+cek("suntingan menyebut hitam putih", "black and white" in d6, d6)
 
 
 # =====================================================================
@@ -204,6 +233,46 @@ with Image.open(BytesIO(_png_asli)) as _a, Image.open(BytesIO(_potong)) as _b:
 cek("hasil pemangkasan masih gambar sah", _potong[:3] == b"\xff\xd8\xff" or _potong[:8] == b"\x89PNG\r\n\x1a\n")
 cek("data rusak dikembalikan apa adanya", gambar._pangkas_bawah(b"bukan gambar") == b"bukan gambar")
 cek("gambar kosong tidak melempar exception", gambar._pangkas_bawah(b"") == b"")
+
+# --- Watermark milik aplikasi ---
+# Tanda air penyedia dibuang (pangkas), lalu diganti tanda air "gungdev".
+_wm = gambar._gambar_watermark(_png_asli)
+cek("watermark mengubah gambar", _wm != _png_asli)
+with Image.open(BytesIO(_wm)) as _w:
+    cek("watermark tidak mengubah ukuran", _w.size == (200, 200), str(_w.size))
+    # Pojok kanan bawah harus berbeda dari gambar polos: di situlah teks
+    # dan titik merek digambar.
+    _polos = Image.open(BytesIO(_png_asli)).convert("RGB")
+    _kanan_bawah = _w.convert("RGB").crop((130, 160, 200, 200))
+    _kanan_bawah_polos = _polos.crop((130, 160, 200, 200))
+    cek(
+        "ada jejak watermark di pojok kanan bawah",
+        list(_kanan_bawah.getdata()) != list(_kanan_bawah_polos.getdata()),
+    )
+    # Pojok kiri atas harus TETAP: watermark tidak boleh menutupi gambar.
+    #
+    # Catatan: JPEG bersifat "lossy", jadi menyimpan ulang mengubah
+    # SETIAP piksel sedikit. Karena itu yang diuji bukan "identik", tetapi
+    # "perubahannya kecil" — jauh lebih kecil daripada jejak teks di
+    # pojok kanan bawah.
+    _kiri_atas = list(_w.convert("RGB").crop((0, 0, 60, 40)).getdata())
+    _kiri_atas_polos = list(_polos.crop((0, 0, 60, 40)).getdata())
+    _selisih_kiri = sum(
+        abs(a[0] - b[0]) + abs(a[1] - b[1]) + abs(a[2] - b[2])
+        for a, b in zip(_kiri_atas, _kiri_atas_polos)
+    )
+    cek(
+        "watermark tidak menutupi bagian lain gambar",
+        _selisih_kiri < 60 * 40 * 12,
+        f"selisih={_selisih_kiri}",
+    )
+cek("watermark data rusak aman", gambar._gambar_watermark(b"bukan gambar") == b"bukan gambar")
+cek("watermark kosong aman", gambar._gambar_watermark(b"") == b"")
+cek("teks watermark = nama aplikasi", gambar.WATERMARK_TEKS == "gungdev", gambar.WATERMARK_TEKS)
+cek(
+    "teks watermark bukan nama penyedia",
+    "pollinations" not in gambar.WATERMARK_TEKS.lower(),
+)
 
 # =====================================================================
 print("\n=== 6. TAMU TIDAK MENDAPAT GAMBAR ===")

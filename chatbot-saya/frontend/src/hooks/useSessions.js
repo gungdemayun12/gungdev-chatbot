@@ -664,6 +664,45 @@ export function useSessions(settings, akunSub = null, apiUrl = '') {
   )
 
   /**
+   * Menandai bahwa pesan asisten ini sedang MENGGAMBAR.
+   *
+   * Dipakai agar UI bisa menampilkan animasi "Sedang menggambar" (kisi
+   * titik + persen) alih-alih animasi "Berpikir". Server mengirim
+   * sinyalnya SEBELUM gambar dibuat, jadi animasinya sudah benar sejak
+   * detik pertama.
+   *
+   * `deskripsi` hanya dipakai sebagai keterangan kecil selama proses;
+   * nilainya tidak disimpan ke riwayat.
+   *
+   * PENTING — tanda ini HARUS bisa dilepas lagi. Beri `deskripsi` null
+   * (atau `selesai: true`) setelah proses gambar berakhir:
+   *
+   *     setMessageImagePhase(sessionId, messageId, null)
+   *
+   * Kalau lupa dilepas, animasi "Sedang menggambar" akan tertinggal di
+   * layar meskipun gambarnya sudah tampil.
+   */
+  const setMessageImagePhase = useCallback(
+    (sessionId, messageId, deskripsi) => {
+      // `null`/`undefined` berarti: proses gambar sudah selesai.
+      const sedang = deskripsi !== null && deskripsi !== undefined
+      updateSession(sessionId, (s) => ({
+        ...s,
+        messages: s.messages.map((m) =>
+          m.id === messageId
+            ? {
+                ...m,
+                membuatGambar: sedang,
+                deskripsiGambar: sedang ? String(deskripsi || '') : '',
+              }
+            : m,
+        ),
+      }))
+    },
+    [updateSession],
+  )
+
+  /**
    * Menyimpan gambar hasil pembuatan AI pada satu pesan asisten.
    *
    * Dipakai agar gambar tetap terlihat setelah halaman dimuat ulang
@@ -811,6 +850,7 @@ export function useSessions(settings, akunSub = null, apiUrl = '') {
     setMessageContent,
     setMessageSources,
     setMessageImage,
+    setMessageImagePhase,
     setFeedback,
     segarkanJudul,
     truncateMessages,

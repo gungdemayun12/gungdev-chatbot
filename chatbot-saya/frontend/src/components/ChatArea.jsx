@@ -130,6 +130,12 @@ export default function ChatArea({
     : ''
   const perluIndikatorMenunggu = !isiBalonTerakhir.trim()
 
+  /* Apakah permintaan yang sedang berjalan adalah PEMBUATAN GAMBAR?
+     Bila ya, animasi "Sedang menggambar" di dalam pesan sudah mewakili
+     prosesnya, jadi indikator "Berpikir" di tempat lain harus DIAM —
+     dua animasi berbeda untuk satu proses hanya membingungkan. */
+  const sedangMenggambar = messages.some((m) => m.membuatGambar)
+
   /* Deteksi posisi scroll: tampilkan tombol "ke bawah" jika pengguna
      menggulir jauh dari dasar, dan matikan auto-scroll saat itu. */
   const handleScroll = useCallback(() => {
@@ -279,7 +285,7 @@ export default function ChatArea({
               {/* Kasus pertama kali memakai aplikasi: pesan pengguna belum
                   ikut tampil di daftar, jadi tanpa ini layar terlihat
                   kosong total selama AI bekerja. */}
-              {loading && (
+              {loading && !sedangMenggambar && (
                 <div className="chat__menunggu chat__menunggu--tengah" data-uji="berpikir-wrapper">
                   <div className="msg__avatar" aria-hidden="true">
                     <LogoGungDev ukuran={26} />
@@ -310,6 +316,10 @@ export default function ChatArea({
                     key={m.id}
                     message={{ ...m, content }}
                     isStreaming={isStreamingMsg}
+                    /* Permintaan gambar memakai animasi sendiri. Server
+                       menandai pesan ini lewat `membuatGambar` SEBELUM
+                       gambarnya dibuat. */
+                    faseGambar={Boolean(m.membuatGambar)}
                     fase={
                       generationPhase === 'research'
                         ? 'research'
@@ -339,7 +349,7 @@ export default function ChatArea({
                   animasi hilang sama sekali. Yang benar: cari tahu apakah
                   ada balon asisten terakhir yang masih kosong. Bila tidak
                   ada (server belum mengirim apa pun), tampilkan animasi. */}
-              {loading && perluIndikatorMenunggu && (
+              {loading && perluIndikatorMenunggu && !sedangMenggambar && (
                 <div className="chat__menunggu" data-uji="berpikir-wrapper">
                   <div className="msg__avatar" aria-hidden="true">
                     <LogoGungDev ukuran={26} />
@@ -425,8 +435,11 @@ export default function ChatArea({
       </div>
 
       {/* Indikator tahap berjalan: selalu terlihat selama AI bekerja,
-          termasuk di mobile, sehingga pengguna tahu aplikasi masih hidup. */}
-      {loading && (
+          termasuk di mobile, sehingga pengguna tahu aplikasi masih hidup.
+
+          TIDAK dipakai saat membuat gambar: animasi "Sedang menggambar"
+          di dalam pesan sudah mewakili prosesnya. */}
+      {loading && !sedangMenggambar && (
         <div className="chat__streaming-hint">
           <Berpikir
             ringkas
