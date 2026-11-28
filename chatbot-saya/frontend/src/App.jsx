@@ -69,6 +69,7 @@ export default function App() {
     addMessage,
     setMessageContent,
     setMessageSources,
+    setMessageImage,
     setFeedback,
     segarkanJudul,
     truncateMessages,
@@ -208,6 +209,7 @@ export default function App() {
       let catatanModel = null
       let terpotong = false
       let sumberRiset = []
+      let gambarHasil = null
 
       /* Token yang hilang/kedaluwarsa TIDAK boleh membuat pesan tercatat
          sebagai tamu. Sebelum mengirim, pastikan token tersedia; bila
@@ -251,6 +253,12 @@ export default function App() {
             if (Array.isArray(meta?.sumber) && meta.sumber.length) {
               sumberRiset = meta.sumber
             }
+            /* Gambar hasil pembuatan AI. Server mengirimnya utuh lewat
+               `meta` (gambar tidak bisa mengalir seperti teks), lalu
+               teks pendampingnya menyusul sebagai delta biasa. */
+            if (meta?.gambar?.data_url) {
+              gambarHasil = meta.gambar
+            }
           },
           onDelta: (delta) => {
             setGenerationPhase('writing')
@@ -276,6 +284,11 @@ export default function App() {
             setMessageContent(session.id, id, akhir)
             if (sumberRiset.length) {
               setMessageSources(session.id, id, sumberRiset)
+            }
+            /* Gambar hasil pembuatan AI disimpan bersama pesannya, agar
+               tetap terlihat setelah halaman dimuat ulang. */
+            if (gambarHasil) {
+              setMessageImage(session.id, id, gambarHasil)
             }
             buffer = akhir
           },
@@ -346,6 +359,7 @@ export default function App() {
       addMessage,
       setMessageContent,
       setMessageSources,
+      setMessageImage,
       truncateMessages,
       segarkanJudul,
       activeSession,

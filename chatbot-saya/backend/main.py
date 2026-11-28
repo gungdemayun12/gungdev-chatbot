@@ -59,6 +59,7 @@ import identitas            # verifikasi ID token Google di server
 import usage                # pencatat & penyedia data kuota (usage)
 import riset                # riset web nyata untuk SEMUA model
 import judul as judul_mod   # judul riwayat dari TOPIK percakapan
+import gambar as gambar_mod # pembuatan gambar (otomatis, gratis)
 
 # python-dotenv hanya dipakai saat pengembangan lokal.
 # Di Vercel/Render variabel masuk lewat environment, bukan file .env.
@@ -725,6 +726,17 @@ class ChatRequest(BaseModel):
         description="True = paksa riset web lebih dalam sebelum menjawab",
     )
 
+    # Paksa pembuatan gambar TANPA permintaan teks.
+    #
+    # Normalnya server MENDETEKSI SENDIRI permintaan gambar dari isi
+    # pesan ("buatkan gambar kucing"), jadi pengguna tidak perlu memilih
+    # mode apa pun dan field ini tidak perlu dikirim. Flag ini hanya
+    # untuk klien yang ingin memaksa (mis. tombol "buat gambar").
+    buat_gambar: bool = Field(
+        False,
+        description="True = paksa membuat gambar dari pesan ini",
+    )
+
 
 class ChatResponse(BaseModel):
     """
@@ -736,6 +748,10 @@ class ChatResponse(BaseModel):
     """
     reply: str
     sumber: Optional[List[dict]] = None
+    # Gambar hasil pembuatan AI. Hanya muncul bila pengguna memang
+    # meminta gambar. Field TAMBAHAN: klien lama yang hanya membaca
+    # `reply` tetap berjalan tanpa perubahan.
+    gambar: Optional[dict] = None
 
 
 class PesanJudul(BaseModel):
@@ -3246,12 +3262,20 @@ async def capabilities():
         "browser_default": MODEL_BROWSER_DEFAULT,
         # Kemampuan tingkat fitur (bukan per model).
         "fitur": {
+            # CATATAN: `gambar` = AI bisa MEMBACA gambar yang diunggah
+            # (butuh model vision). `buat_gambar` = AI bisa MEMBUAT
+            # gambar. Dua hal berbeda; jangan tertukar.
             "gambar": True,
+            "buat_gambar": True,
             "file": True,
             "riset": True,
             "maks_gambar": lampiran.MAKS_JUMLAH_GAMBAR,
             "maks_file": lampiran.MAKS_JUMLAH_FILE,
             "maks_file_mb": lampiran.MAKS_FILE_BYTES // (1024 * 1024),
+            # Jatah gambar TERPISAH dari jatah chat: membuat gambar
+            # tidak pernah mengurangi pesan obrolan.
+            "jatah_gambar": usage.JATAH_GAMBAR_AKUN,
+            "jatah_gambar_tamu": usage.JATAH_GAMBAR_TAMU,
         },
     }
 
@@ -3326,6 +3350,82 @@ async def buat_judul(request: "JudulRequest"):
 # ---------------------------------------------------------------------
 # 13. ENDPOINT POST /chat  (non-streaming, kontrak lama)
 # ---------------------------------------------------------------------
+# ---------------------------------------------------------------------
+# 13a. PEMBUATAN GAMBAR (otomatis, tanpa memilih model)
+# ---------------------------------------------------------------------
+async def siapkan_gambar(
+    request: ChatRequest,
+    sub: Optional[str],
+) -> Optional[dict]:
+    """
+    Menentukan apakah permintaan ini perlu GAMBAR, lalu membuatnya.
+
+    Mengembalikan None bila ini percakapan biasa (mayoritas kasus), atau
+    dict hasil gambar bila gambar berhasil dibuat.
+
+    ALUR (sengaja berlapis agar aman):
+      1. Deteksi niat. Server membaca pesan pengguna sendiri — pengguna
+         TIDAK perlu memilih model atau mode. Ini pola yang sama dengan
+         riset otomatis.
+      2. Periksa jatah GAMBAR (terpisah dari jatah chat).
+      3. Buat gambar di server.
+      4. Catat jatah HANYA bila gambar benar-benar berhasil.
+
+    PENTING: fungsi ini TIDAK PERNAH melempar exception. Bila gambar
+    gagal, chat harus tetap berjalan — pengguna tidak boleh kehilangan
+    jawaban teks hanya karena layanan gambar sedang ramai.
+
+    Bila jatah gambar habis, pengguna DIBERI TAHU dengan jelas tetapi
+    TIDAK dipaksa berhenti: ia tetap boleh mengobrol. Itu sebabnya pesan
+    jatah gambar habis dikembalikan sebagai bagian hasil, bukan error.
+    """
+    teks = (request.message or "").strip()
+    ada_lampiran = bool(request.images)
+
+    niat = gambar_mod.niat_gambar(teks, ada_lampiran_gambar=ada_lampiran)
+    if not (niat["buat"] or request.buat_gambar):
+        return None
+
+    # --- Jatah gambar (BERBEDA dari jatah chat) ---
+    jatah_gambar = await usage.periksa_jatah_gambar(sub)
+    if not jatah_gambar["boleh"]:
+        # Bukan error HTTP: obrolan tetap boleh lanjut. UI menampilkan
+        # pesan ini sebagai jawaban biasa.
+        return {
+            "jenis": "jatah_habis",
+            "pesan": usage.pesan_jatah_gambar_habis(jatah_gambar),
+            "jatah": jatah_gambar,
+        }
+
+    deskripsi = gambar_mod.deskripsi_gambar(teks, sunting=niat["sunting"])
+    hasil = await gambar_mod.buat_gambar(deskripsi)
+
+    if not hasil.get("ok"):
+        # Gagal: jangan catat jatah (bukan salah pengguna) dan jangan
+        # gagalkan chat — pemanggil akan menjawab dengan teks biasa.
+        logger.warning(
+            "Pembuatan gambar gagal (%s): %s",
+            niat["alasan"],
+            hasil.get("galat", ""),
+        )
+        return {
+            "jenis": "gagal",
+            "pesan": hasil.get("pesan") or gambar_mod.pesan_tidak_tersedia(),
+            "deskripsi": deskripsi,
+        }
+
+    # Berhasil -> baru dicatat sebagai pemakaian jatah gambar.
+    await usage.catat_gambar(sub)
+
+    return {
+        "jenis": "berhasil",
+        "data_url": hasil["data_url"],
+        "deskripsi": hasil.get("deskripsi") or deskripsi,
+        "pesan": gambar_mod.pesan_berhasil(hasil.get("deskripsi") or deskripsi),
+        "sunting": bool(niat["sunting"]),
+    }
+
+
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest, authorization: Optional[str] = Header(None)):
     """
@@ -3345,6 +3445,28 @@ async def chat(request: ChatRequest, authorization: Optional[str] = Header(None)
     # bisa ditegakkan. Bila jatah habis, permintaan ditolak dengan pesan
     # yang jelas — kuota penyedia tidak ikut terpakai.
     akun = await identitas_pemanggil(authorization)
+
+    # ---- Pembuatan gambar (otomatis, tanpa memilih model) ----
+    # Dikerjakan LEBIH DULU: bila pengguna meminta gambar, jawabannya
+    # adalah gambar, bukan teks panjang. Gambar punya jatah SENDIRI,
+    # jadi jatah chat tidak berkurang sama sekali.
+    hasil_gambar = await siapkan_gambar(request, (akun or {}).get("sub"))
+    if hasil_gambar and hasil_gambar["jenis"] == "berhasil":
+        return {
+            "reply": hasil_gambar["pesan"],
+            "gambar": {
+                "data_url": hasil_gambar["data_url"],
+                "deskripsi": hasil_gambar["deskripsi"],
+                "sunting": hasil_gambar["sunting"],
+            },
+        }
+
+    # Jatah gambar habis / layanan gambar gagal: sampaikan dengan jelas.
+    # Sengaja TIDAK memakai jatah chat — ini bukan percakapan, dan
+    # menagihnya akan terasa tidak adil bagi pengguna.
+    if hasil_gambar and hasil_gambar["jenis"] in ("jatah_habis", "gagal"):
+        return {"reply": hasil_gambar["pesan"]}
+
     jatah = await usage.periksa_jatah((akun or {}).get("sub"))
     if not jatah["boleh"]:
         raise HTTPException(status_code=429, detail=pesan_jatah_habis(jatah))
@@ -3400,6 +3522,47 @@ async def chat_stream(request: ChatRequest, authorization: Optional[str] = Heade
     # agar hasil cache Google dipakai bersama oleh pencatatan usage.
     akun = await identitas_pemanggil(authorization)
     sub_akun = (akun or {}).get("sub")
+
+    # ---- Pembuatan gambar (otomatis, tanpa memilih model) ----
+    # Dibuat SEBELUM streaming dimulai. Gambar tidak bisa "mengalir"
+    # seperti teks, jadi hasilnya dikirim utuh lewat `meta`. Jatah
+    # gambar terpisah, sehingga jatah chat tidak berkurang.
+    hasil_gambar = await siapkan_gambar(request, sub_akun)
+
+    def sse(obj: dict) -> str:
+        return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
+
+    if hasil_gambar:
+        async def stream_gambar() -> AsyncIterator[str]:
+            """Mengirim hasil gambar sebagai satu jawaban utuh."""
+            try:
+                if hasil_gambar["jenis"] == "berhasil":
+                    # Teks pendamping dikirim sebagai delta biasa agar
+                    # UI memakai jalur render yang sudah ada.
+                    yield sse({"meta": {"gambar": {
+                        "data_url": hasil_gambar["data_url"],
+                        "deskripsi": hasil_gambar["deskripsi"],
+                        "sunting": hasil_gambar["sunting"],
+                    }}})
+                    yield sse({"delta": hasil_gambar["pesan"]})
+                else:
+                    # Jatah habis / gagal: cukup pesan jelas, tanpa
+                    # memakai jatah chat.
+                    yield sse({"delta": hasil_gambar["pesan"]})
+                yield sse({"done": True})
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Streaming gambar gagal: %s", exc)
+                yield sse({"error": gambar_mod.pesan_tidak_tersedia()})
+
+        return StreamingResponse(
+            stream_gambar(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-transform",
+                "X-Accel-Buffering": "no",
+                "Content-Encoding": "identity",
+            },
+        )
 
     # Jatah diperiksa SEBELUM streaming dimulai. Bila diperiksa di dalam
     # generator, status HTTP sudah terkirim sebagai 200 dan pengguna

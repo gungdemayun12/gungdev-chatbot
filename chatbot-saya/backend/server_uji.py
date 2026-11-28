@@ -25,6 +25,29 @@ from datetime import datetime, timezone
 import httpx
 
 # ---------------------------------------------------------------------
+# Gambar tiruan untuk pengujian (JPEG 1x1 piksel yang sah).
+# Dipakai agar jalur pembuatan gambar bisa diuji tanpa internet.
+# ---------------------------------------------------------------------
+JPEG_UJI = (
+    b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
+    b"\xff\xdb\x00C\x00\x08\x06\x06\x07\x06\x05\x08\x07\x07\x07\t\t\x08\n"
+    b"\x0c\x14\r\x0c\x0b\x0b\x0c\x19\x12\x13\x0f\x14\x1d\x1a\x1f\x1e\x1d"
+    b"\x1a\x1c\x1c $.' \",#\x1c\x1c(7),01444\x1f'9=82<.342\xff\xc0\x00"
+    b"\x0b\x08\x00\x01\x00\x01\x01\x01\x11\x00\xff\xc4\x00\x1f\x00\x00"
+    b"\x01\x05\x01\x01\x01\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00"
+    b"\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\xff\xc4\x00\xb5\x10\x00"
+    b"\x02\x01\x03\x03\x02\x04\x03\x05\x05\x04\x04\x00\x00\x01}\x01\x02"
+    b"\x03\x00\x04\x11\x05\x12!1A\x06\x13Qa\x07\"q\x142\x81\x91\xa1\x08"
+    b"\x23B\xb1\xc1\x15R\xd1\xf0$3br\x82\t\n\x16\x17\x18\x19\x1a%&'()*456"
+    b"789:CDEFGHIJSTUVWXYZcdefghijstuvwxyz\x83\x84\x85\x86\x87\x88\x89\x8a"
+    b"\x92\x93\x94\x95\x96\x97\x98\x99\x9a\xa2\xa3\xa4\xa5\xa6\xa7\xa8\xa9"
+    b"\xaa\xb2\xb3\xb4\xb5\xb6\xb7\xb8\xb9\xba\xc2\xc3\xc4\xc5\xc6\xc7\xc8"
+    b"\xc9\xca\xd2\xd3\xd4\xd5\xd6\xd7\xd8\xd9\xda\xe1\xe2\xe3\xe4\xe5\xe6"
+    b"\xe7\xe8\xe9\xea\xf1\xf2\xf3\xf4\xf5\xf6\xf7\xf8\xf9\xfa\xff\xda\x00"
+    b"\x08\x01\x01\x00\x00?\x00\xd2\xcf \xff\xd9"
+)
+
+# ---------------------------------------------------------------------
 # Redis mini
 # ---------------------------------------------------------------------
 DB = {}
@@ -215,6 +238,15 @@ class ClientTiruan:
             kelas.text = "<html><body></body></html>"
             kelas.headers = {}
             return kelas
+        # Layanan gambar (uji): kembalikan JPEG kecil yang sah, sehingga
+        # jalur gambar bisa diuji di browser tanpa mengambil gambar
+        # sungguhan. Isinya bukan gambar bermakna — hanya JPEG 1x1.
+        if "image.pollinations.ai" in url or "/prompt" in url:
+            kelas = type("R", (), {})()
+            kelas.status_code = 200
+            kelas.content = JPEG_UJI
+            kelas.headers = {"content-type": "image/jpeg"}
+            return kelas
         return ResTiruan(404, {})
 
     def build_request(self, *a, **k):
@@ -276,8 +308,28 @@ async def chat_uji(request: main.ChatRequest, authorization: str | None = main.H
     (periksa_jatah + pesan_jatah_habis). Sempat terjadi: stub tidak
     memeriksa jatah sehingga uji jatah "lulus" padahal endpoint
     produksinya bisa saja salah. Yang diuji harus jalur yang sama.
+
+    Hal yang sama berlaku untuk PEMBUATAN GAMBAR: stub memanggil
+    `main.siapkan_gambar` yang SAMA dengan produksi (jatah gambar
+    terpisah, deteksi niat, dsb.). Tanpa ini, uji browser tidak
+    menguji apa pun yang berarti untuk fitur gambar.
     """
     akun = await main.identitas_pemanggil(authorization)
+
+    hasil_gambar = await main.siapkan_gambar(request, (akun or {}).get("sub"))
+    if hasil_gambar and hasil_gambar["jenis"] == "berhasil":
+        return {
+            "reply": hasil_gambar["pesan"],
+            "gambar": {
+                "data_url": hasil_gambar["data_url"],
+                "deskripsi": hasil_gambar["deskripsi"],
+                "sunting": hasil_gambar["sunting"],
+            },
+        }
+    if hasil_gambar and hasil_gambar["jenis"] in ("jatah_habis", "gagal"):
+        # Sama seperti produksi: pesan jelas, TANPA memakai jatah chat.
+        return {"reply": hasil_gambar["pesan"]}
+
     jatah = await usage.periksa_jatah((akun or {}).get("sub"))
     if not jatah["boleh"]:
         raise main.HTTPException(status_code=429, detail=main.pesan_jatah_habis(jatah))
@@ -292,13 +344,30 @@ async def chat_uji(request: main.ChatRequest, authorization: str | None = main.H
 async def chat_stream_uji(request: main.ChatRequest, authorization: str | None = main.Header(None)):
     akun = await main.identitas_pemanggil(authorization)
 
+    def sse(obj):
+        return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
+
+    # Jalur gambar SAMA dengan produksi (lihat chat_uji di atas).
+    hasil_gambar = await main.siapkan_gambar(request, (akun or {}).get("sub"))
+    if hasil_gambar:
+        async def aliran_gambar():
+            if hasil_gambar["jenis"] == "berhasil":
+                yield sse({"meta": {"gambar": {
+                    "data_url": hasil_gambar["data_url"],
+                    "deskripsi": hasil_gambar["deskripsi"],
+                    "sunting": hasil_gambar["sunting"],
+                }}})
+                yield sse({"delta": hasil_gambar["pesan"]})
+            else:
+                yield sse({"delta": hasil_gambar["pesan"]})
+            yield sse({"done": True})
+
+        return StreamingResponse(aliran_gambar(), media_type="text/event-stream")
+
     # Jatah diperiksa SEBELUM stream dimulai, sama seperti produksi.
     jatah = await usage.periksa_jatah((akun or {}).get("sub"))
     if not jatah["boleh"]:
         raise main.HTTPException(status_code=429, detail=main.pesan_jatah_habis(jatah))
-
-    def sse(obj):
-        return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
 
     async def aliran():
         teks = f"Jawaban untuk: {request.message[:40]}"
@@ -337,6 +406,19 @@ async def chat_stream_uji(request: main.ChatRequest, authorization: str | None =
 # Bawaannya kosong, jadi semua uji lain tidak terpengaruh.
 # ---------------------------------------------------------------------
 _SUMBER_UJI = {"sumber": [], "bentuk": "ringkas"}
+
+
+@main.app.post("/__uji/jatah-gambar")
+async def jatah_gambar_uji(payload: dict):
+    """
+    Melaporkan pemakaian jatah GAMBAR satu akun (untuk pengujian).
+
+    Hanya ada di server uji. Dipakai uji browser untuk membuktikan bahwa
+    jatah gambar benar-benar bertambah sementara jatah chat tetap.
+    """
+    sub = str(payload.get("sub") or "")
+    j = await usage.periksa_jatah_gambar(sub or None)
+    return {"terpakai": j["terpakai"], "batas": j["batas"], "boleh": j["boleh"]}
 
 
 @main.app.post("/__uji/sumber")

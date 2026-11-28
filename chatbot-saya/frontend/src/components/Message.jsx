@@ -10,6 +10,7 @@ import { memo, useState } from 'react'
 import Markdown from './Markdown.jsx'
 import Berpikir from './Berpikir.jsx'
 import SumberRiset from './SumberRiset.jsx'
+import GambarHasil from './GambarHasil.jsx'
 import {
   Brain,
   Check,
@@ -122,6 +123,12 @@ function Message({
             {isStreaming && <span className="caret" aria-hidden="true" />}
           </div>
         )}
+
+        {/* Gambar hasil pembuatan AI. Ditaruh SETELAH teks pendamping
+            supaya pengguna membaca kalimatnya dulu, lalu melihat
+            gambarnya. Muncul juga saat streaming karena gambarnya
+            sudah utuh sejak dikirim server. */}
+        {message.gambar && <GambarHasil gambar={message.gambar} />}
 
         {/* Kartu sumber riset: nomornya sama dengan penanda [1], [2] di
             jawaban. Ditampilkan setelah jawaban selesai mengalir. */}

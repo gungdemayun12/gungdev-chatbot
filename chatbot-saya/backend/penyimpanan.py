@@ -76,6 +76,11 @@ UMUR_DATA = 365 * 24 * 3600
 # Batas ukuran agar body permintaan tidak menembus batas Vercel (4,5 MB).
 MAKS_PESAN_SESI = 900_000  # ~900 KB per sesi (cukup untuk ratusan pesan)
 
+# Batas ukuran SATU gambar (data URL base64) yang disimpan dalam riwayat.
+# 400 KB base64 ≈ 300 KB berkas gambar — cukup untuk gambar 1024x1024,
+# dan masih menyisakan ruang untuk pesan-pesan lain dalam satu sesi.
+MAKS_GAMBAR_PESAN = 400_000
+
 # Pola `sub` Google: deretan angka panjang. Selain itu, kunci rahasia
 # perangkat (untuk pengguna login tanpa backend lama) berbentuk hex.
 _POLA_SUB = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
@@ -276,17 +281,38 @@ def bersihkan_sesi(sesi: Any) -> Optional[dict]:
         isi = m.get("content")
         if not isinstance(isi, str):
             isi = "" if isi is None else str(isi)
-        pesan.append(
-            {
-                "id": str(m.get("id") or ""),
-                "role": peran,
-                "content": isi[:20000],
-                "createdAt": int(m.get("createdAt") or 0),
-                "feedback": (
-                    m.get("feedback") if m.get("feedback") in ("like", "dislike") else None
-                ),
-            }
-        )
+
+        # Gambar hasil pembuatan AI ikut disimpan agar tetap terlihat
+        # setelah halaman dimuat ulang / dibuka di perangkat lain.
+        #
+        # Batas ukuran WAJIB ada: satu sesi dibatasi MAKS_PESAN_SESI
+        # (900 KB), sedangkan data URL base64 mudah membengkak. Gambar
+        # yang lebih besar dari batas ini dibuang diam-diam — lebih baik
+        # kehilangan gambar daripada gagal menyimpan SELURUH riwayat.
+        gambar = None
+        g = m.get("gambar")
+        if isinstance(g, dict):
+            data_url = g.get("data_url")
+            if isinstance(data_url, str) and data_url.startswith("data:image/"):
+                if len(data_url) <= MAKS_GAMBAR_PESAN:
+                    gambar = {
+                        "data_url": data_url,
+                        "deskripsi": str(g.get("deskripsi") or "")[:600],
+                        "sunting": bool(g.get("sunting")),
+                    }
+
+        satu_pesan = {
+            "id": str(m.get("id") or ""),
+            "role": peran,
+            "content": isi[:20000],
+            "createdAt": int(m.get("createdAt") or 0),
+            "feedback": (
+                m.get("feedback") if m.get("feedback") in ("like", "dislike") else None
+            ),
+        }
+        if gambar:
+            satu_pesan["gambar"] = gambar
+        pesan.append(satu_pesan)
 
     try:
         dibuat = int(sesi.get("createdAt") or 0)

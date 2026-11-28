@@ -277,6 +277,23 @@ JENDELA_JATAH_DETIK = int(os.getenv("JENDELA_JATAH_JAM", "24") or 24) * 3600
 # penghitung per-IP); angka ini hanya untuk ditampilkan di panel.
 JATAH_TAMU = {"rpd": 3}
 
+# ---------------------------------------------------------------------
+# JATAH GAMBAR — SENGAJA TERPISAH TOTAL DARI JATAH CHAT
+# ---------------------------------------------------------------------
+# Permintaan pemilik situs: "jatah gambar dipisah dengan jatah chat
+# harian agar tidak boros di gambar saja".
+#
+# Karena itu jatah gambar punya KUNCI SENDIRI di Redis, bukan menumpang
+# kunci jatah chat. Akibatnya yang pasti dan mudah dipahami pengguna:
+#   - Membuat 3 gambar TIDAK mengurangi 52 pesan chat.
+#   - Jatah gambar habis TIDAK menghalangi obrolan.
+# Membuat gambar sendiri lebih mahal daripada satu pesan teks, jadi
+# angkanya jauh lebih kecil — dan itu wajar, bukan hukuman.
+JATAH_GAMBAR_AKUN = int(os.getenv("JATAH_GAMBAR_PER_AKUN", "3") or 3)
+# Tamu tidak mendapat gambar: mencegah penyalahgunaan layanan gratis
+# oleh pengunjung anonim. Pengguna yang login tetap dapat jatahnya.
+JATAH_GAMBAR_TAMU = int(os.getenv("JATAH_GAMBAR_TAMU", "0") or 0)
+
 # Toleransi token tak terduga. Bila pencatat token gagal total, server
 # tetap perlu menghitung sesuatu yang wajar agar angka di panel tidak
 # tiba-tiba nol. Nilai ini hanya memengaruhi pencatatan, bukan pembatas.
@@ -918,6 +935,178 @@ async def periksa_jatah(sub: Optional[str]) -> Dict[str, Any]:
         hasil["alasan"] = "request"
 
     return hasil
+
+
+# ---------------------------------------------------------------------
+# JATAH GAMBAR: terpisah total dari jatah chat
+# ---------------------------------------------------------------------
+def _kunci_gambar(sub: str, mulai: int) -> str:
+    """
+    Kunci Redis untuk pemakaian GAMBAR pada jendela milik satu akun.
+
+    Sengaja memakai awalan "gambar" dan BUKAN kunci jatah chat. Dengan
+    begitu kedua jatah tidak mungkin saling memengaruhi, bahkan bila
+    nanti cara pencatatan chat berubah.
+    """
+    return f"{_PREFIX}:gambar:{sub}:{int(mulai)}"
+
+
+async def _baca_gambar(sub: str) -> Dict[str, Any]:
+    """Membaca berapa gambar yang sudah dibuat akun ini pada jendelanya."""
+    jendela = await _jendela_akun(sub)
+    kunci = _kunci_gambar(sub, jendela["mulai"])
+
+    if _UPSTASH_URL and _UPSTASH_TOKEN:
+        try:
+            nilai = await _redis_perintah("HMGET", kunci, "dibuat")
+            if isinstance(nilai, list) and nilai:
+                return {
+                    "terpakai": int(nilai[0] or 0),
+                    "reset_detik": jendela["sisa_detik"],
+                }
+        except Exception:  # noqa: BLE001
+            pass
+
+    catatan = _memori.get(kunci, {})
+    terpakai = catatan.get("dibuat", 0) if isinstance(catatan, dict) else catatan
+    return {
+        "terpakai": int(terpakai or 0),
+        "reset_detik": jendela["sisa_detik"],
+    }
+
+
+async def periksa_jatah_gambar(sub: Optional[str]) -> Dict[str, Any]:
+    """
+    Memeriksa jatah GAMBAR — terpisah dari jatah chat.
+
+    Mengembalikan:
+        {
+          "boleh": bool,      # False = jatah gambar habis
+          "sub": str|None,
+          "terpakai": int,
+          "batas": int,
+          "sisa": int,
+          "reset_detik": int,
+          "alasan": str|None, # 'gambar' bila ditolak
+        }
+
+    ATURAN (sama semangatnya dengan jatah chat):
+    - Penyimpanan mati TIDAK memblokir: lebih baik kehilangan penegakan
+      jatah daripada situs tidak bisa membuat gambar sama sekali.
+    - Tamu mendapat 0 gambar secara bawaan (bisa diubah lewat env).
+    - Jendela memakai 24 jam bergulir milik akun (sama seperti chat),
+      jadi hitungannya konsisten dan mudah dimengerti pengguna.
+    """
+    sub_sah = _sub_sah(sub)
+    hasil: Dict[str, Any] = {
+        "boleh": True,
+        "sub": sub_sah,
+        "terpakai": 0,
+        "batas": JATAH_GAMBAR_AKUN,
+        "sisa": JATAH_GAMBAR_AKUN,
+        "reset_detik": _detik_sampai_reset_harian(),
+        "alasan": None,
+    }
+
+    if not sub_sah:
+        hasil["batas"] = JATAH_GAMBAR_TAMU
+        hasil["sisa"] = JATAH_GAMBAR_TAMU
+        if JATAH_GAMBAR_TAMU <= 0:
+            hasil["boleh"] = False
+            hasil["alasan"] = "gambar"
+        return hasil
+
+    if not (_UPSTASH_URL and _UPSTASH_TOKEN):
+        # Tanpa penyimpanan, jatah tidak bisa ditegakkan dengan jujur.
+        # Jangan menolak — chat/gambar tetap jalan seperti mode lokal.
+        return hasil
+
+    try:
+        catatan = await _baca_gambar(sub_sah)
+    except Exception:  # noqa: BLE001
+        return hasil
+
+    terpakai = max(0, int(catatan.get("terpakai", 0)))
+    batas = JATAH_GAMBAR_AKUN
+    hasil["terpakai"] = terpakai
+    hasil["batas"] = batas
+    hasil["sisa"] = max(0, batas - terpakai)
+    hasil["reset_detik"] = int(catatan.get("reset_detik", 0))
+
+    if terpakai >= batas:
+        hasil["boleh"] = False
+        hasil["alasan"] = "gambar"
+
+    return hasil
+
+
+async def catat_gambar(sub: Optional[str]) -> None:
+    """
+    Mencatat SATU gambar yang berhasil dibuat.
+
+    Hanya dicatat bila gambarnya benar-benar berhasil. Percobaan yang
+    gagal (layanan ramai) tidak memakan jatah pengguna — itu bukan
+    kesalahannya. Tidak pernah melempar exception.
+    """
+    sub_sah = _sub_sah(sub)
+    if not sub_sah:
+        return
+
+    try:
+        jendela = await _jendela_akun(sub_sah)
+    except Exception:  # noqa: BLE001
+        return
+    kunci = _kunci_gambar(sub_sah, jendela["mulai"])
+
+    if _UPSTASH_URL and _UPSTASH_TOKEN:
+        try:
+            # HINCRBY dipakai (bukan INCR) karena ini field di dalam hash
+            # yang sama dengan penanda kedaluwarsa — sekaligus membuat
+            # penghitung tidak mungkin tertukar dengan kunci jatah chat.
+            await _redis_perintah("HINCRBY", kunci, "dibuat", 1)
+            await _redis_perintah("EXPIRE", kunci, JENDELA_JATAH_DETIK * 2)
+            return
+        except Exception:  # noqa: BLE001
+            pass
+
+    catatan = _memori.get(kunci)
+    if not isinstance(catatan, dict):
+        catatan = {"dibuat": int(catatan or 0)}
+        _memori[kunci] = catatan
+    catatan["dibuat"] = int(catatan.get("dibuat", 0)) + 1
+
+
+def pesan_jatah_gambar_habis(jatah: Dict[str, Any]) -> str:
+    """
+    Pesan saat jatah gambar habis.
+
+    Nada tenang dan menenangkan: pengguna diberi tahu bahwa akses
+    obrolannya TIDAK terpengaruh, lalu kapan jatahnya pulih. Tanpa
+    menyebut nama penyedia apa pun.
+    """
+    sisa_detik = max(0, int(jatah.get("reset_detik") or 0))
+    jam = sisa_detik // 3600
+    menit = (sisa_detik % 3600) // 60
+    if jam >= 1:
+        kapan = f"sekitar {jam} jam {menit} menit lagi"
+    elif menit >= 1:
+        kapan = f"sekitar {menit} menit lagi"
+    else:
+        kapan = "sebentar lagi"
+
+    if not jatah.get("sub"):
+        return (
+            "Membuat gambar perlu login dulu ya. Obrolan tetap bisa "
+            "dipakai tanpa login."
+        )
+
+    batas = int(jatah.get("batas") or 0)
+    return (
+        f"Jatah gambar Anda hari ini sudah habis "
+        f"({batas} gambar per 24 jam). Jatahnya pulih {kapan}.\n\n"
+        "Obrolan Anda tetap berjalan seperti biasa dan tidak terpengaruh "
+        "sama sekali — Anda masih bisa bertanya atau minta riset."
+    )
 
 
 def _detik_sampai_reset_menit() -> int:

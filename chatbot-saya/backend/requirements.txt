@@ -19,3 +19,10 @@ pydantic>=2.7,<3.0
 # zipfile bawaan Python, jadi tidak perlu dependensi tambahan.
 # Ukurannya kecil (~300 KB) sehingga tetap aman untuk free tier.
 pypdf>=4.0,<6.0
+
+# --- Pembuatan gambar (fitur "buat gambar") ---
+# Pillow hanya dipakai untuk MEMOTONG strip bawah gambar hasil layanan
+# gambar gratis, karena layanan itu selalu menempelkan tanda air di
+# sana. Nama penyedia tidak boleh tampil di UI aplikasi ini.
+# Ukurannya kecil (~3 MB) dan sudah menjadi dependensi umum di server.
+pillow>=10.0,<14.0

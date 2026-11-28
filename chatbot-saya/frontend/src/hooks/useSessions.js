@@ -101,6 +101,19 @@ function sanitizeSessions(value) {
                   })),
               }
             : {}),
+          // Gambar hasil pembuatan AI disimpan agar tetap tampil setelah
+          // halaman dimuat ulang. Hanya data URL gambar yang diterima;
+          // selain itu dibuang supaya riwayat tidak menyimpan sampah.
+          ...(m.gambar && typeof m.gambar?.data_url === 'string' &&
+          m.gambar.data_url.startsWith('data:image/')
+            ? {
+                gambar: {
+                  data_url: m.gambar.data_url,
+                  deskripsi: String(m.gambar.deskripsi || '').slice(0, 600),
+                  sunting: Boolean(m.gambar.sunting),
+                },
+              }
+            : {}),
         })),
       createdAt: s.createdAt || Date.now(),
       updatedAt: s.updatedAt || s.createdAt || Date.now(),
@@ -650,6 +663,30 @@ export function useSessions(settings, akunSub = null, apiUrl = '') {
     [updateSession],
   )
 
+  /**
+   * Menyimpan gambar hasil pembuatan AI pada satu pesan asisten.
+   *
+   * Dipakai agar gambar tetap terlihat setelah halaman dimuat ulang
+   * (ikut tersimpan bersama riwayat), bukan hanya selama sesi ini.
+   *
+   * Catatan ukuran: gambar disimpan sebagai data URL (base64). Karena
+   * itu hanya SATU gambar terakhir per pesan yang disimpan, dan
+   * pemanggil sebaiknya tidak menyimpan gambar berukuran raksasa.
+   */
+  const setMessageImage = useCallback(
+    (sessionId, messageId, gambar) => {
+      updateSession(sessionId, (s) => ({
+        ...s,
+        messages: s.messages.map((m) =>
+          m.id === messageId
+            ? { ...m, gambar: gambar && typeof gambar === 'object' ? gambar : null }
+            : m,
+        ),
+      }))
+    },
+    [updateSession],
+  )
+
   /** Memberi tanda suka / tidak suka pada pesan asisten. */
   const setFeedback = useCallback(
     (sessionId, messageId, feedback) => {
@@ -773,6 +810,7 @@ export function useSessions(settings, akunSub = null, apiUrl = '') {
     addMessage,
     setMessageContent,
     setMessageSources,
+    setMessageImage,
     setFeedback,
     segarkanJudul,
     truncateMessages,

@@ -1,0 +1,64 @@
+Fitur buat gambar: AI otomatis switch saat diminta gambar
+
+Pengguna tidak perlu memilih model atau menekan tombol apa pun. Ia cukup
+menulis "buatkan gambar kucing oranye sedang tidur di sofa" dan gambarnya
+muncul di percakapan. Pola yang sama dengan riset web otomatis: server
+yang menentukan kapan fitur dipakai.
+
+Penyedia gambar: layanan gratis, TANPA API key, TANPA kartu kredit, TANPA
+pendaftaran. Nama penyedia tidak pernah dikirim ke UI.
+
+Jatah gambar SENGAJA terpisah dari jatah chat
+------------------------------------------------
+Permintaan pemilik situs: jatah gambar dipisah agar tidak boros di gambar
+saja. Karena itu kuncinya berbeda di Redis:
+
+  chat   : gungdev:usage:u:<sub>:<jendela>        (52 pesan / 24 jam)
+  gambar : gungdev:usage:gambar:<sub>:<jendela>   (3 gambar / 24 jam)
+  tamu   : 0 gambar (perlu login), chat tetap jalan
+
+Akibatnya, dibuktikan uji: membuat gambar tidak mengurangi jatah chat
+sama sekali (chat 0 -> 0 sementara gambar 0 -> 1), dan jatah gambar habis
+tidak menghalangi obrolan.
+
+Deteksi niat dibuat konservatif
+-------------------------------
+Lebih baik melewatkan satu permintaan gambar daripada membuat gambar
+padahal pengguna hanya bertanya. Semua pencocokan memakai batas kata,
+karena substring biasa membuat "membuat gambar" cocok dengan "buat gambar"
+sehingga "jelaskan cara membuat gambar dengan AI" salah dikira perintah
+menggambar dan memakan jatah gambar.
+
+Tanda air layanan gambar dibuang
+--------------------------------
+Layanan gratis sekarang SELALU menempelkan tanda air di pojok kanan bawah
+dan parameter nologo=true sudah tidak berpengaruh. Karena nama penyedia
+tidak boleh tampil di UI, strip bawah gambar dipotong 6% (Pillow). Bila
+pemangkasan gagal, gambar asli dipakai apa adanya.
+
+Kegagalan tidak merugikan pengguna
+----------------------------------
+Layanan gratis kadang menolak sesaat (402/503). Karena itu ada 3 percobaan
+dengan jeda makin panjang, jatah HANYA dicatat bila gambar berhasil, dan
+kegagalan tidak menggagalkan chat: pengguna mendapat penjelasan tenang.
+
+Kontrak API tidak berubah
+-------------------------
+/chat, /chat/stream, /health, /capabilities tetap sama. Field baru hanya
+ditambahkan dan opsional: ChatRequest.buat_gambar, ChatResponse.gambar,
+serta fitur.buat_gambar / jatah_gambar di /capabilities.
+
+Gambar dikirim sebagai data URL, bukan tautan, agar tetap tampil setelah
+halaman dimuat ulang. Disimpan di riwayat dengan batas 400 KB per gambar;
+gambar lebih besar dibuang diam-diam supaya seluruh riwayat tidak gagal
+disimpan.
+
+Berkas baru
+-----------
+- backend/gambar.py                  deteksi niat, deskripsi, ambil, pangkas
+- backend/uji_gambar.py              79 pemeriksaan backend
+- frontend/src/components/GambarHasil.jsx   tampil, perbesar, unduh
+- frontend/uji_gambar_browser.mjs    15 pemeriksaan browser
+- FITUR-BUAT-GAMBAR.md               panduan lengkap
+
+Uji: backend 325/325, browser 234/234, tanpa regresi.
