@@ -19,7 +19,7 @@ tanpa pendaftaran. Konsekuensinya (jujur): kualitas di bawah layanan
 berbayar, kadang lambat, dan bisa gagal saat ramai. Karena itu:
 
   - Jatah gambar DIPISAH dari jatah chat (lihat usage.jatah_gambar).
-    Membuat gambar tidak pernah mengurangi 52 pesan chat.
+    Membuat gambar tidak pernah mengurangi 60 pesan chat.
   - Kegagalan membuat gambar TIDAK boleh menggagalkan chat: pemanggil
     harus tetap menjawab dengan teks biasa.
 

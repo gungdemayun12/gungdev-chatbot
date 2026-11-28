@@ -3285,6 +3285,10 @@ async def diagnostik():
                 "tpd_per_model_groq"
             ],
             "token_per_pesan_rata2": usage.KUOTA_BERSAMA["token_per_pesan"],
+            # Cloudflare menagih Neuron, bukan token. Angka ini adalah
+            # terjemahannya ke PESAN, memakai model TERMAHAL (gpt-oss-120b)
+            # sebagai dasar — jadi kapasitas nyata biasanya lebih besar.
+            "pesan_per_hari_cloudflare": usage.PESAN_CLOUDFLARE,
         },
         # Kapasitas gabungan kedua penyedia per hari (hanya pemilik situs).
         "kapasitas_harian": {

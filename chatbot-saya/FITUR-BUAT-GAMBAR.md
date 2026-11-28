@@ -25,7 +25,7 @@ Yang **tidak** berubah:
 - Kontrak `/chat` dan `/chat/stream` tetap sama. `gambar` dan
   `gambar_dimulai` hanyalah field **tambahan** yang hanya muncul bila
   gambar memang dibuat.
-- Jatah chat (52 pesan/24 jam) tidak tersentuh oleh gambar.
+- Jatah chat (60 pesan/24 jam) tidak tersentuh oleh gambar.
 
 Selama gambarnya dibuat, pengguna melihat animasi **"Sedang
 menggambar"** ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â kisi titik yang terisi bertahap dengan lonceng persen ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â
@@ -143,14 +143,14 @@ jatah chat harian agar tidak boros di gambar saja"*.
 
 | Jatah | Batas bawaan | Kunci penyimpanan |
 |---|---|---|
-| Chat (akun) | 52 pesan / 24 jam | `gungdev:usage:u:<sub>:<jendela>` |
+| Chat (akun) | 60 pesan / 24 jam | `gungdev:usage:u:<sub>:<jendela>` |
 | **Gambar (akun)** | **3 gambar / 24 jam** | `gungdev:usage:gambar:<sub>:<jendela>` |
 | Gambar (tamu) | 0 | ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â |
 
 Karena kuncinya **berbeda**, keduanya tidak mungkin saling
 memengaruhi. Yang terjadi:
 
-- Membuat 3 gambar **tidak** mengurangi 52 pesan chat.
+- Membuat 3 gambar **tidak** mengurangi 60 pesan chat.
 - Jatah gambar habis **tidak** menghalangi obrolan.
 - Chat sebanyak apa pun **tidak** menambah jatah gambar.
 

@@ -1,6 +1,6 @@
 """
 uji_terpotong.py — memastikan jawaban yang berhenti di tengah DIKENALI,
-dan jatah 52 tetap aman terhadap kapasitas harian.
+dan jatah 60 tetap aman terhadap kapasitas harian.
 
 MENGAPA PENTING
 ---------------
@@ -368,26 +368,30 @@ cek(
 )
 
 # ---------------------------------------------------------------------
-print("\n=== 5. JATAH 52 AMAN TERHADAP KAPASITAS ===")
+print("\n=== 5. JATAH AMAN TERHADAP KAPASITAS ===")
 # ---------------------------------------------------------------------
+# Uji ini dulu mengunci ANGKA (52, 48+4, <=56). Angka-angka itu berubah
+# ketika Cloudflare ditambahkan, sehingga ujinya gagal padahal tidak ada
+# yang rusak. Sekarang yang dijaga adalah PRINSIPNYA, bukan angkanya —
+# supaya uji tetap berguna walau kapasitas berubah lagi nanti.
 cek(
-    "Jatah per akun = 52",
-    usage.JATAH_AKUN_DASAR == 52,
+    "Jatah per akun = 60",
+    usage.JATAH_AKUN_DASAR == 60,
     str(usage.JATAH_AKUN_DASAR),
 )
 cek(
-    "Jatah naik 4 pesan dari 48 sebelumnya",
-    usage.JATAH_AKUN_DASAR == 48 + 4,
-    f"48 -> {usage.JATAH_AKUN_DASAR}",
+    "Jatah naik 8 pesan dari 52 sebelumnya",
+    usage.JATAH_AKUN_DASAR == 52 + 8,
+    f"52 -> {usage.JATAH_AKUN_DASAR}",
 )
 cek(
-    "Total 10 akun aktif x jatah masih di bawah kapasitas",
-    usage.JATAH_AKUN_DASAR * 10 <= usage.PESAN_PER_HARI,
-    f"{usage.JATAH_AKUN_DASAR} x 10 = {usage.JATAH_AKUN_DASAR * 10} <= {usage.PESAN_PER_HARI}",
+    "Total 13 akun aktif x jatah masih di bawah kapasitas",
+    usage.JATAH_AKUN_DASAR * 13 <= usage.PESAN_PER_HARI,
+    f"{usage.JATAH_AKUN_DASAR} x 13 = {usage.JATAH_AKUN_DASAR * 13} <= {usage.PESAN_PER_HARI}",
 )
 cek(
-    "Kapasitas token menampung minimal 10 akun penuh",
-    usage.PESAN_PER_HARI // usage.JATAH_AKUN_DASAR >= 10,
+    "Kapasitas menampung minimal 13 akun penuh",
+    usage.PESAN_PER_HARI // usage.JATAH_AKUN_DASAR >= 13,
     f"{usage.PESAN_PER_HARI} // {usage.JATAH_AKUN_DASAR}",
 )
 cek(
@@ -396,9 +400,29 @@ cek(
     f"{usage.JATAH_AKUN_DASAR} <= {int(usage.PESAN_PER_HARI * 0.10)}",
 )
 cek(
-    "Jatah tidak melebihi angka teoritis 56",
-    usage.JATAH_AKUN_DASAR <= 56,
-    str(usage.JATAH_AKUN_DASAR),
+    "Jatah tidak melebihi angka teoritis (kapasitas / 13 akun)",
+    usage.JATAH_AKUN_DASAR <= usage.PESAN_PER_HARI // 13,
+    f"{usage.JATAH_AKUN_DASAR} <= {usage.PESAN_PER_HARI // 13}",
+)
+# Cloudflare harus BENAR-BENAR ikut dihitung, bukan sekadar dicatat.
+# Tanpa ini, menambah penyedia tidak menambah kapasitas yang diakui.
+cek(
+    "Kapasitas harian SUDAH mencakup Cloudflare",
+    usage.PESAN_PER_HARI == (
+        usage.KAPASITAS_HARIAN["token"] // usage.KUOTA_BERSAMA["token_per_pesan"]
+        + usage.PESAN_CLOUDFLARE
+    ),
+    f"{usage.PESAN_PER_HARI}",
+)
+cek(
+    "Cloudflare dihitung memakai model TERMAHAL (angka teraman)",
+    usage.PESAN_CLOUDFLARE == 229,
+    str(usage.PESAN_CLOUDFLARE),
+)
+cek(
+    "Tamu tetap 3 pesan/hari",
+    usage.JATAH_TAMU["rpd"] == 3,
+    str(usage.JATAH_TAMU["rpd"]),
 )
 
 # ---------------------------------------------------------------------

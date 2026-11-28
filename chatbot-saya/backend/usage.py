@@ -138,6 +138,39 @@ KUOTA_BERSAMA = {
     # per hari (bukan per menit) agar aman.
     "rpd_gemini": 200,
     "tpd_gemini": 250_000,
+    # ------------------------------------------------------------------
+    # CLOUDFLARE WORKERS AI: DIHITUNG (kuota HARIAN tetap, sama seperti Groq)
+    # ------------------------------------------------------------------
+    # BERBEDA dengan NVIDIA di atas. NVIDIA tidak dihitung karena
+    # kreditnya hanya trial yang akan habis. Cloudflare TIDAK begitu:
+    # ia memberi 10.000 Neuron SETIAP HARI, reset 00:00 UTC, tanpa kartu
+    # kredit, dan tanpa batas waktu. Jadi ia layak dihitung sebagai
+    # kapasitas harian permanen.
+    #
+    # MENGAPA 229 PESAN, BUKAN 1.189
+    # ------------------------------
+    # Cloudflare menagih "Neuron", dan tarifnya BERBEDA per model:
+    #   granite-4.0-h-micro -> 8 Neuron/pesan  -> 1.189 pesan/hari
+    #   gemma-4-26b-a4b     -> 30 Neuron/pesan ->   333 pesan/hari
+    #   gpt-oss-120b        -> 44 Neuron/pesan ->   229 pesan/hari
+    #
+    # Kita memakai angka TERENDAH (229 = model TERMAHAL). Alasannya:
+    # bila ternyata semua pengguna memilih model termahal, kuota tetap
+    # cukup. Sebaliknya, kalau kita memakai angka optimis (1.189) lalu
+    # pengguna ternyata memakai gpt-oss-120b, kuota situs habis di
+    # tengah hari dan SEMUA pengunjung kena sekaligus.
+    #
+    # Menghitung model murah sebagai bonus (bukan sebagai dasar) berarti
+    # kapasitas NYATA biasanya lebih besar dari angka ini — dan itu
+    # keadaan yang aman, bukan sebaliknya.
+    #
+    # Angka 229 diturunkan dari tarif resmi docs.cloudflare.com:
+    #   masuk  1.500 token x 18.182 Neuron/1jt token = 27,3 Neuron
+    #   keluar   600 token x 27.273 Neuron/1jt token = 16,4 Neuron
+    #   -----------------------------------------------------------------
+    #   total per pesan                             = 43,6 Neuron
+    #   10.000 Neuron / 43,6                        = 229 pesan
+    "pesan_cloudflare": 229,
     # Rata-rata token per pesan (prompt + riwayat + jawaban). Diukur dari
     # pemakaian nyata: pesan pendek ~700 token, pesan panjang/riset
     # ~3.000 token, sehingga rata-ratanya ~1.500.
@@ -157,10 +190,19 @@ KAPASITAS_HARIAN = {
     ),
 }
 
+# Cloudflare menagih NEURON, bukan request maupun token. Ia tidak bisa
+# ditambahkan ke "request" (bukan hitungan request) maupun ke "token"
+# (bukan hitungan token). Karena itu kontribusinya dihitung sebagai
+# PESAN, lalu ditambahkan ke PESAN_PER_HARI di bawah.
+PESAN_CLOUDFLARE = KUOTA_BERSAMA["pesan_cloudflare"]
+
 # Berapa PESAN yang muat per hari bila seluruh token dipakai bertanya.
 # Inilah kendala sebenarnya (request jauh lebih longgar).
-PESAN_PER_HARI = KAPASITAS_HARIAN["token"] // max(
-    1, KUOTA_BERSAMA["token_per_pesan"]
+# Cloudflare ditambahkan di sini karena kuotanya diukur dalam Neuron,
+# yang paling adil diterjemahkan langsung sebagai jumlah pesan.
+PESAN_PER_HARI = (
+    KAPASITAS_HARIAN["token"] // max(1, KUOTA_BERSAMA["token_per_pesan"])
+    + PESAN_CLOUDFLARE
 )
 
 # ---------------------------------------------------------------------
@@ -174,54 +216,48 @@ PESAN_PER_HARI = KAPASITAS_HARIAN["token"] // max(
 #
 # PERHITUNGAN ANGKA (dipakai JATAH_AKUN_DASAR di bawah):
 #   Kapasitas gabungan per hari (lihat KAPASITAS_HARIAN):
-#     request : 3 x 1.000 (Groq) + 200 (Gemini) + 50 (OpenRouter)
-#               = 3.250 request
 #     token   : 3 x 200.000 (Groq) + 250.000 (Gemini) = 850.000 token
-#   Kendala yang lebih dulu habis adalah TOKEN:
-#     850.000 token / 1.500 token per pesan = 566 pesan/hari
-#   Dibagi ke ~10 akun aktif:
-#     566 / 10 = 56 pesan per akun
-#   => jatah TEORITIS 56, dipakai 52 (JATAH_AKUN_DASAR).
+#               -> 566 pesan
+#     Cloudflare (Neuron dihitung sebagai pesan, model TERMAHAL):
+#               229 pesan
+#     ------------------------------------------------------------------
+#     total   : 566 + 229 = 795 pesan/hari
+#   Dibagi ke ~13 akun aktif:
+#     795 / 13 = 61 pesan per akun
+#   => jatah TEORITIS 61, dipakai 60 (JATAH_AKUN_DASAR).
 #
-# KENAPA 52, BUKAN 56
+# KENAPA 60, BUKAN 61
 # -------------------
-# 52 diambil dari 56 dikurangi ±7% sebagai bantalan, dan merupakan
-# kenaikan 48 -> 52 (+4 pesan, +8,3%).
+# 60 diambil dari 61 dikurangi bantalan kecil, dan merupakan kenaikan
+# 52 -> 60 (+8 pesan, +15%).
 #
-# Catatan revisi: sebelumnya angkanya 48 (bantalan ±15%). Bantalan
-# diperkecil karena pemakaian nyata di produksi menunjukkan kuota masih
-# tersisa cukup saat angka 48 dipakai, sehingga 4 pesan tambahan masih
-# tertutup. Bantalan tetap ada karena:
+# Bantalan itu TIDAK sekadar kehati-hatian, melainkan mencegah satu
+# masalah nyata: Cloudflare mereset kuotanya pukul 00:00 UTC = 07:00 WIB,
+# sedangkan Groq/Gemini mereset dengan jadwalnya sendiri. Artinya pesan
+# yang masuk SEBELUM 07:00 WIB bisa memakai kuota Cloudflare hari
+# KEMARIN yang sudah hampir kering. Dengan bantalan, sisa kuota biasanya
+# masih cukup untuk melewati jam-jam itu.
+#
+# Bantalan juga menjaga dua hal lain:
 #   - Angka Gemini sengaja konservatif (Google tidak lagi mempublikasikan
 #     RPD pasti; sebagian model dibatasi untuk akun lama).
 #   - Rata-rata 1.500 token/pesan adalah RATA-RATA. Pesan riset/file bisa
 #     3.000 token (2x lipat).
-#   - Bila kuota ternyata lebih kecil dari perkiraan, jatah 56 membuat
-#     kuota situs habis sebelum hari berakhir dan SEMUA pengunjung kena.
 #
 # MENGAPA TIDAK LEBIH TINGGI
 # --------------------------
-# 56 adalah batas aman teoretis kalau kita menganggap SEMUA 10 akun
-# aktif menghabiskan jatahnya. Di atas 56, kuota situs bisa habis di
-# tengah hari. Itu sebabnya NVIDIA (trial credit) tidak dihitung, dan
-# kenaikan besar baru mungkin bila ada kuota harian TETAP yang baru.
+# Di atas 61, kuota situs bisa habis di tengah hari bila jumlah akun aktif
+# bertambah. Penjaga otomatis di bawah (JATAH_SAAT_KUOTA_TIPIS) memang
+# ada, tetapi penjaga yang bekerja berarti pengguna sudah telanjur
+# dibatasi — lebih baik jatahnya pas sejak awal.
 #
 # CATATAN PEMAKAIAN NYATA
 # -----------------------
 # Batas ini hanya mengikat bila jumlah akun aktif x jatah melebihi
-# kapasitas 566 pesan/hari. Dengan 52: 566/52 = 10 akun aktif penuh.
+# kapasitas 795 pesan/hari. Dengan 60: 795/60 = 13 akun aktif penuh.
 # Bila akun aktif lebih dari itu, penjaga otomatis di bawah
 # (JATAH_SAAT_KUOTA_TIPIS) yang menurunkan jatah sementara — jadi situs
 # tidak mati, hanya lebih ketat saat ramai.
-#
-# Kenapa 52 dan bukan 16 atau 80:
-#   - 16  : hanya memakai 1 model Groq + OpenRouter (terlalu pesimis,
-#           kapasitas sebenarnya 3x lebih besar karena kuota per model).
-#   - 80  : hanya aman bila <= 7 akun aktif/hari; satu pengguna yang suka
-#           riset web memakai ~3.000 token/pesan (2x rata-rata), jadi
-#           kuota bisa habis sebelum hari berakhir.
-#   - 52  : aman untuk ~10 akun aktif/hari dan masih menyisakan ruang
-#           untuk pesan panjang/riset.
 #
 # Bila pemakaian nyata menunjukkan kuota masih lega (cek panel
 # "Layanan" di /usage), angka ini boleh dinaikkan tanpa mengubah kode:
@@ -232,12 +268,12 @@ PESAN_PER_HARI = KAPASITAS_HARIAN["token"] // max(
 #     dipangkas ke 8 pesan/24 jam (JATAH_SAAT_KUOTA_TIPIS). Akun yang
 #     datang belakangan tetap bisa memakai layanan.
 #   - Total akun baru per hari dibatasi MAX_AKUN_BARU_PER_HARI. Tanpa
-#     ini, 25 akun baru sehari (x 52 pesan) langsung menghabiskan kuota.
-JATAH_AKUN_DASAR = int(os.getenv("JATAH_REQUEST_PER_AKUN", "52") or 52)
+#     ini, 25 akun baru sehari (x 60 pesan) langsung menghabiskan kuota.
+JATAH_AKUN_DASAR = int(os.getenv("JATAH_REQUEST_PER_AKUN", "60") or 60)
 JATAH_SAAT_KUOTA_TIPIS = int(os.getenv("JATAH_KUOTA_TIPIS", "8") or 8)
-# Akun baru per hari: 25 akun x 52 pesan = 1.300 pesan, jauh di atas
-# kapasitas 566 pesan/hari. Karena itu batasnya tetap 25 agar jumlah
-# akun baru tidak melampaui kapasitas token harian.
+# Akun baru per hari: 25 akun x 60 pesan = 1.500 pesan, di atas
+# kapasitas 795 pesan/hari. Karena itu batasnya tetap 25 agar jumlah
+# akun baru tidak melampaui kapasitas pesan harian.
 MAX_AKUN_BARU_PER_HARI = int(os.getenv("MAKS_AKUN_BARU", "25") or 25)
 
 # Persentase sisa kuota bersama yang dianggap "tipis".
@@ -285,7 +321,7 @@ JATAH_TAMU = {"rpd": 3}
 #
 # Karena itu jatah gambar punya KUNCI SENDIRI di Redis, bukan menumpang
 # kunci jatah chat. Akibatnya yang pasti dan mudah dipahami pengguna:
-#   - Membuat 3 gambar TIDAK mengurangi 52 pesan chat.
+#   - Membuat 3 gambar TIDAK mengurangi 60 pesan chat.
 #   - Jatah gambar habis TIDAK menghalangi obrolan.
 # Membuat gambar sendiri lebih mahal daripada satu pesan teks, jadi
 # angkanya jauh lebih kecil — dan itu wajar, bukan hukuman.
@@ -551,6 +587,20 @@ async def sisa_pesan_situs() -> int:
     Kendala diambil dari yang lebih dulu habis:
       - request : 3.250/hari (3 model Groq + OpenRouter + Gemini)
       - token   : 850.000/hari -> 566 pesan
+      - Cloudflare: 10.000 Neuron/hari -> 229 pesan (model termahal)
+
+    CATATAN PENTING — Cloudflare dan token:
+    Pemakaian Cloudflare DICATAT sebagai token oleh usage.py (karena
+    responsnya menyertakan `usage`). Bila token Cloudflare ikut
+    dikurangkan dari jatah token Groq+Gemini, kapasitas Cloudflare
+    terhitung DUA KALI: sekali sebagai pengurang token, sekali lagi
+    sebagai tambahan 229 pesan. Itu membuat sisa kuota tampak lebih
+    kecil dari kenyataan.
+
+    Karena itu sisa token dibatasi agar tidak melampaui kapasitas
+    token penyedia Groq+Gemini; kelebihannya (yang berasal dari
+    Cloudflare) tidak mengurangi jatah, karena Cloudflare punya
+    kuotanya SENDIRI yang reset sendiri pula.
     """
     try:
         harian = await baca_harian()
@@ -561,10 +611,16 @@ async def sisa_pesan_situs() -> int:
     terpakai_token = max(0, int(harian.get("tokens", 0)))
 
     sisa_request = KAPASITAS_HARIAN["request"] - terpakai_request
-    sisa_token = KAPASITAS_HARIAN["token"] - terpakai_token
+    # Token milik Cloudflare tidak boleh mengurangi jatah token Groq+Gemini,
+    # jadi sisa token dibatasi paling banyak sebesar kapasitas itu sendiri.
+    sisa_token = max(0, min(
+        KAPASITAS_HARIAN["token"] - terpakai_token,
+        KAPASITAS_HARIAN["token"],
+    ))
     sisa_dari_token = sisa_token // max(1, KUOTA_BERSAMA["token_per_pesan"])
 
-    return max(0, min(sisa_request, sisa_dari_token))
+    # Cloudflare punya kuota sendiri, jadi sisa pesannya ditambahkan.
+    return max(0, min(sisa_request, sisa_dari_token) + PESAN_CLOUDFLARE)
 
 
 async def jatah_berjalan() -> int:
@@ -577,7 +633,7 @@ async def jatah_berjalan() -> int:
     sekaligus, kuota bersama akan habis di tengah hari dan semua orang
     (termasuk yang baru masuk) ikut kecewa. Karena itu:
 
-      - kuota masih lega  -> jatah penuh (JATAH_AKUN_DASAR, 52)
+      - kuota masih lega  -> jatah penuh (JATAH_AKUN_DASAR, 60)
       - kuota < 15% sisa  -> jatah dipangkas (JATAH_SAAT_KUOTA_TIPIS, 8)
 
     Pemangkasan hanya MEMBATASI lebih awal, tidak pernah menambah dan

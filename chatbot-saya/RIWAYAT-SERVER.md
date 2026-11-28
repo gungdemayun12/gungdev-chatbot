@@ -14,7 +14,7 @@ masih tersimpan di perangkat masing-masing.
 |---|---|
 | Riwayat hanya di browser | Riwayat di server, **sama di semua perangkat** |
 | Hapus data browser = riwayat hilang | Riwayat aman di server |
-| Semua pengunjung berbagi satu angka usage | Tiap akun punya **jatah 52 pesan/24 jam** sendiri |
+| Semua pengunjung berbagi satu angka usage | Tiap akun punya **jatah 60 pesan/24 jam** sendiri |
 | Tidak ada pembatas per akun | Satu akun habis jatah **tidak** memengaruhi akun lain |
 | — | Bila server tak bisa dipakai, salinan perangkat dipakai otomatis |
 | Satu penyedia AI habis kuota = situs berhenti | **Failover otomatis** ke penyedia lain saat kuota habis (429/402) |
@@ -28,7 +28,7 @@ Kontrak API lama **tidak berubah**: `/chat`, `/chat/stream`, `/health`,
 
 | Hal | Nilai |
 |---|---|
-| Jatah pesan per akun | **52 pesan per jendela 24 jam** |
+| Jatah pesan per akun | **60 pesan per jendela 24 jam** |
 | Saat layanan ramai | Sementara 8 pesan (otomatis, kembali normal sendiri) |
 | Jatah tamu | 3 pesan/hari (per IP, tidak berubah) |
 | Akun baru per hari | Maksimal 25 (agar akun baru tidak melampaui kapasitas 566/hari) |
@@ -135,10 +135,10 @@ lebih kecil dari perkiraan, kuota situs habis sebelum hari berakhir dan
 Dua penjaga supaya kuota tidak habis di tengah hari:
 
 1. **Jatah dipangkas otomatis** — bila sisa pesan situs < 15% dari kapasitas
-   harian (566), akun mendapat 8 pesan/24 jam. Akun yang datang belakangan
+   harian (795), akun mendapat 8 pesan/24 jam. Akun yang datang belakangan
    tetap kebagian.
 2. **Batas akun baru per hari** — maksimal 25 akun baru. Tanpa ini, 25 akun
-   baru x 52 pesan sehari sudah hampir melampaui kapasitas 566 pesan/hari.
+   baru x 60 pesan sehari sudah melampaui kapasitas 795 pesan/hari.
 
 ### Jendela bergulir, bukan jam dinding
 
@@ -653,8 +653,11 @@ peringatan — dan begitu kredit habis, semua pengunjung kehilangan jatah itu
 sekaligus. Karena itu di `usage.py` ada `trial_nvidia_dihitung: 0` dan
 jatah **tidak** dihitung dari NVIDIA. NVIDIA dipakai sebagai **pilihan
 model tambahan** dan **jalur cadangan keempat**, bukan sebagai dasar
-menaikkan jatah. (Kenaikan 48 → 52 berasal dari bantalan yang diperkecil
-setelah pemakaian nyata diperiksa, bukan dari NVIDIA.)
+menaikkan jatah. (Kenaikan 48 → 52 dahulu berasal dari bantalan yang
+diperkecil setelah pemakaian nyata diperiksa, bukan dari NVIDIA. Kenaikan
+52 → 60 berasal dari **Cloudflare Workers AI**, yang BERBEDA dari NVIDIA
+karena kuotanya harian tetap dan reset setiap hari — lihat bagian
+"Cloudflare Workers AI" di bawah.)
 
 ### Penyedia yang TIDAK dipakai (dan alasannya)
 

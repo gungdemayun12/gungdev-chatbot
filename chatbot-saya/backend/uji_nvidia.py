@@ -200,8 +200,11 @@ cek(
     str(usage.KUOTA_BERSAMA.get("trial_nvidia_dihitung")),
 )
 cek(
-    "Jatah tetap 52 (NVIDIA tidak menaikkan jatah; kenaikan 48->52 dari bantalan)",
-    usage.JATAH_AKUN_DASAR == 52,
+    # Uji ini dulu mengunci angka 52. Angkanya kini 60 karena CLOUDFLARE
+    # (kuota harian tetap) ditambahkan — bukan karena NVIDIA. Yang penting
+    # dijaga di sini: NVIDIA TIDAK ikut menaikkan jatah maupun kapasitas.
+    "Jatah tidak dipengaruhi NVIDIA (60 dari Cloudflare, bukan dari NVIDIA)",
+    usage.JATAH_AKUN_DASAR == 60,
     str(usage.JATAH_AKUN_DASAR),
 )
 cek(
