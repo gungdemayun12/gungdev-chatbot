@@ -23,6 +23,10 @@ PowerShell (Windows):
     $env:GEMINI_API_KEY="AIza..."
     python cek_key.py gemini
 
+    $env:CLOUDFLARE_ACCOUNT_ID="..."
+    $env:CLOUDFLARE_API_TOKEN="..."
+    python cek_key.py cloudflare
+
 Bisa juga tanpa menyebut nama (semua yang punya key akan diuji):
 
     python cek_key.py
@@ -160,11 +164,33 @@ def main() -> int:
                 os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite"),
             )
 
+    if pilihan in ("cloudflare", "semua"):
+        akun = (os.environ.get("CLOUDFLARE_ACCOUNT_ID") or "").strip()
+        token = (os.environ.get("CLOUDFLARE_API_TOKEN") or "").strip()
+        if not akun or not token:
+            if pilihan == "cloudflare":
+                print("Cloudflare butuh DUA bagian: ACCOUNT_ID dan API_TOKEN.")
+                print('PowerShell:  $env:CLOUDFLARE_ACCOUNT_ID="..."')
+                print('             $env:CLOUDFLARE_API_TOKEN="..."')
+                return 2
+        else:
+            dikerjakan += 1
+            hidup += _uji_satu(
+                "Cloudflare Workers AI",
+                (
+                    "https://api.cloudflare.com/client/v4/accounts/"
+                    f"{akun}/ai/v1/chat/completions"
+                ),
+                token,
+                os.environ.get("CLOUDFLARE_MODEL") or "@cf/openai/gpt-oss-120b",
+            )
+
     if dikerjakan == 0:
         print("Tidak ada key yang bisa diuji.")
         print("Isi salah satu dulu, misalnya:")
         print('  $env:NVIDIA_API_KEY="nvapi-..."')
         print('  $env:GEMINI_API_KEY="AIza..."')
+        print('  $env:CLOUDFLARE_ACCOUNT_ID="..."; $env:CLOUDFLARE_API_TOKEN="..."')
         return 2
 
     print("\n" + "=" * 60)

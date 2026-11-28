@@ -49,6 +49,7 @@ daftar = {
     "openrouter": main.OPENROUTER_MODELS,
     "gemini": main.GEMINI_MODELS,
     "nvidia": main.NVIDIA_MODELS,
+    "cloudflare": main.CLOUDFLARE_MODELS,
 }
 
 pemilik = {}
@@ -70,10 +71,13 @@ cek(
 print("\n=== 2. ROUTING SESUAI PEMILIKNYA ===")
 # ---------------------------------------------------------------------
 kunci = (main.GROQ_API_KEY, main.GEMINI_API_KEY, main.OPENROUTER_API_KEY, main.NVIDIA_API_KEY)
+kunci_cf = (main.CLOUDFLARE_ACCOUNT_ID, main.CLOUDFLARE_API_TOKEN)
 main.GROQ_API_KEY = "ada"
 main.GEMINI_API_KEY = "ada"
 main.OPENROUTER_API_KEY = "ada"
 main.NVIDIA_API_KEY = "ada"
+main.CLOUDFLARE_ACCOUNT_ID = "ada"
+main.CLOUDFLARE_API_TOKEN = "ada"
 try:
     salah = []
     for penyedia, model_list in daftar.items():
@@ -88,6 +92,7 @@ try:
     )
 finally:
     (main.GROQ_API_KEY, main.GEMINI_API_KEY, main.OPENROUTER_API_KEY, main.NVIDIA_API_KEY) = kunci
+    (main.CLOUDFLARE_ACCOUNT_ID, main.CLOUDFLARE_API_TOKEN) = kunci_cf
 
 # ---------------------------------------------------------------------
 print("\n=== 3. SEMUA MODEL BISA DIPILIH ===")
@@ -115,7 +120,7 @@ print("\n=== 4. JUMLAH MODEL PER PENYEDIA ===")
 for penyedia, model_list in daftar.items():
     print(f"       {penyedia:<12} {len(model_list)} model")
 cek(
-    "Keempat penyedia punya model",
+    "Kelima penyedia punya model",
     all(len(v) > 0 for v in daftar.values()),
 )
 

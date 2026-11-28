@@ -532,6 +532,86 @@ logika niat, jatah, dan tampilan tidak perlu disentuh.
 
 ---
 
+## 11b. Penyedia chat kelima: kuota HARIAN, tanpa kartu kredit
+
+Situs punya beberapa penyedia chat. Yang menentukan **jatah harian** adalah
+seberapa besar kuota gratis masing-masing penyedia, jadi menambah penyedia
+berarti menambah jatah obrolan untuk semua pengguna.
+
+**Syarat yang diminta pemilik situs: kuota reset HARIAN, bukan bulanan, dan
+tanpa kartu kredit.** Hasil riset halaman resmi penyedia (Nov 2026):
+
+| Penyedia | Kuota | Reset | Kartu | Lolos? |
+|---|---|---|---|---|
+| Groq | 1.000 permintaan + 200.000 token per model/hari | harian | tidak | sudah dipakai |
+| OpenRouter | 50/hari (1.000 bila beli 10 kredit) | harian | tidak | sudah dipakai |
+| Gemini (teks) | ~1.000/hari/model | harian (tengah malam Pasifik) | tidak | sudah dipakai |
+| NVIDIA NIM | kredit trial ~1.000 panggilan | sekali, ±90 hari | tidak | sudah dipakai |
+| **Cloudflare Workers AI** | **10.000 Neuron/hari** | **00:00 UTC** | **tidak** | **dipakai** |
+| Mistral | ~1 miliar token/**bulan** | bulanan | verifikasi HP | gugur |
+| Cerebras | kredit $5 habis 30 hari | sekali | **wajib** | gugur |
+| Together AI | tidak ada free tier permanen | — | ya | gugur |
+
+### Berapa pesan tambahannya?
+
+10.000 Neuron per hari, dengan perkiraan satu pesan ±1.500 token masuk +
+600 token keluar:
+
+| Model | Neuron/pesan | Pesan/hari |
+|---|---|---|
+| `granite-4.0-h-micro` | 8 | **1.189** |
+| `qwen3-30b-a3b` | 25 | **396** |
+| `gemma-4-26b-a4b-it` | 30 | **333** |
+| `gpt-oss-120b` | 44 | **229** |
+| `qwen2.5-coder-32b` | 145 | **69** |
+
+### Model mana yang dipakai, dan kapan
+
+Pemilik situs meminta "yang paling pintar", khususnya untuk coding. Yang
+**paling pintar tetapi masih gratis** di Cloudflare adalah `gpt-oss-120b`,
+jadi itu default-nya. Model lain dipakai otomatis sesuai kebutuhan:
+
+| Kebutuhan | Model | Alasan |
+|---|---|---|
+| Obrolan biasa | `gpt-oss-120b` | paling pintar yang gratis |
+| Pesan minta **coding** | `qwen2.5-coder-32b` | khusus coding; hanya dipakai saat relevan karena paling mahal |
+| Ada **gambar** | `llama-4-scout` | satu-satunya model gratis Cloudflare yang bisa membaca gambar |
+| Kuota hampir habis | `granite-4.0-h-micro` | paling hemat; selalu ditaruh paling akhir agar chat tidak mati |
+
+**Penting — jangan berharap ke model berbayar.** Model coding TERBAIK
+Cloudflare (`kimi-k2.7-code`, `glm-5.3`, `deepseek-v4`, `inkling-2-small`)
+**wajib metode pembayaran berbayar**. Dokumentasi resmi menyebutnya
+demikian, dan memakainya di akun gratis hanya menghasilkan HTTP 403. Karena
+itu model-model itu **sengaja tidak dimasukkan** ke daftar.
+
+### Pengaturan
+
+| Variabel | Bawaan | Arti |
+|---|---|---|
+| `CLOUDFLARE_ACCOUNT_ID` | *(kosong)* | Account ID dari dashboard Cloudflare |
+| `CLOUDFLARE_API_TOKEN` | *(kosong)* | API token Workers AI (Read + Edit) |
+| `CLOUDFLARE_MODEL` | `cloudflare/gpt-oss-120b` | Model default |
+| `CLOUDFLARE_BASE_URL` | `https://api.cloudflare.com/client/v4` | Jarang perlu diubah |
+
+Bila `CLOUDFLARE_ACCOUNT_ID` **atau** `CLOUDFLARE_API_TOKEN` kosong, seluruh
+bagian Cloudflare dilewati — situs kembali memakai penyedia lain seperti
+biasa, tanpa error. Periksa kunci sebelum deploy dengan:
+
+```bash
+cd chatbot-saya/backend
+python cek_key.py cloudflare
+```
+
+### Apa yang terjadi saat kuota habis
+
+Cloudflare membalas HTTP 429 ketika 10.000 Neuron harian terpakai. Server
+**tidak menampilkan error** kepada pengguna: permintaan otomatis dialihkan ke
+penyedia lain yang masih punya sisa kuota (`complete()` / `stream()` di
+`main.py`). Ini perilaku yang sama dengan penyedia lain, dan dijaga oleh
+`uji_cloudflare.py`.
+
+---
+
 ## 12. Kalau ingin pindah ke layanan berbayar nanti
 
 Yang perlu diubah **hanya** `gambar.buat_gambar()`:
@@ -549,7 +629,8 @@ Niat, jatah, penyimpanan, dan tampilan **tidak perlu diubah**.
 
 ```bash
 cd chatbot-saya/backend
-python uji_gambar.py          # 160 pemeriksaan (backend, tanpa jaringan)
+python uji_gambar.py          # 171 pemeriksaan (backend, tanpa jaringan)
+python uji_cloudflare.py       # 41 pemeriksaan (penyedia Cloudflare, tanpa jaringan)
 ```
 
 ```bash
@@ -600,6 +681,7 @@ Endpoint ini **hanya ada di `server_uji.py`**, tidak di produksi.
 | `frontend/src/hooks/useSessions.js` | Menyimpan gambar & tanda fase gambar |
 | `frontend/src/App.css` | Tampilan gambar, animasi `.menggambar*`, bilah `.jatah-bar*` |
 | `backend/uji_gambar.py` | 160 pemeriksaan backend |
+| `backend/uji_cloudflare.py` | 41 pemeriksaan jalur penyedia Cloudflare (tanpa jaringan) |
 | `frontend/uji_gambar_browser.mjs` | 52 pemeriksaan browser |
 
 ---

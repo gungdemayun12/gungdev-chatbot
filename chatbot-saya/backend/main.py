@@ -45,6 +45,7 @@ import contextvars         # penanda jawaban terpotong per-permintaan
 import json                 # payload SSE (streaming)
 import logging              # log rapi di terminal
 import os                   # membaca environment variable
+import re                   # pencocokan kata kunci (deteksi permintaan coding)
 from typing import AsyncIterator, List, Optional, Sequence
 
 import httpx                # HTTP client async (dipakai Groq & cek kesehatan)
@@ -297,6 +298,201 @@ def _nvidia_nama_asli(model: str) -> str:
     """Menerjemahkan id pilihan pengguna menjadi nama model katalog NVIDIA."""
     return _NVIDIA_NAMA_ASLI.get(model, model)
 
+
+# ---------------------------------------------------------------------
+# PENYEDIA KELIMA: CLOUDFLARE WORKERS AI
+# ---------------------------------------------------------------------
+# MENGAPA DITAMBAHKAN
+# -------------------
+# Satu-satunya penyedia yang lolos dua syarat pemilik situs sekaligus:
+#
+#   1. Kuota gratis di-RESET HARIAN (bukan bulanan), dan
+#   2. TIDAK memerlukan kartu kredit.
+#
+# Penyedia lain gugur justru karena dua syarat itu:
+#   - Mistral : ~1 miliar token/bulan (bulanan, bukan harian)
+#   - Cerebras: kredit $5 yang habis dalam 30 hari + WAJIB kartu kredit
+#   - Together: tidak ada free tier permanen (harus membeli kredit)
+#
+# ANGKA RESMINYA (docs.cloudflare.com, dicek Nov 2026)
+#   10.000 Neuron per hari, reset 00:00 UTC. 1 Neuron != 1 token;
+#   tarifnya berbeda per model (lihat MODEL_CF_* di bawah).
+#   Dengan satu pesan ±1.500 token masuk + 600 token keluar, 10.000
+#   Neuron berarti:
+#       granite-4.0-h-micro    ~1.189 pesan/hari
+#       qwen3-30b-a3b            ~396 pesan/hari
+#       gemma-4-26b-a4b          ~333 pesan/hari
+#       gpt-oss-120b             ~229 pesan/hari
+#       qwen2.5-coder-32b          ~69 pesan/hari
+#
+# MODEL CODING TERBAIK CLOUDFLARE TIDAK BISA DIPAKAI (penting!)
+# ------------------------------------------------------------
+# Dokumentasi resmi menyebut model ini WAJIB metode pembayaran berbayar:
+#   @cf/moonshotai/kimi-k2.7-code, @cf/zai-org/glm-5.3,
+#   @cf/deepseek-ai/deepseek-v4, @cf/inkling/inkling-2-small
+# Karena itu model tersebut TIDAK dimasukkan daftar — memakainya hanya
+# menghasilkan error 403 dan menipu pengguna.
+#
+# Bentuk API-nya kompatibel OpenAI, jadi tidak ada kontrak yang berubah:
+#   POST https://api.cloudflare.com/client/v4/accounts/{ID}/ai/v1/chat/completions
+# Bila kuncinya kosong, seluruh bagian ini dilewati tanpa merusak apa pun.
+CLOUDFLARE_ACCOUNT_ID = _env("CLOUDFLARE_ACCOUNT_ID")
+CLOUDFLARE_API_TOKEN = _env("CLOUDFLARE_API_TOKEN")
+# Nama lama yang mungkin sudah terlanjur dipasang di Vercel. Diterima
+# sebagai padanan supaya pengguna tidak perlu menebak nama variabelnya.
+if not CLOUDFLARE_API_TOKEN:
+    CLOUDFLARE_API_TOKEN = _env("CLOUDFLARE_API_KEY")
+
+CLOUDFLARE_BASE_URL = _env(
+    "CLOUDFLARE_BASE_URL", "https://api.cloudflare.com/client/v4"
+).rstrip("/")
+
+# Id model pilihan-pengguna memakai awalan "cloudflare/" (tanpa "@cf/"),
+# lalu diterjemahkan ke nama katalog asli lewat _CLOUDFLARE_NAMA_ASLI.
+# Awalan itu dipakai supaya id TIDAK BENTROK dengan penyedia lain —
+# aturan yang dijaga uji_unik_model.py. Contoh: Cloudflare juga punya
+# "qwen2.5-coder-32b-instruct" yang bisa sama dengan penyedia lain.
+CLOUDFLARE_MODELS = [
+    # Paling pintar yang masih GRATIS: model penalaran besar dari OpenAI
+    # (gpt-oss 120B). Dipakai sebagai default.
+    "cloudflare/gpt-oss-120b",
+    # Hemat & konteks 256K — cadangan pertama bila kuota menipis.
+    "cloudflare/gemma-4-26b-a4b-it",
+    # Hemat + kuat; cadangan berikutnya.
+    "cloudflare/qwen3-30b-a3b",
+    # Khusus coding: dipakai otomatis saat pesan minta bantuan coding.
+    "cloudflare/qwen2.5-coder-32b-instruct",
+    # Satu-satunya model gratis di Cloudflare yang bisa MEMBACA GAMBAR.
+    "cloudflare/llama-4-scout-17b-16e-instruct",
+    # Paling hemat Neuron: penjaga terakhir agar chat tidak pernah mati.
+    "cloudflare/granite-4.0-h-micro",
+]
+
+CLOUDFLARE_MODEL_DEFAULT = _env(
+    "CLOUDFLARE_MODEL", "cloudflare/gpt-oss-120b"
+)
+
+# Pemetaan id pilihan-pengguna -> nama model asli di katalog Cloudflare.
+#
+# Awalan "cloudflare/" dipakai supaya id TIDAK BENTROK dengan penyedia
+# lain (aturan yang dijaga uji_unik_model.py). Mis. Cloudflare juga punya
+# "qwen2.5-coder-32b-instruct" yang bisa sama dengan penyedia lain.
+_CLOUDFLARE_NAMA_ASLI = {
+    "cloudflare/gpt-oss-120b": "@cf/openai/gpt-oss-120b",
+    "cloudflare/gemma-4-26b-a4b-it": "@cf/google/gemma-4-26b-a4b-it",
+    "cloudflare/qwen3-30b-a3b": "@cf/qwen/qwen3-30b-a3b",
+    "cloudflare/qwen2.5-coder-32b-instruct": "@cf/qwen/qwen2.5-coder-32b-instruct",
+    "cloudflare/llama-4-scout-17b-16e-instruct": "@cf/meta/llama-4-scout-17b-16e-instruct",
+    "cloudflare/granite-4.0-h-micro": "@cf/ibm-granite/granite-4.0-h-micro",
+}
+
+
+def cloudflare_tersedia() -> bool:
+    """Apakah jalur Cloudflare bisa dipakai (dua bagian kunci terisi)."""
+    return bool(CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN)
+
+
+def _cloudflare_nama_asli(model: str) -> str:
+    """Menerjemahkan id pilihan pengguna menjadi nama katalog Cloudflare."""
+    if model in _CLOUDFLARE_NAMA_ASLI:
+        return _CLOUDFLARE_NAMA_ASLI[model]
+    if model.startswith("@cf/"):
+        return model
+    # Nama katalog yang ditulis tanpa awalan (mis. "openai/gpt-oss-120b").
+    return f"@cf/{model}" if model in CLOUDFLARE_MODELS else model
+
+
+# Model Cloudflare untuk kebutuhan khusus. Nilainya harus ADA di
+# CLOUDFLARE_MODELS; dijaga uji_cloudflare.py.
+CF_MODEL_CODING = "cloudflare/qwen2.5-coder-32b-instruct"
+CF_MODEL_VISION = "cloudflare/llama-4-scout-17b-16e-instruct"
+CF_MODEL_HEMAT = "cloudflare/granite-4.0-h-micro"
+# Model terpintar untuk CODING yang masih gratis di Cloudflare.
+# CATATAN: kimi-k2.7-code, glm-5.3, deepseek-v4 LEBIH pintar, tetapi
+# WAJIB metode pembayaran berbayar (403 di akun gratis), jadi tidak dipakai.
+CF_MODEL_PINTAR = "cloudflare/gpt-oss-120b"
+
+# Kata kunci yang menandakan pengguna minta bantuan CODING. Pemilik situs
+# memilih "yang paling pintar untuk coding", jadi saat itu model khusus
+# coding didahulukan — tetapi HANYA saat relevan, karena kuotanya paling
+# mahal (69 pesan/hari vs 229 milik gpt-oss-120b).
+_CF_KATA_CODING = re.compile(
+    r"\b(kode|koding|coding|program|programnya|script|skrip|fungsi|function|"
+    r"error|galat|bug|debug|python|javascript|typescript|java|php|kotlin|"
+    r"golang|rust|sql|html|css|react|node|npm|pip|git|regex|json|api|"
+    r"compile|kompilasi|syntax|sintaks|variabel|variable|array|loop|"
+    r"perulangan|class|kelas|method|refactor|terminal|bash|"
+    r"powershell|docker|database|query|tabel sql|endpoint)\b",
+    re.IGNORECASE,
+)
+
+
+def _cf_ada_kata_coding(messages: List[dict]) -> bool:
+    """True bila pesan TERAKHIR pengguna meminta bantuan coding."""
+    for pesan in reversed(messages or []):
+        if not isinstance(pesan, dict) or pesan.get("role") != "user":
+            continue
+        isi = pesan.get("content")
+        if isinstance(isi, list):
+            isi = " ".join(
+                b.get("text", "")
+                for b in isi
+                if isinstance(b, dict) and isinstance(b.get("text"), str)
+            )
+        if isinstance(isi, str) and _CF_KATA_CODING.search(isi):
+            return True
+        # Hanya pesan pengguna terakhir yang dinilai: permintaan lama
+        # tidak boleh membuat percakapan berikutnya ikut memakai model
+        # coding yang mahal.
+        return False
+    return False
+
+
+def _kandidat_cloudflare(
+    model: str, ada_gambar: bool = False, messages: Optional[List[dict]] = None
+) -> List[str]:
+    """
+    Urutan model Cloudflare yang dicoba.
+
+    Urutannya:
+      1. model yang paling sesuai kebutuhan (pilihan pengguna, atau model
+         khusus coding, atau model vision bila ada gambar),
+      2. model lain sebagai cadangan,
+      3. model paling hemat Neuron ditaruh PALING AKHIR, supaya saat kuota
+         harian mulai menipis chat tetap mendapat jawaban alih-alih error.
+
+    Bila ada GAMBAR, hanya model vision yang boleh dicoba — mengirim
+    gambar ke model teks akan ditolak dengan error 400 oleh penyedia.
+    """
+    dipilih = model if model in CLOUDFLARE_MODELS else None
+
+    if ada_gambar and CF_MODEL_VISION in CLOUDFLARE_MODELS:
+        utama = CF_MODEL_VISION
+    elif dipilih:
+        utama = dipilih
+    elif _cf_ada_kata_coding(messages or []):
+        utama = CF_MODEL_CODING
+    else:
+        utama = CLOUDFLARE_MODEL_DEFAULT
+
+    if utama not in CLOUDFLARE_MODELS:
+        utama = CLOUDFLARE_MODELS[0]
+
+    sisanya = [m for m in CLOUDFLARE_MODELS if m != utama]
+    if ada_gambar:
+        sisanya = [m for m in sisanya if m in _CF_VISION]
+    # Model hemat selalu ditaruh paling akhir, apa pun kebutuhannya.
+    # `sorted` stabil, jadi urutan aslinya dipertahankan di depannya.
+    if CF_MODEL_HEMAT in sisanya:
+        sisanya.remove(CF_MODEL_HEMAT)
+        sisanya.append(CF_MODEL_HEMAT)
+    return [utama] + sisanya
+
+
+# Model Cloudflare yang bisa MEMBACA gambar (vision).
+# Hanya llama-4-scout yang gratis dan multimoda; sisanya model teks.
+_CF_VISION = {CF_MODEL_VISION}
+
 # Model default.
 #
 # CATATAN PENTING (diperbarui):
@@ -359,6 +555,7 @@ MODEL_GROQ_DIIZINKAN = [
 ]
 MODEL_DIIZINKAN = (
     MODEL_GROQ_DIIZINKAN + OPENROUTER_MODELS + GEMINI_MODELS + NVIDIA_MODELS
+    + CLOUDFLARE_MODELS
 )
 
 # Model yang dipakai bila klien tidak mengirim pilihan / mengirim nilai
@@ -396,6 +593,10 @@ MODEL_VISION = {
     # Model NVIDIA NIM yang multimodal (varian VL = vision-language).
     "nvidia/nemotron-3.5-super-vl-120b-a12b",
     "zai-org/glm-5",
+    # Model Cloudflare: hanya llama-4-scout yang gratis dan bisa
+    # membaca gambar. Model Cloudflare lain (gpt-oss-120b, gemma, qwen,
+    # granite) menolak gambar dengan error 400.
+    "cloudflare/llama-4-scout-17b-16e-instruct",
 }
 
 # Model yang dipakai bila pesan berisi gambar tetapi pilihan pengguna
@@ -630,13 +831,24 @@ def pilih_provider() -> str:
             "AI_PROVIDER=gemini tetapi GEMINI_API_KEY kosong; pilihan diabaikan."
         )
         dipaksa = ""
+    elif dipaksa == "cloudflare" and not cloudflare_tersedia():
+        logger.warning(
+            "AI_PROVIDER=cloudflare tetapi CLOUDFLARE_ACCOUNT_ID / "
+            "CLOUDFLARE_API_TOKEN kosong; pilihan diabaikan."
+        )
+        dipaksa = ""
 
-    if dipaksa in ("groq", "openrouter", "gemini", "ollama"):
+    if dipaksa in ("groq", "openrouter", "gemini", "cloudflare", "ollama"):
         return dipaksa
+    # Urutan deteksi otomatis: penyedia dengan kuota HARIAN paling besar
+    # lebih dulu, supaya situs memakai kuota yang paling lega. Cloudflare
+    # ditaruh sebelum ollama karena ia menambah ±229–1.189 pesan/hari.
     if GROQ_API_KEY:
         return "groq"
     if GEMINI_API_KEY:
         return "gemini"
+    if cloudflare_tersedia():
+        return "cloudflare"
     if OPENROUTER_API_KEY:
         return "openrouter"
     return "ollama"
@@ -645,7 +857,8 @@ def pilih_provider() -> str:
 PROVIDER = pilih_provider()
 MODEL_NAME = (
     GROQ_MODEL if PROVIDER == "groq" else
-    OPENROUTER_MODEL_DEFAULT if PROVIDER == "openrouter" else OLLAMA_MODEL
+    OPENROUTER_MODEL_DEFAULT if PROVIDER == "openrouter" else
+    CLOUDFLARE_MODEL_DEFAULT if PROVIDER == "cloudflare" else OLLAMA_MODEL
 )
 
 if PROVIDER == "groq":
@@ -660,6 +873,8 @@ elif PROVIDER == "openrouter":
     logger.info("Provider aktif: OpenRouter model %s", MODEL_NAME)
     if not OPENROUTER_API_KEY:
         logger.warning("AI_PROVIDER=openrouter tetapi OPENROUTER_API_KEY kosong.")
+elif PROVIDER == "cloudflare":
+    logger.info("Provider aktif: Cloudflare Workers AI model %s", MODEL_NAME)
 else:
     logger.info("Provider aktif: OLLAMA lokal (%s) model %s", OLLAMA_HOST, MODEL_NAME)
 
@@ -2155,6 +2370,263 @@ async def nvidia_stream(messages: List[dict], opsi: dict) -> AsyncIterator[str]:
 
 
 # ---------------------------------------------------------------------
+# 9b. PEMANGGILAN KE CLOUDFLARE WORKERS AI
+# ---------------------------------------------------------------------
+def _cloudflare_headers() -> dict:
+    """Header Cloudflare Workers AI (token Bearer, format OpenAI)."""
+    return {
+        "Authorization": f"Bearer {CLOUDFLARE_API_TOKEN}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
+
+def _cloudflare_url() -> str:
+    """URL chat completions milik akun Cloudflare."""
+    return (
+        f"{CLOUDFLARE_BASE_URL}/accounts/{CLOUDFLARE_ACCOUNT_ID}"
+        "/ai/v1/chat/completions"
+    )
+
+
+def _cloudflare_payload(
+    model: str, messages: List[dict], opsi: dict, streaming: bool
+) -> dict:
+    """
+    Body permintaan Cloudflare.
+
+    Cloudflare memakai standar OpenAI, tetapi lebih ketat soal suhu:
+    `temperature` 0 ditolak sebagian model. Nilainya digeser sedikit,
+    sama seperti penanganan NVIDIA.
+    """
+    suhu = opsi.get("temperature", 0.3)
+    if not isinstance(suhu, (int, float)) or suhu <= 0:
+        suhu = 0.1
+
+    return {
+        "model": _cloudflare_nama_asli(model),
+        "messages": messages,
+        "temperature": suhu,
+        "max_tokens": opsi.get("max_tokens") or 4096,
+        "stream": streaming,
+    }
+
+
+def _pesan_cloudflare_error(kode: int, badan: str) -> str:
+    """
+    Pesan galat Cloudflare dalam Bahasa Indonesia yang tenang.
+
+    Dua jenjang, disengaja:
+
+      - Pesan untuk PENGGUNA menyebut "layanan AI", TANPA nama penyedia.
+        Pengguna tidak perlu tahu siapa di baliknya; baginya produk ini
+        hanya "gungdev".
+      - Kode 401/403 adalah masalah KUNCI, bukan masalah pengguna.
+        Penyebab paling mungkin — variabel salah nama atau terpotong saat
+        menempel — hanya bisa diperbaiki PEMILIK SITUS. Karena itu
+        pesannya menyebut nama variabelnya; tanpa itu, pemilik situs
+        menghabiskan waktu menebak. (Praktik sama dengan pemberitahuan
+        konfigurasi NVIDIA yang sudah ada.)
+    """
+    if kode in (401, 403):
+        # 403 di Cloudflare juga muncul untuk model BERBAYAR. Pesannya
+        # dibuat mencakup dua sebab itu.
+        return (
+            "Layanan AI menolak kunci akses. Bila Anda pemilik situs, "
+            "periksa kembali CLOUDFLARE_ACCOUNT_ID dan CLOUDFLARE_API_TOKEN "
+            "di pengaturan server."
+        )
+    if kode == 404:
+        return "Model yang dipilih tidak tersedia. Silakan pilih model lain."
+    if kode in (402, 429):
+        # Cloudflare memakai 429 saat 10.000 Neuron harian habis.
+        return (
+            "Kuota harian layanan AI sudah terpakai. Kuota diperbarui lagi "
+            "nanti; sementara itu obrolan tetap bisa dilanjutkan."
+        )
+    if kode == 400:
+        logger.warning("Cloudflare menolak permintaan (400): %s", badan[:200])
+        return "Permintaan tidak bisa diproses. Coba ubah atau pendekkan pertanyaan."
+    logger.warning("Cloudflare menolak permintaan: HTTP %s %s", kode, badan[:200])
+    return "Layanan AI sedang bermasalah. Silakan coba lagi."
+
+
+async def cloudflare_complete(messages: List[dict], opsi: dict) -> str:
+    """Jawaban lengkap (non-streaming) dari Cloudflare Workers AI."""
+    kandidat = _kandidat_cloudflare(
+        opsi.get("model") or CLOUDFLARE_MODEL_DEFAULT,
+        bool(opsi.get("ada_gambar")),
+        messages,
+    )
+    error_terakhir: Optional[HTTPException] = None
+
+    async with httpx.AsyncClient(timeout=TIMEOUT_GEMINI) as http:
+        for model in kandidat:
+            res = await http.post(
+                _cloudflare_url(),
+                headers=_cloudflare_headers(),
+                json=_cloudflare_payload(model, messages, opsi, False),
+            )
+
+            if res.status_code >= 400:
+                sebab = res.text[:300]
+                logger.warning(
+                    "Cloudflare menolak %s: HTTP %s %s", model, res.status_code, sebab
+                )
+                pesan = _pesan_cloudflare_error(res.status_code, sebab)
+                # Status kuota (402/429) dipertahankan agar failover ke
+                # penyedia lain tetap bekerja. Selain itu, 404/403 berarti
+                # model ini tidak bisa dipakai (salah nama atau berbayar):
+                # lewati ke model cadangan alih-alih menyerah.
+                if res.status_code in _STATUS_KUOTA:
+                    error_terakhir = HTTPException(
+                        status_code=res.status_code, detail=pesan
+                    )
+                else:
+                    error_terakhir = HTTPException(status_code=502, detail=pesan)
+
+                bisa_dilewati = res.status_code in (403, 404) and model != kandidat[-1]
+                if bisa_dilewati:
+                    logger.info(
+                        "Model Cloudflare %s tidak bisa dipakai (HTTP %s); "
+                        "mencoba cadangan.",
+                        model,
+                        res.status_code,
+                    )
+                    continue
+                raise error_terakhir
+
+            data = res.json()
+            pakai = data.get("usage") or {}
+            if pakai:
+                try:
+                    usage.simpan_token_asli(
+                        pakai.get("total_tokens") or 0,
+                        pakai.get("prompt_tokens") or 0,
+                        pakai.get("completion_tokens") or 0,
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+
+            isi = _teks_dari_pesan((data.get("choices") or [{}])[0].get("message") or {})
+            if not isi:
+                logger.warning("Cloudflare %s memberi jawaban kosong.", model)
+                error_terakhir = HTTPException(
+                    status_code=502,
+                    detail="Layanan AI mengembalikan jawaban kosong. Silakan coba lagi.",
+                )
+                if model != kandidat[-1]:
+                    continue
+                raise error_terakhir
+
+            if model != kandidat[0]:
+                logger.info("Cloudflare memakai model cadangan %s.", model)
+            return isi
+
+    raise error_terakhir or HTTPException(
+        status_code=502, detail="Layanan AI sedang bermasalah. Silakan coba lagi."
+    )
+
+
+async def cloudflare_stream(messages: List[dict], opsi: dict) -> AsyncIterator[str]:
+    """Mengalirkan jawaban dari Cloudflare Workers AI (SSE, format OpenAI)."""
+    kandidat = _kandidat_cloudflare(
+        opsi.get("model") or CLOUDFLARE_MODEL_DEFAULT,
+        bool(opsi.get("ada_gambar")),
+        messages,
+    )
+
+    async with httpx.AsyncClient(timeout=TIMEOUT_STREAM) as http:
+        res = None
+        for model in kandidat:
+            payload = _cloudflare_payload(model, messages, opsi, streaming=True)
+            permintaan = http.build_request(
+                "POST",
+                _cloudflare_url(),
+                headers=_cloudflare_headers(),
+                json=payload,
+            )
+            kandidat_res = await http.send(permintaan, stream=True)
+
+            if kandidat_res.status_code in (403, 404) and model != kandidat[-1]:
+                await kandidat_res.aread()
+                logger.warning(
+                    "Model Cloudflare '%s' tidak bisa dipakai (HTTP %s); "
+                    "mencoba cadangan.",
+                    model,
+                    kandidat_res.status_code,
+                )
+                await kandidat_res.aclose()
+                continue
+
+            if kandidat_res.status_code >= 400:
+                badan = await kandidat_res.aread()
+                kode = kandidat_res.status_code
+                await kandidat_res.aclose()
+                logger.error("Cloudflare menolak streaming: %s %s", kode, badan[:200])
+                # Kode asli dipertahankan agar failover kuota bisa bekerja.
+                raise HTTPException(
+                    status_code=kode if kode in _STATUS_KUOTA else 502,
+                    detail=_pesan_cloudflare_error(
+                        kode, badan.decode("utf-8", "replace")
+                    ),
+                )
+
+            res = kandidat_res
+            break
+
+        if res is None:
+            raise HTTPException(
+                status_code=502,
+                detail="Model yang dipilih tidak tersedia. Silakan pilih model lain.",
+            )
+
+        try:
+            async for baris in res.aiter_lines():
+                if not baris or not baris.startswith("data:"):
+                    continue
+                data = baris[5:].strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    obj = json.loads(data)
+                except json.JSONDecodeError:
+                    continue
+
+                pakai = obj.get("usage")
+                if isinstance(pakai, dict) and pakai:
+                    try:
+                        usage.simpan_token_asli(
+                            pakai.get("total_tokens") or 0,
+                            pakai.get("prompt_tokens") or 0,
+                            pakai.get("completion_tokens") or 0,
+                        )
+                    except Exception:  # noqa: BLE001
+                        pass
+
+                try:
+                    pilihan = obj["choices"][0]
+                except (KeyError, IndexError, TypeError):
+                    pilihan = {}
+                try:
+                    delta = (pilihan.get("delta") or {}).get("content") or ""
+                except AttributeError:
+                    delta = ""
+                if _terpotong_dari_finish(pilihan.get("finish_reason")):
+                    _tandai_terpotong()
+                if isinstance(delta, list):
+                    delta = "".join(
+                        b.get("text", "")
+                        for b in delta
+                        if isinstance(b, dict) and isinstance(b.get("text"), str)
+                    )
+                if isinstance(delta, str) and delta:
+                    yield delta
+        finally:
+            await res.aclose()
+
+
+# ---------------------------------------------------------------------
 # 10. PEMANGGILAN KE OLLAMA (lokal)
 # ---------------------------------------------------------------------
 def _pesan_untuk_ollama(messages: List[dict]) -> List[dict]:
@@ -2299,6 +2771,7 @@ def _penyedia_untuk_model(model: str) -> str:
     di_groq = model in MODEL_GROQ_DIIZINKAN
     di_gemini = model in GEMINI_MODELS
     di_nvidia = model in NVIDIA_MODELS
+    di_cloudflare = model in CLOUDFLARE_MODELS
 
     # Daftar penyedia penyelamat, dipakai berurutan bila penyedia yang
     # dituju tidak punya kunci. Disusun sekali agar tidak berulang.
@@ -2308,11 +2781,16 @@ def _penyedia_untuk_model(model: str) -> str:
             ("gemini", GEMINI_API_KEY),
             ("openrouter", OPENROUTER_API_KEY),
             ("nvidia", NVIDIA_API_KEY),
+            ("cloudflare", cloudflare_tersedia()),
         ):
             if nama != kecuali and ada:
                 return nama
         return None
 
+    if di_cloudflare:
+        if cloudflare_tersedia():
+            return "cloudflare"
+        return penyelamat("cloudflare") or PROVIDER
     if di_openrouter:
         if OPENROUTER_API_KEY:
             return "openrouter"
@@ -2351,7 +2829,7 @@ def _urutan_penyedia(penyedia_utama: str) -> List[str]:
     Urutannya: penyedia pilihan pengguna lebih dulu (agar pilihannya
     dihormati), lalu penyedia lain sebagai penyelamat.
     """
-    semua = ["groq", "gemini", "openrouter", "nvidia"]
+    semua = ["groq", "gemini", "openrouter", "nvidia", "cloudflare"]
 
     def tersedia(nama: str) -> bool:
         if nama == "groq":
@@ -2362,6 +2840,8 @@ def _urutan_penyedia(penyedia_utama: str) -> List[str]:
             return bool(OPENROUTER_API_KEY)
         if nama == "nvidia":
             return bool(NVIDIA_API_KEY)
+        if nama == "cloudflare":
+            return cloudflare_tersedia()
         return False
 
     urutan = [penyedia_utama] if tersedia(penyedia_utama) else []
@@ -2471,6 +2951,8 @@ async def complete(messages: List[dict], opsi: dict) -> str:
                 return await openrouter_complete(messages, opsi)
             if penyedia == "nvidia":
                 return await nvidia_complete(messages, opsi)
+            if penyedia == "cloudflare":
+                return await cloudflare_complete(messages, opsi)
             if penyedia == "groq":
                 return await groq_complete(messages, opsi)
             return await ollama_complete(messages, opsi)
@@ -2511,6 +2993,8 @@ async def stream(messages: List[dict], opsi: dict) -> AsyncIterator[str]:
                 aliran = openrouter_stream(messages, opsi)
             elif penyedia == "nvidia":
                 aliran = nvidia_stream(messages, opsi)
+            elif penyedia == "cloudflare":
+                aliran = cloudflare_stream(messages, opsi)
             elif penyedia == "groq":
                 aliran = groq_stream(messages, opsi)
             else:
@@ -2746,6 +3230,7 @@ async def diagnostik():
                     "GROQ",
                     "GEMINI",
                     "NVIDIA",
+                    "CLOUDFLARE",
                     "AI_",
                     "UPSTASH",
                     "GOOGLE",
@@ -2759,6 +3244,13 @@ async def diagnostik():
             "openrouter": {"ada_kunci": bool(OPENROUTER_API_KEY)},
             "gemini": {"ada_kunci": bool(GEMINI_API_KEY)},
             "nvidia": {"ada_kunci": bool(NVIDIA_API_KEY)},
+            "cloudflare": {
+                # Perlu DUA bagian. account_id tanpa token (atau
+                # sebaliknya) tidak bisa dipakai, jadi keduanya wajib ada.
+                "ada_kunci": cloudflare_tersedia(),
+                "ada_akun": bool(CLOUDFLARE_ACCOUNT_ID),
+                "ada_token": bool(CLOUDFLARE_API_TOKEN),
+            },
         },
         # Penanda aman: apakah kunci OpenRouter memakai awalan yang benar.
         # Ini membedakan "variabel tidak ada" dari "variabel ada tapi salah
@@ -3257,7 +3749,7 @@ async def capabilities():
         ],
         # Penyedia cadangan aktif? Dipakai diagnostik/uji, bukan untuk
         # menampilkan nama backend ke pengguna.
-        "cadangan_aktif": bool(GEMINI_API_KEY),
+        "cadangan_aktif": bool(GEMINI_API_KEY) or cloudflare_tersedia(),
         "vision_default": MODEL_VISION_DEFAULT,
         "browser_default": MODEL_BROWSER_DEFAULT,
         # Kemampuan tingkat fitur (bukan per model).
