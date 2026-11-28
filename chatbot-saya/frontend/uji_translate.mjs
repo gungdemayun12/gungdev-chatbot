@@ -41,17 +41,16 @@ const cek = (nama, syarat, info = '') => {
 const panggilan = []
 globalThis.fetch = async (url) => {
   panggilan.push(String(url))
-  const q = new URL(url).searchParams.get('q')
-  return {
-    ok: true,
-    json: async () => ({
-      responseData: { translatedText: q === 'Pengaturan' ? 'Settings' : `EN:${q}` },
-    }),
-  }
+  const q = decodeURIComponent(new URL(url).searchParams.get('q'))
+  const hasil = q
+    .split('\n⟦GD⟧\n')
+    .map((bagian) => (bagian === 'Pengaturan' ? 'Settings' : `EN:${bagian}`))
+    .join('\n⟦GD⟧\n')
+  return { ok: true, json: async () => ({ responseData: { translatedText: hasil } }) }
 }
 globalThis.AbortSignal = { timeout: () => undefined }
 
-const { translateText } = await import(pathToFileURL(berkas).href)
+const { translateMany, translateText } = await import(pathToFileURL(berkas).href)
 unlinkSync(berkas)
 unlinkSync(join(dir, '_storage_uji_translate.mjs'))
 
@@ -64,6 +63,12 @@ cek('teks yang sama diambil dari cache', ulang === 'Settings' && panggilan.lengt
 
 cek('bahasa sama tidak memanggil jaringan', (await translateText('Halo', 'id', 'id')) === 'Halo')
 cek('teks kosong tidak memanggil jaringan', (await translateText('', 'id', 'en')) === '')
+
+const sebelum = panggilan.length
+const banyak = await translateMany(['Pengaturan', 'Percakapan Baru', 'Pengaturan'], 'id', 'en')
+cek('banyak teks dikembalikan bersamaan', banyak.get('Pengaturan') === 'Settings')
+cek('teks baru ikut dalam hasil yang sama', banyak.get('Percakapan Baru') === 'EN:Percakapan Baru')
+cek('kelompok teks cukup satu permintaan, bukan satu per teks', panggilan.length === sebelum + 1, `${panggilan.length - sebelum}`)
 
 console.log(gagal ? `\nHASIL: ${gagal} GAGAL` : '\nHASIL: semua pemeriksaan lulus')
 process.exit(gagal ? 1 : 0)

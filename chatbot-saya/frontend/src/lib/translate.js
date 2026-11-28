@@ -1,35 +1,24 @@
 /**
  * translate.js — terjemahan antarmuka lewat MyMemory.
  *
- * PEMILIHAN LAYANAN
- * -----------------
- * MyMemory dipilih karena bisa dipakai langsung tanpa akun, API key, atau
- * kartu kredit. Bahasa Indonesia tetap menjadi sumber teks di kode; layanan
- * ini hanya dipakai saat pengguna memilih English.
- *
- * BATAS GRATIS
- * ------------
- * Tanpa email: 5.000 karakter per hari.
- * Dengan email: 50.000 karakter per hari.
- * Hasil disimpan di localStorage supaya teks yang sama tidak diterjemahkan
- * berulang dan kuota harian tidak cepat habis.
+ * Semua teks dikirim bersamaan, tetapi pemanggil baru menerima hasil
+ * setelah seluruh kelompok selesai. Dengan begitu antarmuka bisa berpindah
+ * bahasa dalam satu langkah, bukan satu teks demi satu teks.
  */
 import { readJSON, writeJSON } from './storage.js'
 
 const KUNCI_CACHE = 'gungdev:translate-cache'
 const ENDPOINT = 'https://api.mymemory.translated.net/get'
-const MAKS_PER_PERMINTAAN = 450
+const MAKS_KARAKTER = 450
+const PEMISAH = '\n⟦GD⟧\n'
 
 const cache = new Map()
-const antrean = []
-let sedangBerjalan = false
 
 function muatCache() {
   const tersimpan = readJSON(KUNCI_CACHE, {})
-  if (tersimpan && typeof tersimpan === 'object') {
-    for (const [kunci, nilai] of Object.entries(tersimpan)) {
-      if (typeof nilai === 'string' && nilai) cache.set(kunci, nilai)
-    }
+  if (!tersimpan || typeof tersimpan !== 'object') return
+  for (const [kunci, nilai] of Object.entries(tersimpan)) {
+    if (typeof nilai === 'string' && nilai) cache.set(kunci, nilai)
   }
 }
 
@@ -39,80 +28,82 @@ function simpanCache() {
 
 muatCache()
 
-function kunciCache(teks, dari, ke) {
+function kunci(teks, dari, ke) {
   return `${dari}|${ke}|${teks}`
 }
 
-function pecah(teks) {
-  if (teks.length <= MAKS_PER_PERMINTAAN) return [teks]
-  const potongan = []
-  let sisa = teks
-  while (sisa.length > MAKS_PER_PERMINTAAN) {
-    const batas = sisa.lastIndexOf(' ', MAKS_PER_PERMINTAAN)
-    const potong = batas > 100 ? batas : MAKS_PER_PERMINTAAN
-    potongan.push(sisa.slice(0, potong))
-    sisa = sisa.slice(potong).trimStart()
+function kelompok(daftar) {
+  const hasil = []
+  let sekarang = []
+  let panjang = 0
+  for (const teks of daftar) {
+    const tambahan = teks.length + PEMISAH.length
+    if (sekarang.length && panjang + tambahan > MAKS_KARAKTER) {
+      hasil.push(sekarang)
+      sekarang = []
+      panjang = 0
+    }
+    sekarang.push(teks)
+    panjang += tambahan
   }
-  if (sisa) potongan.push(sisa)
-  return potongan
+  if (sekarang.length) hasil.push(sekarang)
+  return hasil
 }
 
-async function terjemahkanLangsung(teks, dari, ke) {
+async function terjemahkanKelompok(daftar, dari, ke) {
   const params = new URLSearchParams({
-    q: teks,
+    q: daftar.join(PEMISAH),
     langpair: `${dari}|${ke}`,
   })
   const email = import.meta.env.VITE_TRANSLATE_EMAIL
   if (typeof email === 'string' && email.includes('@')) params.set('de', email)
 
   const respons = await fetch(`${ENDPOINT}?${params}`, {
-    signal: AbortSignal.timeout(12000),
+    signal: AbortSignal.timeout(15000),
   })
   if (!respons.ok) throw new Error(`translate ${respons.status}`)
   const data = await respons.json()
   if (data?.quotaFinished) throw new Error('kuota translate habis')
-  const hasil = data?.responseData?.translatedText
-  if (typeof hasil !== 'string' || !hasil.trim()) throw new Error('translate kosong')
-  return hasil
-}
+  const mentah = data?.responseData?.translatedText
+  if (typeof mentah !== 'string' || !mentah.trim()) throw new Error('translate kosong')
 
-async function prosesAntrean() {
-  if (sedangBerjalan) return
-  sedangBerjalan = true
-  try {
-    while (antrean.length) {
-      const pekerjaan = antrean.shift()
-      try {
-        const hasil = (
-          await Promise.all(
-            pecah(pekerjaan.teks).map((bagian) =>
-              terjemahkanLangsung(bagian, pekerjaan.dari, pekerjaan.ke),
-            ),
-          )
-        ).join(' ')
-        cache.set(pekerjaan.kunci, hasil)
-        simpanCache()
-        pekerjaan.selesai(hasil)
-      } catch (err) {
-        pekerjaan.gagal(err)
-      }
-    }
-  } finally {
-    sedangBerjalan = false
-  }
+  const bagian = mentah.split(/\s*⟦\s*GD\s*⟧\s*/i)
+  return daftar.map((teks, i) => bagian[i]?.trim() || teks)
 }
 
 /**
- * Menerjemahkan satu teks. Bahasa sumber dan tujuan yang sama dikembalikan
- * langsung tanpa permintaan jaringan.
+ * Menerjemahkan banyak teks sekaligus.
+ * Hasilnya baru dikembalikan setelah semua permintaan selesai.
  */
-export function translateText(teks, dari = 'id', ke = 'en') {
-  if (!teks || dari === ke) return Promise.resolve(teks)
-  const kunci = kunciCache(teks, dari, ke)
-  if (cache.has(kunci)) return Promise.resolve(cache.get(kunci))
+export async function translateMany(daftar, dari = 'id', ke = 'en') {
+  const unik = [...new Set(daftar.filter((teks) => typeof teks === 'string' && teks.trim()))]
+  if (!unik.length || dari === ke) return new Map(unik.map((teks) => [teks, teks]))
 
-  return new Promise((selesai, gagal) => {
-    antrean.push({ teks, dari, ke, kunci, selesai, gagal })
-    prosesAntrean()
-  })
+  const hasil = new Map()
+  const belum = []
+  for (const teks of unik) {
+    const ada = cache.get(kunci(teks, dari, ke))
+    if (ada) hasil.set(teks, ada)
+    else belum.push(teks)
+  }
+
+  await Promise.all(
+    kelompok(belum).map(async (bagian) => {
+      try {
+        const terjemahan = await terjemahkanKelompok(bagian, dari, ke)
+        bagian.forEach((teks, i) => {
+          cache.set(kunci(teks, dari, ke), terjemahan[i])
+          hasil.set(teks, terjemahan[i])
+        })
+      } catch {
+        bagian.forEach((teks) => hasil.set(teks, teks))
+      }
+    }),
+  )
+  if (belum.length) simpanCache()
+  return hasil
+}
+
+export function translateText(teks, dari = 'id', ke = 'en') {
+  return translateMany([teks], dari, ke).then((hasil) => hasil.get(teks) || teks)
 }
