@@ -407,6 +407,108 @@ console.log('\n=== 7. TAMU TIDAK MENDAPAT GAMBAR ===')
   await ctx3.close()
 }
 
+/* ================================================================ */
+console.log('\n=== 8. PANEL JATAH: INDIKATOR PERSEN ===')
+// Bagian jatah diganti dari angka menjadi BILAH PERSEN, mengikuti contoh
+// "Plan limits": judul, "N% sisa" di kanan, keterangan waktu reset, dan
+// bilah tipis. Uji ini memastikan bilahnya benar-benar tampil dan
+// angkanya masuk akal — bukan hanya ada di data.
+{
+  await resetAkun(SUB_A)
+
+  // Data server yang menjadi sumber bilah.
+  const data = await fetch(`${API}/usage`, {
+    headers: { Authorization: `Bearer ${TOKEN_UJI}` },
+  }).then((r) => r.json())
+  const g = data?.akun?.gambar
+  cek('/usage mengirim akun.gambar', Boolean(g), g ? `batas=${g.batas}` : 'tidak ada')
+  cek('/usage mengirim persen gambar', typeof g?.persen === 'number', String(g?.persen))
+  cek('/usage mengirim reset gambar', typeof g?.reset?.detik === 'number', String(g?.reset?.detik))
+
+  const sesi8 = await buka()
+  const { page: page8 } = sesi8
+
+  // Buka panel "Jatah Saya" dari tombol di header.
+  await page8.evaluate(() => {
+    const tombol = Array.from(document.querySelectorAll('button')).find((b) =>
+      /jatah/i.test(b.getAttribute('aria-label') || ''),
+    )
+    if (tombol) tombol.click()
+  })
+
+  await page8.waitForSelector('.jatah-bar', { timeout: 15000 }).catch(() => {})
+
+  const panel = await page8.evaluate(() => {
+    const bar = Array.from(document.querySelectorAll('.jatah-bar'))
+    const baca = (el) => {
+      if (!el) return null
+      const isi = el.querySelector('.jatah-bar__isi')
+      const track = el.querySelector('.jatah-bar__trek')
+      return {
+        judul: el.querySelector('.jatah-bar__judul')?.textContent?.trim() || '',
+        persen: el.querySelector('.jatah-bar__persen')?.textContent?.trim() || '',
+        sub: el.querySelector('.jatah-bar__sub')?.textContent?.trim() || '',
+        lebar: isi ? isi.style.width : '',
+        adaProgressbar: track?.getAttribute('role') === 'progressbar',
+        ariaNow: track?.getAttribute('aria-valuenow') || '',
+      }
+    }
+    return {
+      jumlah: bar.length,
+      chat: baca(bar.find((b) => b.dataset.uji === 'jatah-chat')),
+      gambar: baca(bar.find((b) => b.dataset.uji === 'jatah-gambar')),
+      // Angka mentah lama TIDAK boleh lagi menjadi tampilan utama.
+      adaTotalLama: Boolean(document.querySelector('.usage__akun-total')),
+      teksPanel: document.querySelector('.usage')?.innerText?.slice(0, 400) || '',
+    }
+  })
+
+  cek('panel menampilkan dua bilah jatah', panel.jumlah >= 2, `jumlah=${panel.jumlah}`)
+  cek('bilah obrolan ada', Boolean(panel.chat), JSON.stringify(panel.chat))
+  cek('bilah gambar ada', Boolean(panel.gambar), JSON.stringify(panel.gambar))
+  cek('bilah obrolan menulis persen sisa', /^\d{1,3}% sisa$/.test(panel.chat?.persen || ''), panel.chat?.persen)
+  cek('bilah gambar menulis persen sisa', /^\d{1,3}% sisa$/.test(panel.gambar?.persen || ''), panel.gambar?.persen)
+  cek('bilah obrolan punya lebar terisi', /%$/.test(panel.chat?.lebar || ''), panel.chat?.lebar)
+  cek('bilah gambar punya lebar terisi', /%$/.test(panel.gambar?.lebar || ''), panel.gambar?.lebar)
+  cek('bilah bisa dibaca pembaca layar', Boolean(panel.chat?.adaProgressbar && panel.gambar?.adaProgressbar))
+  cek('bilah punya nilai aria', panel.chat?.ariaNow === '100', `obrolan=${panel.chat?.ariaNow}`)
+  cek('keterangan waktu reset tampil', /diperbarui|siap dipakai/i.test(panel.chat?.sub || ''), panel.chat?.sub)
+  cek('angka mentah lama tidak lagi jadi tampilan utama', !panel.adaTotalLama)
+  cek('tidak ada nama penyedia di panel', !/pollinations|openrouter|ollama/i.test(panel.teksPanel))
+
+  // Setelah jatah gambar dipakai, bilahnya harus TURUN sendirinya.
+  await fetch(`${API}/__uji/jatah-gambar`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sub: SUB_A, jumlah: 1 }),
+  })
+  const sesi8b = await buka()
+  const { page: page8b } = sesi8b
+  await page8b.evaluate(() => {
+    const tombol = Array.from(document.querySelectorAll('button')).find((b) =>
+      /jatah/i.test(b.getAttribute('aria-label') || ''),
+    )
+    if (tombol) tombol.click()
+  })
+  await page8b.waitForSelector('[data-uji="jatah-gambar"]', { timeout: 15000 }).catch(() => {})
+  const persenGambarBaru = await page8b
+    .evaluate(() => {
+      const el = document.querySelector('[data-uji="jatah-gambar-persen"]')
+      return el ? el.textContent.trim() : ''
+    })
+    .catch(() => '')
+  const angkaBaru = parseInt(persenGambarBaru, 10)
+  cek(
+    'bilah gambar turun setelah gambar dibuat',
+    Number.isFinite(angkaBaru) && angkaBaru < 100,
+    persenGambarBaru || '(kosong)',
+  )
+
+  await sesi8.ctx.close()
+  await sesi8b.ctx.close()
+  await resetAkun(SUB_A)
+}
+
 await browser.close()
 
 const gagal = HASIL.filter((h) => !h.lulus)

@@ -878,6 +878,108 @@
   }
 }
 
+/* --- Bilah jatah bergaya "Plan limits" -------------------------------
+   Mengikuti contoh yang diminta: kotak berisi judul, "N% sisa" di kanan,
+   keterangan waktu reset, lalu bilah tipis memanjang.
+
+   Kenapa bilah, bukan angka: "sisa 47 pesan" tidak berarti banyak bagi
+   pengguna baru; "100% sisa" langsung terbaca. Angka pastinya tetap
+   tersedia di baris keterangan kecil.
+
+   Warna hanya penegas — persennya selalu tertulis, jadi tetap terbaca
+   oleh pengguna buta warna. */
+.usage__bars {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.jatah-bar {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.jatah-bar__atas {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.jatah-bar__judul {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.jatah-bar__persen {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.jatah-bar__sub {
+  margin-top: 3px;
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+  line-height: 1.45;
+}
+
+.jatah-bar__rinci {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Trek bilah. Tipis dan tenang, mengikuti contoh. */
+.jatah-bar__trek {
+  margin-top: 8px;
+  height: 6px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--surface-3, rgba(127, 127, 127, 0.18));
+}
+
+.jatah-bar__isi {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent, #4a8cff);
+  /* Transisi halus saat angka berubah (mis. setelah membuat gambar),
+     supaya perubahan terasa, bukan melompat. */
+  transition: width 0.45s ease, background 0.3s ease;
+}
+
+/* Sisa menipis: peringatan halus, tanpa membuat panik. */
+.jatah-bar.is-rendah .jatah-bar__isi {
+  background: color-mix(in srgb, var(--warning, #d9a53f) 85%, var(--accent, #4a8cff));
+}
+
+.jatah-bar.is-rendah .jatah-bar__persen {
+  color: var(--text);
+}
+
+/* Sisa hampir habis. */
+.jatah-bar.is-kritis .jatah-bar__isi {
+  background: var(--danger, #e5484d);
+}
+
+.jatah-bar.is-kritis .jatah-bar__persen {
+  color: var(--danger, #e5484d);
+  font-weight: 600;
+}
+
+/* Hormati pengguna yang mematikan animasi. */
+@media (prefers-reduced-motion: reduce) {
+  .jatah-bar__isi {
+    transition: none;
+  }
+}
+
 /* --- Gambar hasil pembuatan AI --- */
 .hasil-gambar {
   margin: var(--sp-3) 0 0;

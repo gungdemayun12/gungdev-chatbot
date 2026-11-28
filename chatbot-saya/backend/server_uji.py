@@ -440,6 +440,12 @@ async def jatah_gambar_uji(payload: dict):
     """
     sub = str(payload.get("sub") or "")
     j = await usage.periksa_jatah_gambar(sub or None)
+    # `jumlah` opsional: dipakai uji panel untuk membuat pemakaian tanpa
+    # harus membuat gambar sungguhan (yang memakan waktu & kuota).
+    for _ in range(int(payload.get("jumlah") or 0)):
+        await usage.catat_gambar(sub)
+    if payload.get("jumlah"):
+        j = await usage.periksa_jatah_gambar(sub or None)
     return {"terpakai": j["terpakai"], "batas": j["batas"], "boleh": j["boleh"]}
 
 

@@ -17,6 +17,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Modal from './Modal.jsx'
+import JatahBar from './JatahBar.jsx'
 import { Activity, RefreshCw } from './icons.jsx'
 import { getTokenRiwayat } from '../lib/riwayat.js'
 
@@ -45,31 +46,6 @@ function durasi(detik) {
   }
   if (d >= 60) return `${Math.floor(d / 60)} menit`
   return `${d} detik`
-}
-
-/**
- * Format KHUSUS hitung mundur: selalu menampilkan DETIK sehingga angka
- * benar-benar berdetak setiap detik (jam:menit:detik).
- *
- * Contoh: 86399 -> "23:59:59", 900 -> "15:00", 45 -> "0:45".
- * Dipakai di blok hitung mundur, bukan di teks biasa — di teks biasa
- * "23 jam 59 menit" lebih enak dibaca.
- */
-function durasiDetik(detik) {
-  const d = Math.max(0, Math.round(Number(detik) || 0))
-  const jam = Math.floor(d / 3600)
-  const menit = Math.floor((d % 3600) / 60)
-  const sisa = d % 60
-  const duaAngka = (n) => String(n).padStart(2, '0')
-  if (jam > 0) return `${jam}:${duaAngka(menit)}:${duaAngka(sisa)}`
-  return `${menit}:${duaAngka(sisa)}`
-}
-
-/** Warna bar berdasarkan persen terpakai. */
-function warnaBar(persen) {
-  if (persen >= 90) return 'is-danger'
-  if (persen >= 70) return 'is-warning'
-  return ''
 }
 
 /**
@@ -198,9 +174,27 @@ export function UsageContent({ apiUrl, apiOnline, aktif = true }) {
   const hampirHabis = persenAkun >= 90
   const jatahPenuh = data?.jatah_penuh || akun?.requests?.jatah_penuh || 0
 
+  /* Judul ringkasan mengikuti jatah yang paling menipis.
+     Dengan dua bilah (obrolan & gambar), kalimatnya tidak lagi cukup
+     menyebut "jatah" saja — pengguna perlu tahu jatah mana yang hampir
+     habis. Bila keduanya masih lega, kalimat tetap netral. */
+  const persenGambar =
+    akun?.gambar && akun.gambar.batas > 0
+      ? Math.round(((akun.gambar.batas - akun.gambar.terpakai) / akun.gambar.batas) * 100)
+      : 100
+  const sisaPersenChat = Math.max(0, 100 - persenAkun)
+  const menipisChat = sisaPersenChat <= 10
+  const menipisGambar = persenGambar <= 10
+
   /* Hitung mundur BERDETAK PER DETIK. Saat habis, data diambil ulang
      supaya jatah yang baru pulih langsung tampil. */
   const sisaDetik = useHitungMundur(akun?.reset, ambil)
+
+  /* Jatah gambar punya jendela waktunya SENDIRI (dihitung sejak gambar
+     pertama, bukan sejak pesan pertama). Karena itu hitung mundurnya
+     dipisah — memakai satu nilai untuk keduanya akan menampilkan waktu
+     yang salah pada salah satunya. */
+  const detikGambar = useHitungMundur(akun?.gambar?.reset, ambil)
 
   return (
     <div className="usage">
@@ -225,7 +219,12 @@ export function UsageContent({ apiUrl, apiOnline, aktif = true }) {
 
       {data && (
         <>
-          {/* --- Ringkasan jatah akun --- */}
+          {/* --- Ringkasan jatah akun ---
+               Diganti dari angka menjadi BILAH PERSEN, mengikuti contoh
+               yang diminta: judul, "N% sisa", keterangan waktu reset, dan
+               bilah. Angka pastinya tetap ada di baris keterangan kecil,
+               jadi pengguna yang ingin hitungan tepat tidak kehilangan
+               informasi. */}
           <div className="usage__hero">
             <div className="usage__hero-icon">
               <Activity size={18} />
@@ -235,21 +234,14 @@ export function UsageContent({ apiUrl, apiOnline, aktif = true }) {
               <div className="usage__hero-sub">
                 {akun ? (
                   <>
-                    {akun.requests?.sisa > 0 ? (
-                      <>
-                        Masih ada{' '}
-                        <strong>{angkaRingkas(akun.requests?.sisa || 0)}</strong>{' '}
-                        pesan
-                        {sisaDetik > 0 && (
-                          <> · diperbarui dalam {durasi(sisaDetik)}</>
-                        )}
-                      </>
+                    {akun.requests?.sisa > 0 && !menipisChat ? (
+                      <>Jatah Anda masih lega. Jatah kembali penuh otomatis dalam{' '}</>
+                    ) : menipisChat ? (
+                      <>Jatah obrolan tinggal sedikit · kembali penuh dalam{' '}</>
                     ) : (
-                      <>
-                        Jatah sudah terpakai semua · kembali dalam{' '}
-                        <strong>{durasi(sisaDetik)}</strong>
-                      </>
+                      <>Jatah obrolan sudah terpakai semua · kembali dalam{' '}</>
                     )}
+                    <strong>{durasi(sisaDetik)}</strong>.
                   </>
                 ) : (
                   <>Anda sedang memakai mode tamu</>
@@ -258,97 +250,80 @@ export function UsageContent({ apiUrl, apiOnline, aktif = true }) {
             </div>
           </div>
 
-          {/* --- Pemakaian akun ini sendiri ---
-               Satu-satunya angka jatah yang perlu diketahui pengguna.
-               Bila habis, chat ditolak sampai jendelanya berakhir, jadi
-               angkanya harus terlihat jelas — bukan tersembunyi. */}
+          {/* --- Bilah jatah ---
+               SATU bilah per jenis jatah. Chat dan gambar dipisah karena
+               memang tidak saling mengurangi: membuat gambar tidak
+               memotong jatah chat. Menggabungkannya akan menyesatkan. */}
+          {akun && (
+            <div className="usage__bars">
+              <JatahBar
+                judul="Batas obrolan"
+                terpakai={akun.requests?.terpakai || 0}
+                batas={akun.requests?.batas || 0}
+                sisaDetik={sisaDetik}
+                keterangan
+                uji="jatah-chat"
+              />
+
+              {akun.gambar && (
+                <JatahBar
+                  judul="Batas gambar"
+                  terpakai={akun.gambar.terpakai || 0}
+                  batas={akun.gambar.batas || 0}
+                  sisaDetik={detikGambar}
+                  keterangan
+                  uji="jatah-gambar"
+                />
+              )}
+            </div>
+          )}
+
+          {/* --- Penjelasan tambahan ---
+               Hanya muncul bila memang ada yang perlu dijelaskan. */}
           {akun && (
             <div className="usage__akun">
-              <div className="usage__akun-head">
-                <span className="usage__akun-label">Pemakaian saya</span>
-                <span className="usage__akun-total">
-                  {angkaRingkas(akun.requests?.terpakai || 0)}
-                  <span className="usage__akun-sep"> / </span>
-                  {angkaRingkas(akun.requests?.batas || 0)} pesan
-                </span>
-              </div>
-
-              <div
-                className={`usage-bar__track usage__akun-track ${warnaBar(
-                  akun.requests?.persen ?? 0,
-                )}`}
-                role="progressbar"
-                aria-valuenow={Math.round(akun.requests?.persen ?? 0)}
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-label={`Jatah pesan akun ini: ${akun.requests?.persen ?? 0}% terpakai`}
-              >
-                <div
-                  className="usage-bar__fill"
-                  style={{
-                    width: `${Math.max(
-                      akun.requests?.persen ?? 0,
-                      (akun.requests?.terpakai || 0) > 0 ? 1.5 : 0,
-                    )}%`,
-                  }}
-                />
-              </div>
-
-              <div className="usage__akun-note">
-                Sudah dipakai <strong>{angkaRingkas(akun.requests?.terpakai || 0)}</strong>{' '}
-                dari {angkaRingkas(akun.requests?.batas || 0)} pesan · sisa{' '}
-                <strong>{angkaRingkas(akun.requests?.sisa || 0)}</strong>
-                {(akun.tokens?.terpakai || 0) > 0 && (
-                  <>
-                    <span className="usage__akun-sep">·</span>
-                    {angkaRingkas(akun.tokens.terpakai)} token
-                  </>
-                )}
-              </div>
-
-              {/* Hitung mundur RESET — berdetak tiap detik (real time),
-                  dihitung di browser sehingga tidak memakai kuota. */}
-              {akun.reset?.bergulir && sisaDetik > 0 && (
-                <div className="usage__hitung" aria-live="polite">
-                  <span className="usage__hitung-label">Diperbarui dalam</span>
-                  <span className="usage__hitung-nilai" data-uji="hitung">
-                    {durasiDetik(sisaDetik)}
-                  </span>
-                  {akun.reset?.waktu_utc && (
-                    <span className="usage__hitung-jam">
-                      ({new Date(akun.reset.waktu_utc).toLocaleString('id-ID', {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                        day: 'numeric',
-                        month: 'short',
-                      })})
-                    </span>
-                  )}
-                </div>
-              )}
-
               {akun.reset?.bergulir && (
-                <div className="usage__akun-jendela">
-                  Jatah ini seperti bekal untuk {Math.round(akun.reset.jendela_jam || 24)}{' '}
-                  jam ke depan, dihitung sejak pesan pertama Anda.
+                <div className="usage__akun-note">
+                  Jatah obrolan dan jatah gambar dihitung terpisah: membuat
+                  gambar tidak mengurangi jatah obrolan Anda. Keduanya
+                  berjalan sebagai bekal{' '}
+                  {Math.round(akun.reset.jendela_jam || 24)} jam sejak pesan
+                  pertama.
                   {akun.requests?.terpakai === 0 && (
                     <> Hitungannya baru mulai saat Anda mengirim pesan.</>
                   )}
                 </div>
               )}
 
+              {akun.gambar && akun.gambar.batas === 0 && (
+                <div className="usage__akun-note">
+                  Akun Anda belum mendapat jatah gambar. Masuk dengan Google
+                  agar bisa membuat gambar.
+                </div>
+              )}
+
+              {akun.gambar && akun.gambar.habis && (
+                <div className="usage__akun-note">
+                  Jatah gambar Anda sudah terpakai semua · kembali dalam{' '}
+                  {durasi(detikGambar)}
+                  {detikGambar <= 0 && 'sebentar lagi'}. Mengobrol tetap bisa
+                  seperti biasa.
+                </div>
+              )}
+
               {akun.requests?.dikurangi && (
-                <div className="usage__akun-jendela">
-                  Hari ini jatahnya sedikit lebih kecil karena sedang banyak yang
-                  memakai — {angkaRingkas(akun.requests?.batas || 0)} pesan (biasanya{' '}
-                  {angkaRingkas(jatahPenuh)}). Kembali normal sendiri, tidak perlu
-                  melakukan apa pun.
+                <div className="usage__akun-note">
+                  Hari ini jatah obrolannya sedikit lebih kecil karena sedang
+                  banyak yang memakai —{' '}
+                  {angkaRingkas(akun.requests?.batas || 0)} pesan (biasanya{' '}
+                  {angkaRingkas(jatahPenuh)}). Kembali normal sendiri, tidak
+                  perlu melakukan apa pun.
                 </div>
               )}
 
               {akun.habis && (
                 <div className="usage__akun-habis">
-                  Jatah Anda sudah terpakai semua. Bisa chat lagi dalam{' '}
+                  Jatah obrolan Anda sudah terpakai semua. Bisa chat lagi dalam{' '}
                   {durasi(sisaDetik)}
                   {sisaDetik <= 0 && 'sebentar lagi'} — sementara itu, percakapan
                   lama tetap bisa dibaca.
@@ -377,8 +352,15 @@ export function UsageContent({ apiUrl, apiOnline, aktif = true }) {
 
           {hampirHabis && !akun?.habis && (
             <div className="usage__notice is-warning">
-              Jatah Anda tinggal sedikit. Tidak masalah — akan kembali sendiri
-              dalam {durasi(sisaDetik)}.
+              Jatah obrolan Anda tinggal sedikit. Tidak masalah — akan kembali
+              sendiri dalam {durasi(sisaDetik)}.
+            </div>
+          )}
+
+          {menipisGambar && !menipisChat && akun?.gambar && !akun.gambar.habis && (
+            <div className="usage__notice is-warning">
+              Jatah gambar Anda tinggal sedikit. Akan kembali sendiri dalam{' '}
+              {durasi(detikGambar)}.
             </div>
           )}
 

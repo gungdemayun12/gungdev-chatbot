@@ -258,6 +258,49 @@ async def uji_jatah():
 
 asyncio.run(uji_jatah())
 
+
+# =====================================================================
+print("\n=== 4b. PANEL /usage MENGIRIM JATAH SEBAGAI PERSEN ===")
+# =====================================================================
+# Panel jatah di UI kini memakai BILAH PERSEN ("N% sisa"), bukan angka
+# mentah. Supaya bilahnya bisa digambar, /usage HARUS mengirim bagian
+# gambar beserta batas, sisa, dan waktu resetnya. Uji ini menjaga
+# bentuk data itu agar tidak diam-diam hilang saat kode lain diubah.
+SUB_PANEL = "900000000000000010"
+
+
+async def uji_ringkasan():
+    # Keadaan awal: belum ada pemakaian sama sekali.
+    r0 = await usage.ringkasan("uji", "uji", sub=SUB_PANEL)
+    akun0 = r0.get("akun") or {}
+    g0 = akun0.get("gambar") or {}
+    cek("ringkasan akun punya bagian gambar", bool(g0), str(sorted(g0))[:80])
+    cek("jatah gambar mulai 0 terpakai", g0.get("terpakai") == 0, str(g0.get("terpakai")))
+    cek("persen gambar dihitung", g0.get("persen") == 0, str(g0.get("persen")))
+    cek("sisa gambar = batas saat belum dipakai", g0.get("sisa") == g0.get("batas"))
+    cek("belum habis", g0.get("habis") is False)
+    cek("reset gambar punya field detik", "detik" in (g0.get("reset") or {}), str(g0.get("reset"))[:80])
+    cek("reset gambar punya detik/jam", "jam" in (g0.get("reset") or {}))
+    cek("jendela reset gambar disebut", "jendela_jam" in (g0.get("reset") or {}))
+
+    # Membuat satu gambar HARUS menggeser persen jatah gambar, dan TIDAK
+    # menggeser jatah chat — keduanya memang terpisah.
+    await usage.catat_gambar(SUB_PANEL)
+    r1 = await usage.ringkasan("uji", "uji", sub=SUB_PANEL)
+    g1 = (r1.get("akun") or {}).get("gambar") or {}
+    chat1 = (r1.get("akun") or {}).get("requests") or {}
+    cek("gambar tercatat di panel", g1.get("terpakai") == 1, str(g1.get("terpakai")))
+    cek("sisa gambar berkurang", g1.get("sisa") == g1.get("batas") - 1, str(g1.get("sisa")))
+    cek("persen gambar naik", g1.get("persen", 0) > 0, str(g1.get("persen")))
+    cek("chat TIDAK ikut bertambah", chat1.get("terpakai") == 0, str(chat1.get("terpakai")))
+
+    # Tamu (tanpa sub) tidak boleh mendapat bagian "akun" sama sekali.
+    rt = await usage.ringkasan("uji", "uji", sub=None)
+    cek("tamu tidak punya bagian akun", "akun" not in rt, str(sorted(rt.keys())))
+
+
+asyncio.run(uji_ringkasan())
+
 # =====================================================================
 print("\n=== 5. TANDA AIR LAYANAN GAMBAR DIBUANG ===")
 # =====================================================================

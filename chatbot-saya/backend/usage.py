@@ -1038,8 +1038,6 @@ async def periksa_jatah_gambar(sub: Optional[str]) -> Dict[str, Any]:
         hasil["alasan"] = "gambar"
 
     return hasil
-
-
 async def catat_gambar(sub: Optional[str]) -> None:
     """
     Mencatat SATU gambar yang berhasil dibuat.
@@ -1314,6 +1312,38 @@ async def ringkasan(
                 " Hari ini layanan sedang ramai, sehingga jatah harian "
                 "sementara dikurangi — jatah kembali normal otomatis."
             )
+
+        # ---------------- Jatah GAMBAR (terpisah dari chat) ----------------
+        # MENGAPA DIPISAH DI DATA, BUKAN DIGABUNG:
+        # membuat gambar TIDAK mengurangi jatah chat (lihat catat_gambar).
+        # Kalau keduanya dijumlahkan, pengguna akan melihat jatah chatnya
+        # berkurang padahal ia hanya membuat gambar — itu menyesatkan.
+        # Jadi dikirim sebagai bagian sendiri, dengan jendela waktunya
+        # sendiri pula.
+        try:
+            g = await periksa_jatah_gambar(sub_sah)
+            _sisa_gambar = int(g.get("reset_detik") or 0)
+            hasil["akun"]["gambar"] = {
+                "terpakai": int(g["terpakai"]),
+                "batas": int(g["batas"]),
+                "sisa": int(g["sisa"]),
+                "persen": _persen(int(g["terpakai"]), max(1, int(g["batas"]))),
+                "habis": not g["boleh"],
+                "reset": {
+                    "detik": _sisa_gambar,
+                    "jam": round(_sisa_gambar / 3600, 1),
+                    # Waktu absolut supaya frontend bisa menghitung mundur
+                    # sendiri per detik tanpa bertanya ulang ke server.
+                    "pada": int(datetime.now(timezone.utc).timestamp()) + _sisa_gambar,
+                    "zona": "UTC",
+                    "bergulir": True,
+                    "jendela_jam": round(JENDELA_JATAH_DETIK / 3600, 1),
+                },
+            }
+        except Exception as exc:  # noqa: BLE001
+            # Kegagalan membaca jatah gambar TIDAK boleh menggagalkan panel
+            # jatah. Cukup tidak ditampilkan.
+            logger.warning("Gagal membaca jatah gambar untuk panel: %s", exc)
     else:
         # Tamu: tidak punya akun, jadi tidak ada jatah per akun.
         # Batas 3 pesan/hari per IP ditegakkan di main.py.
