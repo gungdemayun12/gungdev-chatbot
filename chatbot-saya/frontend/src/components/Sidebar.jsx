@@ -10,6 +10,7 @@ import {
   ChevronRight,
   CloudOff,
   Download,
+  Link2,
   LogIn,
   LogOut,
   MoreHorizontal,
@@ -40,7 +41,7 @@ function HistorySkeleton() {
 }
 
 /** Satu item riwayat + menu kontekstual. */
-function HistoryItem({ session, active, onSelect, onRename, onPin, onDelete, onExport }) {
+function HistoryItem({ session, active, onSelect, onRename, onPin, onDelete, onExport, onCopyLink }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const wrapRef = useRef(null)
 
@@ -104,6 +105,17 @@ function HistoryItem({ session, active, onSelect, onRename, onPin, onDelete, onE
           >
             {session.pinned ? <PinOff size={14} /> : <Pin size={14} />}
             {session.pinned ? 'Lepas sematan' : 'Sematkan'}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="sb-menu__item"
+            onClick={() => {
+              setMenuOpen(false)
+              onCopyLink(session)
+            }}
+          >
+            <Link2 size={14} /> Salin tautan
           </button>
           <button
             type="button"
@@ -225,6 +237,7 @@ export default function Sidebar({
   onPin,
   onDelete,
   onExport,
+  onCopyLink,
   onOpenSettings,
   user,
   inisialAkun,
@@ -397,6 +410,7 @@ export default function Sidebar({
                         onPin={onPin}
                         onDelete={onDelete}
                         onExport={onExport}
+                        onCopyLink={onCopyLink}
                       />
                     ))}
                   </ul>

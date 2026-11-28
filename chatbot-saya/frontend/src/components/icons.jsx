@@ -27,6 +27,7 @@ export {
   MoreHorizontal,
   Download,
   Share2,
+  Link2,
   Trash2,
   SendHorizontal,
   Paperclip,

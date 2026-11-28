@@ -46,6 +46,10 @@
       "destination": "https://gungdev-chatbot-rq5l.vercel.app/api/sessions/$1"
     },
     {
+      "source": "/c/(.*)",
+      "destination": "/index.html"
+    },
+    {
       "source": "/((?!health|usage|capabilities|diagnostik|chat|api/).*)",
       "destination": "/index.html"
     }

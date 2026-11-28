@@ -20,6 +20,7 @@ import LoginModal from './components/LoginModal.jsx'
 
 import { useSettings, resolveApiUrl } from './hooks/useSettings.js'
 import { useSessions } from './hooks/useSessions.js'
+import { useUrlSesi, AWALAN_SESI } from './hooks/useUrlSesi.js'
 import { useToasts } from './hooks/useToasts.js'
 import { useAuth } from './hooks/useAuth.js'
 import { LogOut } from './components/icons.jsx'
@@ -83,6 +84,11 @@ export default function App() {
     tersimpan,
     statusSimpan,
   } = useSessions(settings, user?.sub || null, apiUrl)
+
+  /* Alamat unik per percakapan (/c/<token>). Hook ini menjaga URL tetap
+     sejalan dengan sesi yang sedang dibuka, dua arah: URL dibuka ->
+     sesi dibuka, dan sesi diganti -> URL ikut berganti. */
+  useUrlSesi({ activeSession, sessions, selectSession, loaded })
 
   const { toasts, toast, dismiss } = useToasts()
 
@@ -700,6 +706,49 @@ export default function App() {
     handleExportSession(activeSession, 'md')
   }, [activeSession, handleExportSession, toast])
 
+  /**
+   * Menyalin alamat unik percakapan (/c/<token>) ke clipboard.
+   *
+   * Ini yang membuat token per sesi BERGUNA: pengguna bisa menyimpan
+   * penanda, membuka lagi di perangkat lain, atau mengirimkannya.
+   * Bila clipboard diblokir browser (butuh https + izin), alamatnya
+   * ditampilkan di toast agar tetap bisa disalin manual — lebih baik
+   * daripada gagal diam-diam.
+   */
+  const handleCopyLink = useCallback(async () => {
+    const token = activeSession?.token
+    if (!token) {
+      toast('Percakapan ini belum punya alamat sendiri. Kirim satu pesan dulu.', 'info')
+      return
+    }
+    const alamat = `${window.location.origin}${AWALAN_SESI}${token}`
+    try {
+      await navigator.clipboard.writeText(alamat)
+      toast('Tautan percakapan disalin.', 'success')
+    } catch {
+      toast(`Tautan: ${alamat}`, 'info')
+    }
+  }, [activeSession?.token, toast])
+
+  /** Versi untuk menu sidebar: menerima objek sesi mana pun. */
+  const handleCopyLinkSesi = useCallback(
+    async (sesi) => {
+      const token = sesi?.token
+      if (!token) {
+        toast('Percakapan ini belum punya alamat sendiri.', 'info')
+        return
+      }
+      const alamat = `${window.location.origin}${AWALAN_SESI}${token}`
+      try {
+        await navigator.clipboard.writeText(alamat)
+        toast('Tautan percakapan disalin.', 'success')
+      } catch {
+        toast(`Tautan: ${alamat}`, 'info')
+      }
+    },
+    [toast],
+  )
+
   const handleCopyNotice = useCallback(() => toast('Tersalin ke clipboard.', 'success'), [toast])
 
   /* ---------------- Lampiran & riset: ganti model otomatis ------------- */
@@ -805,6 +854,7 @@ export default function App() {
         onPin={togglePin}
         onDelete={(s) => setDeleteTarget(s)}
         onExport={handleExportSession}
+        onCopyLink={handleCopyLinkSesi}
         onOpenSettings={() => setSettingsOpen(true)}
         user={user}
         inisialAkun={inisialNama}
