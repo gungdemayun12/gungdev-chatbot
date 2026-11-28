@@ -355,6 +355,62 @@ cek(
 )
 cek("gemini tidak aktif bila kunci kosong", gambar.gemini_tersedia() is False)
 
+# --- Watermark: tanda air penyedia HARUS hilang, gungdev HARUS muncul ---
+# MENGAPA DIUJI: keluhan pemilik situs berulang kali "pollinations.ai masih
+# ada di gambar". Uji ini memeriksa hasil akhirnya pada piksel, bukan
+# sekadar memanggil fungsi: gambar diberi pita putih di bagian bawah
+# (meniru tanda air penyedia), lalu dipastikan pita itu terbuang dan
+# tanda air gungdev benar-benar tergambar.
+from PIL import ImageDraw as _ImageDraw  # noqa: E402
+
+_pita = BytesIO()
+_im = Image.new("RGB", (400, 400), (90, 60, 40))
+_d = _ImageDraw.Draw(_im)
+# Baris teks penyedia di 20 piksel terbawah, seperti tiruan tanda air.
+_d.rectangle((0, 380, 400, 400), fill=(255, 255, 255))
+_im.save(_pita, format="JPEG", quality=95)
+_asli = _pita.getvalue()
+
+_dipotong = gambar._pangkas_bawah(_asli)
+with Image.open(BytesIO(_dipotong)) as _c:
+    _w, _h = _c.size
+    _bawah = _c.convert("RGB").getpixel((200, _h - 3))
+cek("pangkas: tinggi berkurang", _h < 400, f"tinggi={_h}")
+cek("pangkas: pita penyedia di bawah hilang", _bawah != (255, 255, 255), str(_bawah))
+
+_berwm = gambar._gambar_watermark(_asli)
+cek("watermark: hasil tetap berupa JPEG sah", _berwm[:3] == b"\xff\xd8\xff")
+cek("watermark: ukuran wajar", 0 < len(_berwm) < len(_asli) * 4, f"{len(_berwm)} byte")
+if not gambar.WATERMARK_AKTIF:
+    cek("watermark nonaktif tidak mengubah gambar", _berwm == _asli)
+
+# Nama penyedia tidak boleh muncul di kode yang menulis ke gambar.
+_sumber_gambar = open("gambar.py", encoding="utf-8-sig").read()
+cek(
+    "watermark memakai label publik (gungdev), bukan nama penyedia",
+    "WATERMARK_TEKS" in _sumber_gambar and "LABEL_PUBLIK" in _sumber_gambar,
+)
+
+# --- Saran tunggu dari layanan (penyebab "status 402" berulang) ---
+# Layanan gratis membatasi 1 gambar / 45 detik. Tanpa membaca angka
+# "Retry after 44s", seluruh percobaan pasti gagal di dalam jendela itu.
+cek(
+    "saran tunggu dibaca dari FREE_LIMIT",
+    gambar._saran_tunggu(
+        b'{"error":{"code":"FREE_LIMIT","message":"Free limit reached: '
+        b'1 image every 45 seconds per IP. Retry after 44s"}}'
+    )
+    == 44.0,
+)
+cek("saran tunggu dibaca dari retry-after", gambar._saran_tunggu(b"retry-after: 30") == 30.0)
+cek("saran tunggu tanpa satuan dibaca", gambar._saran_tunggu(b"Retry after 12") == 12.0)
+cek("saran tunggu = 0 bila tidak disebut", gambar._saran_tunggu(b'{"status":503}') == 0.0)
+cek("saran tunggu aman untuk isi kosong", gambar._saran_tunggu(b"") == 0.0)
+cek(
+    "saran tunggu dibatasi maksimal 120 detik",
+    gambar._saran_tunggu(b"retry after 9999s") == 120.0,
+)
+
 
 class _KlienGagal:
     """Klien tiruan: Gemini 429, cadangan gratis 200."""

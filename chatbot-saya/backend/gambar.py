@@ -81,13 +81,31 @@ GAMBAR_MODEL = os.environ.get("GAMBAR_MODEL", "flux").strip() or "flux"
 
 # Berapa kali dicoba bila layanan gagal (ramai / timeout).
 # Layanan gratis sering menolak sesaat dengan status 402/429 ketika
-# sedang ramai. Karena itu percobaan dibuat beberapa kali dengan jeda
-# singkat: satu gambar gagal padahal layanan hanya "penuh sebentar"
-# akan terasa seperti fitur yang rusak.
+# sedang ramai. Karena itu percobaan dibuat beberapa kali dengan jeda.
 GAMBAR_PERCOBAAN = max(1, int(os.environ.get("GAMBAR_PERCOBAAN", "3") or 3))
 
-# Jeda antar percobaan (detik), dikali nomor percobaan.
+# Jeda dasar antar percobaan (detik), dikali nomor percobaan.
 GAMBAR_JEDA_DETIK = float(os.environ.get("GAMBAR_JEDA", "1.5") or 1.5)
+
+# Jeda BILA LAYANAN MENJAWAB "terlalu cepat" (HTTP 402 FREE_LIMIT).
+#
+# MENGAPA PERLU ANGKA TERPISAH — ini temuan dari uji nyata:
+# layanan gratis membatasi **1 gambar per 45 detik per IP**. Pesan
+# balasannya bahkan menyebut sendiri "Retry after 44s".
+#
+# Jeda lama 1,5 detik × percobaan berarti seluruh retry (1,5 + 3 detik)
+# SELALU jatuh di dalam jendela 45 detik itu, sehingga SEMUA percobaan
+# pasti ditolak dan pengguna akhirnya melihat "layanan sedang ramai"
+# padahal penyebabnya bukan ramai. Karena itu, bila layanan menyebut
+# angka tunggu, kita menunggunya — dibatasi agar tetap di bawah
+# maxDuration Vercel (60 detik).
+GAMBAR_JEDA_BATAS_DETIK = max(0, int(os.environ.get("GAMBAR_JEDA_BATAS", "0") or 0))
+
+# Batas atas jeda yang mau ditunggu. Bila layanan meminta lebih lama
+# dari ini, percobaan dihentikan lebih awal dengan pesan yang JUJUR
+# ("coba lagi sebentar lagi") daripada membuat pengguna menunggu
+# sia-sia sampai Vercel memutus koneksi.
+GAMBAR_JEDA_MAKS_DETIK = float(os.environ.get("GAMBAR_JEDA_MAKS", "40") or 40)
 
 # Penanda publik produk. Nama penyedia gambar TIDAK boleh tampil di UI.
 LABEL_PUBLIK = "gungdev"
@@ -1582,6 +1600,53 @@ def _bangun_url(deskripsi: str, ukuran: int, seed: int) -> str:
     return f"{GAMBAR_BASE_URL}/{prompt}?{kueri}"
 
 
+def _saran_tunggu(isi_balasan: bytes) -> float:
+    """
+    Membaca berapa detik layanan minta kita menunggu.
+
+    Layanan gambar gratis membalas HTTP 402 dengan badan seperti:
+
+        {"error":{"code":"FREE_LIMIT","message":
+          "Free limit reached: 1 image every 45 seconds per IP.
+           Retry after 44s, ..."}}
+
+    Angka "Retry after 44s" itu penting: tanpanya, retry kita (jeda 1,5
+    detik) selalu jatuh di dalam jendela 45 detik, sehingga SEMUA
+    percobaan pasti gagal dan pengguna melihat pesan "sedang ramai"
+    padahal sebenarnya ia hanya perlu menunggu.
+
+    Mengembalikan 0 bila balasan tidak menyebut angka.
+    """
+    if not isi_balasan:
+        return 0.0
+    try:
+        teks = isi_balasan.decode("utf-8", "replace")
+    except Exception:  # noqa: BLE001
+        return 0.0
+
+    # Cari "retry after 44s" / "retry-after: 44" / "after 44 seconds".
+    # \d{1,5} (bukan 1,3): angka seperti 9999 tetap harus TERBACA lalu
+    # dibatasi ke 120 detik oleh kode di bawah. Bila tidak terbaca, nilai
+    # 0 berarti "tidak ada saran" — dan itu membuat retry tetap gagal.
+    cocok = re.search(
+        r"(?:retry[\s\-_]{0,3}after|after)\D{0,6}(\d{1,5})\s*(?:s\b|sec|second)",
+        teks,
+        re.IGNORECASE,
+    ) or re.search(
+        # Bentuk tanpa satuan: "retry after 44" / "retry-after: 44".
+        r"retry[\s\-_]{0,3}after\D{0,6}(\d{1,5})\b",
+        teks,
+        re.IGNORECASE,
+    )
+    if not cocok:
+        return 0.0
+    try:
+        detik = float(cocok.group(1))
+    except Exception:  # noqa: BLE001
+        return 0.0
+    return max(0.0, min(detik, 120.0))
+
+
 # ---------------------------------------------------------------------
 # MESIN UTAMA: GEMINI
 # ---------------------------------------------------------------------
@@ -1809,6 +1874,27 @@ async def buat_gambar(
                     GAMBAR_PERCOBAAN,
                     galat_terakhir,
                 )
+                # Layanan membatasi 1 gambar / 45 detik per IP. Bila ia
+                # menyebut angka tunggu, tunggulah selama itu — selain itu
+                # semua percobaan berikutnya pasti ditolak juga.
+                saran = _saran_tunggu(resp.content or b"")
+                if saran > 0 and percobaan + 1 < GAMBAR_PERCOBAAN:
+                    if saran > GAMBAR_JEDA_MAKS_DETIK:
+                        # Terlalu lama untuk ditunggu di dalam satu
+                        # permintaan: berhenti dengan pesan jujur.
+                        galat_terakhir = f"batas layanan, tunggu {int(saran)} detik"
+                        logger.warning(
+                            "Layanan minta tunggu %.0f detik — melebihi batas %.0f; "
+                            "percobaan dihentikan.",
+                            saran,
+                            GAMBAR_JEDA_MAKS_DETIK,
+                        )
+                        break
+                    logger.info(
+                        "Layanan minta tunggu %.0f detik sebelum percobaan berikutnya.",
+                        saran,
+                    )
+                    await asyncio.sleep(saran + 1.0)
                 continue
 
             isi = resp.content or b""
@@ -1846,12 +1932,27 @@ async def buat_gambar(
             galat_terakhir = type(exc).__name__
             logger.warning("Gambar gagal (percobaan %s): %s", percobaan + 1, exc)
 
-    return {
-        "ok": False,
-        "pesan": (
+    # Pesan dibedakan menurut SEBABNYA, bukan disamakan "sedang ramai".
+    #
+    # MENGAPA PENTING: layanan gratis membatasi 1 gambar per 45 detik per
+    # IP. Bila itu disebut "sedang ramai", pengguna akan mencoba terus
+    # tanpa tahu bahwa ia hanya perlu menunggu. Pesan yang salah sebab
+    # membuat orang menyimpulkan fiturnya rusak.
+    if "batas layanan" in (galat_terakhir or ""):
+        pesan = (
+            "Layanan gambar sedang membatasi jumlah permintaan, jadi gambar "
+            "belum bisa dibuat sekarang. Tunggu sekitar satu menit, lalu "
+            "minta lagi ya."
+        )
+    else:
+        pesan = (
             "Gambar belum berhasil dibuat karena layanan gambar sedang ramai. "
             "Coba lagi sebentar lagi ya."
-        ),
+        )
+
+    return {
+        "ok": False,
+        "pesan": pesan,
         "galat": galat_terakhir,
     }
 
