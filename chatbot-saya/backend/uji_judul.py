@@ -118,6 +118,53 @@ def main() -> int:
     cek("jawaban asisten ikut", "Berikut tiga paket" in bahan)
     cek("pesan sistem tidak ikut", "abaikan" not in bahan)
 
+    # --- 6b. Model bertele-tele / terpotong -------------------------
+    # Model penalar (gpt-oss) kadang berpikir dulu dalam bahasa Inggris:
+    #   'We need to output a title summarizing the topic. ... So title: "Paket'
+    # Dengan max_tokens kecil keluarannya terpotong di tengah. Judul yang
+    # sudah ada di dalam teks itu harus tetap DISELAMATKAN — dulu seluruh
+    # keluaran dibuang sehingga judul pintar tidak pernah terpakai.
+    print("\n=== 6b. KELUARAN BERTELE-TELE DISELAMATKAN ===")
+    bertele = (
+        'We need to output a title summarizing the topic. The conversation: '
+        'user asks for honeymoon Bali package and price. So title: "Paket'
+    )
+    j_bertele = judul.bersihkan_judul(bertele)
+    cek("judul diselamatkan dari penalaran terpotong", j_bertele != "", repr(j_bertele))
+    cek("hasil selamat tidak berbahasa Inggris", not judul._tampak_bahasa_inggris(j_bertele), j_bertele)
+
+    lengkap = (
+        'We need to output a title summarizing the topic. '
+        'The user asks for honeymoon Bali package and price. '
+        'So title: "Paket honeymoon Bali dan harga"'
+    )
+    cek(
+        "judul diambil dari kalimat berkutip",
+        judul.bersihkan_judul(lengkap) == "Paket honeymoon Bali dan harga",
+        repr(judul.bersihkan_judul(lengkap)),
+    )
+    cek(
+        "narasi Inggris TANPA judul ditolak",
+        judul.bersihkan_judul("We need to output a title summarizing the topic now") == "",
+    )
+    cek(
+        "judul Indonesia dengan istilah Inggris tetap lolos",
+        judul.bersihkan_judul("IndexedDB vs localStorage") == "IndexedDB vs localStorage",
+        repr(judul.bersihkan_judul("IndexedDB vs localStorage")),
+    )
+    cek(
+        "label 'Judul adalah' juga dipahami",
+        judul.bersihkan_judul('Judul adalah "Cara membuat bolu kukus"') == "Cara membuat bolu kukus",
+        repr(judul.bersihkan_judul('Judul adalah "Cara membuat bolu kukus"')),
+    )
+
+    # --- 6c. Jatah token judul cukup --------------------------------
+    print("\n=== 6c. JATAH TOKEN JUDUL CUKUP ===")
+    cek(
+        "prompt melarang berpikir panjang",
+        "JANGAN menjelaskan rencanamu" in judul.instruksi_judul(),
+    )
+
     # --- 7. Endpoint /judul ------------------------------------------
     print("\n=== 7. ENDPOINT /judul ===")
     import server_uji  # noqa: F401  (menyiapkan tiruan Upstash & Google)

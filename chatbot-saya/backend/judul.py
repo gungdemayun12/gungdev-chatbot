@@ -192,7 +192,10 @@ def instruksi_judul() -> str:
         "kalimat pengguna apa adanya.\n"
         "4. Jangan memakai kata sapaan atau kata perintah seperti 'tolong', "
         "'carikan', 'bisa', 'halo'.\n"
-        "5. Jangan mengarang isi di luar percakapan.\n\n"
+        "5. Jangan mengarang isi di luar percakapan.\n"
+        "6. JANGAN menjelaskan rencanamu dan jangan berpikir panjang. "
+        "Langsung tulis judulnya di baris pertama, karena jawaban yang "
+        "terlalu panjang akan terpotong.\n\n"
         "Contoh:\n"
         "- Pengguna tanya paket honeymoon Bali beserta harga -> "
         "Paket honeymoon Bali\n"
@@ -246,23 +249,45 @@ def bersihkan_judul(mentah: Optional[str]) -> str:
     teks = (mentah or "").strip()
     if not teks:
         return ""
-    # Ambil baris pertama yang berisi.
-    for baris in teks.splitlines():
-        baris = baris.strip()
-        if baris:
-            teks = baris
-            break
-    # Buang awalan label.
+
+    # 1) Bila model menyebut judulnya secara eksplisit, ambil yang itu.
+    #    Ditelusuri SEBELUM memotong baris, karena penalaran model
+    #    biasanya satu paragraf panjang.
+    pola = re.search(
+        r"(?:judul|title)\s*(?:percakapan|chat|nya)?\s*(?:adalah|is|:|=)\s*[\"“']?\s*"
+        r"([^\"“”'\n]{4,80})",
+        teks,
+        flags=re.I,
+    )
+    if pola:
+        teks = pola.group(1).strip()
+
+    # 2) Ambil baris pertama yang berisi (bila model menulis per baris).
+    elif "\n" in teks:
+        for baris in teks.splitlines():
+            baris = baris.strip()
+            if baris:
+                teks = baris
+                break
+
+    # 3) Buang awalan label.
     teks = re.sub(r"^(judul|title)\s*[:：-]\s*", "", teks, flags=re.I)
-    # Buang tanda kutip/penutup.
+    # 4) Buang tanda kutip/penutup.
     teks = teks.strip(" \"'`“”‘’*_#.!,;:")
     teks = re.sub(r"\s+", " ", teks).strip()
-    # Buang emoji & simbol yang bukan huruf/angka. Judul riwayat harus
-    # tenang dan mudah dipindai; emoji dari model tidak diinginkan.
+    # 5) Buang emoji & simbol yang bukan huruf/angka. Judul riwayat harus
+    #    tenang dan mudah dipindai; emoji dari model tidak diinginkan.
     teks = "".join(
         c for c in teks
         if c.isprintable() and (c.isalnum() or c in " -&+/.',:")
     ).strip()
+    teks = re.sub(r"\s+", " ", teks).strip()
+
+    # 6) Model penalar kadang berpikir dalam bahasa Inggris. Judul yang
+    #    baik memakai bahasa pengguna, jadi narasi Inggris ditolak.
+    if _tampak_bahasa_inggris(teks):
+        return ""
+
     if len(teks) < 4:
         return ""
     if len(teks) > MAKS_PANJANG:
@@ -275,4 +300,31 @@ def bersihkan_judul(mentah: Optional[str]) -> str:
         return ""
     if len(teks) > 42:
         return ""
+    # Judul harus benar-benar punya huruf, bukan sisa tanda baca.
+    if not re.search(r"[^\W\d_]", teks, re.UNICODE):
+        return ""
     return teks[:1].upper() + teks[1:]
+
+
+# Kata fungsi bahasa Inggris yang praktis tidak muncul di judul Indonesia.
+_KATA_INGGRIS = {
+    "the", "we", "need", "to", "output", "title", "summarizing", "topic",
+    "conversation", "user", "asks", "and", "price", "so", "is", "that",
+    "this", "should", "be", "let", "me", "write", "of", "about",
+    "here", "then", "final", "answer", "summarize", "must", "only",
+}
+
+
+def _tampak_bahasa_inggris(teks: str) -> bool:
+    """
+    True bila teks jelas narasi bahasa Inggris, bukan judul singkat.
+
+    Judul Indonesia yang kebetulan memuat kata Inggris (mis. "IndexedDB
+    vs localStorage") tetap lolos karena tidak memuat kata fungsi narasi
+    dalam jumlah berarti.
+    """
+    kata = [k for k in _RE_KATA.findall((teks or "").lower()) if len(k) > 1]
+    if len(kata) < 3:
+        return False
+    inggris = sum(1 for k in kata if k in _KATA_INGGRIS)
+    return inggris >= 3 and inggris / len(kata) > 0.4

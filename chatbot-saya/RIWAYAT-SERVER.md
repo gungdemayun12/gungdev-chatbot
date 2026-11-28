@@ -962,6 +962,28 @@ Judul dibuat **dua tahap**:
 Endpoint ini **tidak memakai jatah chat**: biayanya beberapa puluh token
 dan dipanggil sekali per sesi baru.
 
+### Dua jebakan yang sempat membuat judul pintar tidak terpakai
+
+1. **`/judul` belum dirutekan di `vercel.json`.** Endpoint sudah ada di
+   `main.py`, tetapi Vercel tidak punya aturan `rewrites` untuk `/judul`,
+   jadi permintaan tidak pernah sampai ke fungsi dan dijawab 404. Setiap
+   rewrite baru di FastAPI **wajib** ditambahkan juga di `vercel.json`.
+2. **Jawaban model terpotong di tengah penalaran.** Model `gpt-oss`
+   (model penalar) menulis rencananya dulu — dalam bahasa Inggris — baru
+   judulnya. Dengan `max_tokens: 32` jawabannya berhenti di
+   `'We need to output a title ... So title: "Paket'`, lalu
+   `bersihkan_judul` menolak seluruh keluaran itu. Sekarang:
+
+   - jatah token judul dinaikkan ke 200 (tetap sangat murah), dan
+     prompt melarang model menjelaskan rencananya;
+   - `bersihkan_judul` **menyelamatkan** judul yang sudah disebut setelah
+     kata "judul:"/"title:" — termasuk bila keluarannya terpotong;
+   - narasi bahasa Inggris tetap **ditolak** agar judul memakai bahasa
+     pengguna.
+
+Respons `/judul` menyertakan `sumber`: `"model"` (judul dirumuskan model)
+atau `"lokal"` (cadangan tanpa jaringan). Keduanya judul yang wajar.
+
 Contoh nyata (diuji di browser): prompt 400+ karakter
 
 > "Halo, selamat sore. Tolong bantu saya ya, saya sedang merencanakan
@@ -993,7 +1015,7 @@ python cek_key.py gemini          # idem untuk Gemini
 python server_uji.py              # jalankan server uji di port 8000
 python uji_api.py                 # 25 pemeriksaan endpoint lama
 python uji_jatah_api.py           # 44 pemeriksaan jatah/reset via HTTP
-python uji_judul.py               # 24 pemeriksaan judul dari TOPIK (bukan potongan prompt)
+python uji_judul.py               # 31 pemeriksaan judul dari TOPIK (bukan potongan prompt)
 
 # Frontend (butuh server_uji.py + npm run dev berjalan)
 cd chatbot-saya/frontend

@@ -3302,7 +3302,11 @@ async def buat_judul(request: "JudulRequest"):
             {
                 "model": request.model or MODEL_NAME,
                 "temperature": 0.2,
-                "max_tokens": 32,
+                # Model penalar (gpt-oss) butuh ruang untuk berpikir singkat
+                # sebelum menulis judul. Dengan 32 token jawabannya
+                # terpotong di tengah penalaran sehingga judul tidak pernah
+                # terpakai. 200 token masih sangat murah.
+                "max_tokens": 200,
                 "penelitian": False,
                 "perlu_riset": False,
             },
@@ -3310,12 +3314,9 @@ async def buat_judul(request: "JudulRequest"):
         pintar = judul_mod.bersihkan_judul(mentah)
         if pintar:
             return {"judul": pintar, "sumber": "model"}
-        logger.info("Judul dari model ditolak pembersih: %r", mentah)
-        return {"judul": cadangan, "sumber": "lokal", "debug_mentah": repr(mentah)}
     except Exception as exc:  # noqa: BLE001
         # Terminal: judul tidak boleh menggagalkan apa pun.
         logger.info("Judul dari model gagal (%s); memakai cadangan lokal.", exc)
-        return {"judul": cadangan, "sumber": "lokal", "debug_error": repr(exc)}
 
     return {"judul": cadangan, "sumber": "lokal"}
 
