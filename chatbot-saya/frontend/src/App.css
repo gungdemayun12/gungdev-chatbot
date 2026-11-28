@@ -1047,6 +1047,28 @@
   border-color: var(--border-strong, rgba(127, 127, 127, 0.4));
 }
 
+/* Penanda gambar lama (dibuat sebelum tanda air diperbaiki).
+   Tenang dan kecil — ini keterangan, bukan peringatan keras. */
+.hasil-gambar__lama {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 8px);
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.hasil-gambar__lama svg {
+  flex: none;
+  margin-top: 1px;
+  color: var(--text-tertiary, var(--text-muted));
+}
+
 .hasil-gambar--gagal {
   display: flex;
   align-items: center;

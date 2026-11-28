@@ -1,5 +1,5 @@
 /**
- * uji_gambar_browser.mjs — menguji pembuatan gambar di UI sungguhan.
+ * uji_gambar_browser.mjs â€” menguji pembuatan gambar di UI sungguhan.
  *
  * Yang diuji:
  *   1. Pengguna minta gambar -> gambar MUNCUL di percakapan.
@@ -20,14 +20,14 @@
  */
 import { chromium } from 'playwright'
 
-const URL_APP = 'http://127.0.0.1:5173/'
+const URL_APP = process.env.URL_UJI || 'http://127.0.0.1:5173/'
 const API = 'http://127.0.0.1:8000'
 const SUB_A = '100000000000000001'
 
 const HASIL = []
 function cek(nama, lulus, info = '') {
   HASIL.push({ nama, lulus: Boolean(lulus) })
-  console.log(`${lulus ? 'LULUS' : 'GAGAL'}  ${nama}${info ? ' — ' + info : ''}`)
+  console.log(`${lulus ? 'LULUS' : 'GAGAL'}  ${nama}${info ? ' â€” ' + info : ''}`)
 }
 
 async function resetAkun(sub) {
@@ -157,7 +157,7 @@ console.log('\n=== 1b. ANIMASI "SEDANG MENGGAMBAR" ===')
 {
   // Jatah gambar akun hanya 3 per 24 jam, dan bagian 1 di atas sudah
   // memakainya. Tanpa dikosongkan, permintaan di bagian ini dijawab
-  // "jatah habis" — bukan gambar — sehingga `meta.gambar_dimulai` tidak
+  // "jatah habis" â€” bukan gambar â€” sehingga `meta.gambar_dimulai` tidak
   // pernah dikirim dan animasinya tidak bisa diuji sama sekali.
   await fetch(`${API}/__uji/jatah-gambar-bebaskan`, {
     method: 'POST',
@@ -353,6 +353,59 @@ const bocor = await page.evaluate(() => {
 cek('nama layanan gambar tidak tampil', !bocor)
 cek('tidak ada galat halaman', sesi.galat.length === 0, sesi.galat.slice(0, 2).join(' | '))
 
+/* ================================================================ */
+console.log('\n=== 5b. PENANDA GAMBAR LAMA (watermark penyedia) ===')
+// Gambar lama di riwayat dibuat kode lama sehingga tanda air penyedia
+// masih menempel di pikselnya. Gambar itu TIDAK berubah sendiri, jadi UI
+// harus menjelaskan sebabnya â€” bukan membiarkan pengguna mengira fiturnya
+// masih rusak.
+//
+// Yang diuji adalah LOGIKA komponennya (fungsi kemungkinanLama), bukan
+// sekadar adanya elemen: perbandingan gambar lama vs gambar baru.
+{
+  const hasilLogika = await page.evaluate(async () => {
+    const mod = await import('/src/components/GambarHasil.jsx')
+    const f = mod.kemungkinanLama
+    if (typeof f !== 'function') return { adaFungsi: false }
+    return {
+      adaFungsi: true,
+      // Gambar baru SELALU membawa penanda mesin dari server.
+      baruUtama: f({ mesin: 'utama', data_url: 'data:image/jpeg;base64,' + 'A'.repeat(100) }),
+      baruCadangan: f({ mesin: 'cadangan', data_url: 'data:image/jpeg;base64,' + 'A'.repeat(100) }),
+      // Data lama tidak punya field mesin -> dianggap lama.
+      lamaTanpaMesin: f({ data_url: 'data:image/jpeg;base64,' + 'A'.repeat(900000) }),
+      lamaMesinAsing: f({ mesin: 'lain' }),
+      kosong: f(null),
+    }
+  })
+
+  cek('komponen menyediakan penilaian gambar lama', hasilLogika.adaFungsi)
+  cek('gambar mesin utama BUKAN gambar lama', hasilLogika.baruUtama === false)
+  cek('gambar mesin cadangan BUKAN gambar lama', hasilLogika.baruCadangan === false)
+  cek('data tanpa penanda mesin dianggap lama', hasilLogika.lamaTanpaMesin === true)
+  cek('nilai mesin asing dianggap lama', hasilLogika.lamaMesinAsing === true)
+  cek('gambar kosong tidak melempar', hasilLogika.kosong === false)
+
+  // Gambar baru di layar tidak boleh diberi penanda palsu.
+  const adaPenandaBaru = await page.evaluate(
+    () => document.querySelectorAll('[data-uji="gambar-lama"]').length,
+  )
+  cek('gambar baru di layar tanpa penanda lama', adaPenandaBaru === 0, `jumlah=${adaPenandaBaru}`)
+
+  // Bukti bahwa server tetap sehat setelah perubahan.
+  const dataServer = await fetch(`${API}/usage`, {
+    headers: { Authorization: `Bearer ${TOKEN_UJI}` },
+  }).then((r) => r.json())
+  cek('server tetap sehat setelah perubahan', Boolean(dataServer?.akun))
+
+  // Teks penandanya harus menjelaskan sebab, bukan menyalahkan pengguna.
+  const { readFileSync } = await import('node:fs')
+  const sumber = readFileSync('src/components/GambarHasil.jsx', 'utf8')
+  cek('penanda menjelaskan sebabnya', /sebelum kualitas gambar ditingkatkan/.test(sumber))
+  cek('penanda menawarkan membuat ulang', /Minta gambar yang sama lagi/.test(sumber))
+  cek('penanda berhati-hati (memakai "mungkin")', /mungkin masih terlihat/.test(sumber))
+}
+
 await sesi.ctx.close()
 
 /* ================================================================ */
@@ -412,7 +465,7 @@ console.log('\n=== 8. PANEL JATAH: INDIKATOR PERSEN ===')
 // Bagian jatah diganti dari angka menjadi BILAH PERSEN, mengikuti contoh
 // "Plan limits": judul, "N% sisa" di kanan, keterangan waktu reset, dan
 // bilah tipis. Uji ini memastikan bilahnya benar-benar tampil dan
-// angkanya masuk akal — bukan hanya ada di data.
+// angkanya masuk akal â€” bukan hanya ada di data.
 {
   await resetAkun(SUB_A)
 

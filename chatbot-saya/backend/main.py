@@ -3456,6 +3456,16 @@ async def siapkan_gambar(
         "deskripsi": hasil.get("deskripsi") or deskripsi,
         "pesan": gambar_mod.pesan_berhasil(hasil.get("deskripsi") or deskripsi),
         "sunting": bool(niat["sunting"]),
+        # Mesin pembuat gambar disimpan bersama gambarnya.
+        #
+        # MENGAPA: gambar lama di riwayat masih membawa tanda air penyedia
+        # lama, dan UI perlu membedakannya dengan PASTI (bukan menebak dari
+        # ukuran berkas). Gambar yang dibuat kode baru selalu punya field
+        # ini; data lama tidak punya.
+        #
+        # Nilainya internal ("utama"/"cadangan"), TIDAK ditampilkan ke
+        # pengguna dan tidak menyebut nama penyedia.
+        "mesin": hasil.get("mesin") or "cadangan",
     }
 
 
@@ -3491,6 +3501,9 @@ async def chat(request: ChatRequest, authorization: Optional[str] = Header(None)
                 "data_url": hasil_gambar["data_url"],
                 "deskripsi": hasil_gambar["deskripsi"],
                 "sunting": hasil_gambar["sunting"],
+                # Penanda internal untuk membedakan gambar baru dari gambar
+                # lama di riwayat (lihat GambarHasil.jsx).
+                "mesin": hasil_gambar.get("mesin"),
             },
         }
 
@@ -3598,6 +3611,7 @@ async def chat_stream(request: ChatRequest, authorization: Optional[str] = Heade
                         "data_url": hasil_gambar["data_url"],
                         "deskripsi": hasil_gambar["deskripsi"],
                         "sunting": hasil_gambar["sunting"],
+                        "mesin": hasil_gambar.get("mesin"),
                     }}})
                     yield sse({"delta": hasil_gambar["pesan"]})
                 elif hasil_gambar and hasil_gambar["jenis"] in ("jatah_habis", "gagal"):

@@ -1,5 +1,5 @@
 /**
- * GambarHasil.jsx — menampilkan gambar yang DIBUAT oleh AI.
+ * GambarHasil.jsx â€” menampilkan gambar yang DIBUAT oleh AI.
  *
  * Ini berbeda dari gambar yang diunggah pengguna: gambarnya baru
  * dihasilkan server, lalu dikirim sebagai data URL.
@@ -11,16 +11,47 @@
  *
  * Tampilannya sengaja sederhana: gambar besar yang bisa diklik untuk
  * diunduh, dengan keterangan deskripsi di bawahnya. Tanpa nama layanan
- * pembuat gambar — label publiknya hanya "GungDev".
+ * pembuat gambar â€” label publiknya hanya "GungDev".
  */
 import { useState } from 'react'
-import { Check, Download, Image as ImageIcon } from './icons.jsx'
+import { AlertCircle, Check, Download, Image as ImageIcon } from './icons.jsx'
+
+/**
+ * Apakah gambar ini dibuat sebelum perbaikan tanda air?
+ *
+ * MENGAPA PERLU: gambar lama di riwayat dibuat oleh kode lama yang masih
+ * memakai layanan gratis, sehingga tanda air penyedia masih menempel di
+ * pikselnya. Gambar itu tersimpan permanen sebagai JPEG di data URL dan
+ * TIDAK berubah dengan sendirinya ketika kodenya diperbaiki.
+ *
+ * Pengguna berhak tahu mengapa gambarnya berbeda dari yang baru. Tanpa
+ * penjelasan, ia akan mengira fiturnya masih rusak.
+ *
+ * CARA MENENTUKANNYA — SENGAJA TIDAK MENEBAK:
+ * server menyimpan `mesin` ("utama"/"cadangan") saat gambar dibuat.
+ * Gambar yang dibuat kode baru SELALU membawa penanda itu.
+ *
+ * Percobaan pertama memakai ukuran berkas sebagai patokan, dan itu SALAH:
+ * gambar baru dari mesin cadangan (JPEG 1x1 pada uji, atau gambar yang
+ * sangat terkompresi di produksi) juga kecil, sehingga gambar BARU diberi
+ * peringatan "gambar lama". Peringatan palsu lebih buruk daripada tidak
+ * ada peringatan — pengguna jadi meragukan gambar yang sebenarnya bersih.
+ *
+ * Karena itu: tanpa penanda `mesin`, gambar dianggap lama. Data lama memang
+ * disimpan tanpa field itu, jadi aturan ini tepat sasaran tanpa menebak.
+ */
+function kemungkinanLama(gambar) {
+  if (!gambar || typeof gambar !== 'object') return false
+  const mesin = gambar.mesin
+  return mesin !== 'utama' && mesin !== 'cadangan'
+}
+
 /** Membuat nama berkas yang aman dari deskripsi gambar. */
 function namaBerkas(deskripsi, tipe) {
   const ekstensi = tipe.includes('png') ? 'png' : tipe.includes('webp') ? 'webp' : 'jpg'
   const bersih = (deskripsi || 'gambar')
     .toLowerCase()
-    // Hanya huruf, angka, dan tanda hubung — aman di semua sistem.
+    // Hanya huruf, angka, dan tanda hubung â€” aman di semua sistem.
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 48)
@@ -36,6 +67,7 @@ function GambarHasil({ gambar }) {
   if (!dataUrl.startsWith('data:image/')) return null
 
   const tipe = dataUrl.slice(5, dataUrl.indexOf(';'))
+  const lama = kemungkinanLama(gambar)
 
   /** Mengunduh gambar. Memakai data URL langsung, tanpa permintaan baru. */
   const unduh = () => {
@@ -97,6 +129,19 @@ function GambarHasil({ gambar }) {
         </button>
       </figcaption>
 
+      {/* Penanda gambar lama â€” lihat kemungkinanLama(). Kalimatnya
+          menjelaskan SEBABNYA, bukan sekadar menyalahkan gambar. */}
+      {lama && (
+        <div className="hasil-gambar__lama" data-uji="gambar-lama">
+          <AlertCircle size={13} aria-hidden="true" />
+          <span>
+            Gambar ini dibuat sebelum kualitas gambar ditingkatkan, jadi tanda
+            airnya mungkin masih terlihat. Minta gambar yang sama lagi untuk
+            mendapat versi baru yang bersih.
+          </span>
+        </div>
+      )}
+
       {/* Tampilan besar: cukup lapisan penuh, ditutup dengan klik di mana
           saja atau tombol Esc (lihat onKeyDown pada lapisan). */}
       {terbuka && (
@@ -123,3 +168,6 @@ function GambarHasil({ gambar }) {
 }
 
 export default GambarHasil
+
+// Diekspor untuk pengujian logika penanda gambar lama (bukan untuk UI).
+export { kemungkinanLama }

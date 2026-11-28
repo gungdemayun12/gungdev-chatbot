@@ -93,6 +93,53 @@ GAMBAR_JEDA_DETIK = float(os.environ.get("GAMBAR_JEDA", "1.5") or 1.5)
 LABEL_PUBLIK = "gungdev"
 
 # ---------------------------------------------------------------------
+# MESIN GAMBAR UTAMA: GEMINI (bila kuncinya ada)
+# ---------------------------------------------------------------------
+# MENGAPA ADA DUA MESIN
+# ---------------------
+# Layanan gambar gratis selalu menempelkan tanda air penyedianya, dan
+# kualitasnya untuk pose/tata letak sering meleset ("kucing tidur" jadi
+# kucing duduk). Gemini adalah mesin gambar yang jauh lebih patuh pada
+# deskripsi DAN tidak menempelkan logo di piksel gambar.
+#
+# Kuncinya memakai GEMINI_API_KEY yang sama dengan penyedia teks, jadi
+# pemilik situs TIDAK perlu mendaftar layanan baru. Bedanya hanya nama
+# model: model teks (gemini-3.5-flash-lite) tidak bisa membuat gambar,
+# sedangkan model gambar (gemini-3.1-flash-image) bisa.
+#
+# ATURAN PENTING — SELALU ADA CADANGAN
+# ------------------------------------
+# Kuota gambar gratis Gemini terbatas dan bisa habis kapan saja. Bila
+# mesin utama gagal, permintaan otomatis jatuh ke layanan gratis, supaya
+# fitur gambar tidak pernah benar-benar mati. Pengguna tidak perlu tahu
+# mesin mana yang akhirnya dipakai.
+#
+# Isi GAMBAR_GEMINI="" untuk mematikan mesin utama tanpa menghapus kunci.
+GEMINI_API_KEY = (os.environ.get("GEMINI_API_KEY") or "").strip()
+GEMINI_GAMBAR_MODEL = (
+    os.environ.get("GEMINI_GAMBAR_MODEL") or "gemini-3.1-flash-image"
+).strip()
+GEMINI_GAMBAR_BASE_URL = (
+    os.environ.get("GEMINI_GAMBAR_BASE_URL")
+    or "https://generativelanguage.googleapis.com/v1beta"
+).rstrip("/")
+
+# Ukuran keluaran Gemini: 512 / 1K / 2K / 4K.
+# 1K dipakai sebagai bawaan: cukup tajam, dan tidak membuat data URL
+# membengkak sampai melewati batas penyimpanan riwayat.
+GEMINI_GAMBAR_UKURAN = (os.environ.get("GEMINI_GAMBAR_UKURAN") or "1K").strip()
+
+# Batas waktu satu permintaan Gemini. Harus menyisakan waktu untuk
+# cadangan gratis bila Gemini gagal — total tetap di bawah maxDuration
+# Vercel 60 detik.
+GEMINI_GAMBAR_TIMEOUT = float(os.environ.get("GEMINI_GAMBAR_TIMEOUT", "40") or 40)
+
+# Jatah waktu untuk cadangan gratis, setelah Gemini gagal/kehabisan.
+# 52 detik (layanan gratis) terlalu lama bila Gemini sudah memakan 40
+# detik, jadi cadangannya dipersingkat.
+GAMBAR_CADANGAN_TIMEOUT = float(os.environ.get("GAMBAR_CADANGAN_TIMEOUT", "45") or 45)
+
+# ---------------------------------------------------------------------
 # TANDA AIR: MILIK GUNGDEV SENDIRI
 # ---------------------------------------------------------------------
 # Layanan gambar gratis yang dipakai SELALU menempelkan tanda air
@@ -1247,6 +1294,21 @@ def _bersihkan_kata_sampah(teks: str) -> str:
         r"punya\s+saya",
         r"terbaik",
         r"terbagus",
+        r"paling\s+bagus",
+        r"bagus\s+sekali",
+        # "sekeren mungkin", "seindah mungkin", "sebagus mungkin" — penegasan
+        # yang tidak bisa ditafsirkan model gambar.
+        #
+        # INI PENYEBAB NYATA SEBUAH BUG: permintaan "kucing sedang tidur di
+        # sofa, buatkan sekeren mungkin" menghasilkan kucing DUDUK. Kata
+        # "sekeren mungkin" lolos dalam bahasa Indonesia, dan model gambar
+        # yang tidak mengenalinya mengabaikan seluruh frasa di dekatnya —
+        # termasuk pose "tidur". Membuang kata ini memulihkan posenya.
+        r"se\w+\s+mungkin",
+        r"secantik\s+mungkin",
+        r"sebaik\s+mungkin",
+        r"yang\s+paling",
+        r"paling",
         r"berikan",
         r"beriakan",
         r"berikanlah",
@@ -1520,6 +1582,135 @@ def _bangun_url(deskripsi: str, ukuran: int, seed: int) -> str:
     return f"{GAMBAR_BASE_URL}/{prompt}?{kueri}"
 
 
+# ---------------------------------------------------------------------
+# MESIN UTAMA: GEMINI
+# ---------------------------------------------------------------------
+def gemini_tersedia() -> bool:
+    """Apakah mesin gambar Gemini bisa dipakai saat ini."""
+    return bool(GEMINI_API_KEY and GEMINI_GAMBAR_MODEL)
+
+
+def _ambil_gambar_gemini(data: bytes) -> Optional[bytes]:
+    """
+    Mengambil gambar pertama dari respons Gemini.
+
+    Bentuk respons yang diharapkan:
+
+        {"candidates": [{"content": {"parts": [
+            {"text": "..."},
+            {"inlineData": {"mimeType": "image/png", "data": "<base64>"}}
+        ]}}]}
+
+    MENGAPA DIPERIKSA KETAT — HTTP 200 TIDAK MENJAMIN ADA GAMBAR.
+    Gemini bisa membalas 200 dengan bagian teks saja (mis. menolak
+    permintaan karena kebijakan). Bila itu dianggap berhasil, pengguna
+    akan menerima pesan "gambar berhasil" tanpa gambar apa pun.
+
+    Mengembalikan bytes gambar, atau None bila tidak ada gambar sah.
+    """
+    try:
+        import json
+
+        isi = json.loads(data.decode("utf-8", "replace"))
+    except Exception:  # noqa: BLE001
+        return None
+
+    for calon in isi.get("candidates") or []:
+        for bagian in (calon.get("content") or {}).get("parts") or []:
+            inline = bagian.get("inlineData") or bagian.get("inline_data") or {}
+            b64 = inline.get("data")
+            if not isinstance(b64, str) or not b64:
+                continue
+            try:
+                mentah = base64.b64decode(b64)
+            except Exception:  # noqa: BLE001
+                continue
+            # Pastikan benar-benar berkas gambar, bukan potongan teks.
+            if mentah[:3] == b"\xff\xd8\xff" or mentah[:8] == b"\x89PNG\r\n\x1a\n":
+                return mentah
+    return None
+
+
+async def _gambar_ke_gemini(deskripsi: str) -> Dict[str, Any]:
+    """
+    Meminta satu gambar dari Gemini.
+
+    Mengembalikan {"ok": True, "isi": bytes} atau {"ok": False, "galat": str}.
+
+    CATATAN ENDPOINT: Gemini gambar memakai `generateContent`, BUKAN
+    endpoint kompatibel-OpenAI (`chat/completions`) yang dipakai penyedia
+    teks. Karena itu bentuk permintaannya berbeda: `contents` +
+    `generationConfig.responseModalities`.
+
+    Kunci dikirim lewat header `x-goog-api-key`, tidak lewat URL, supaya
+    tidak tercatat di log proxy.
+    """
+    if not gemini_tersedia():
+        return {"ok": False, "galat": "gemini tidak aktif"}
+
+    url = f"{GEMINI_GAMBAR_BASE_URL}/models/{GEMINI_GAMBAR_MODEL}:generateContent"
+
+    # `responseModalities: ["IMAGE"]` meminta gambar saja. Bila model
+    # mengembalikan teks juga, itu tidak masalah — kita hanya mengambil
+    # bagian gambarnya.
+    badan: Dict[str, Any] = {
+        "contents": [
+            {
+                "role": "user",
+                "parts": [{"text": deskripsi}],
+            }
+        ],
+        "generationConfig": {
+            "responseModalities": ["IMAGE"],
+            "imageConfig": {
+                "aspectRatio": "1:1",
+                "imageSize": GEMINI_GAMBAR_UKURAN,
+            },
+        },
+    }
+
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(GEMINI_GAMBAR_TIMEOUT, connect=12.0),
+            follow_redirects=True,
+        ) as klien:
+            resp = await klien.post(
+                url,
+                json=badan,
+                headers={
+                    "x-goog-api-key": GEMINI_API_KEY,
+                    "Content-Type": "application/json",
+                },
+            )
+    except httpx.TimeoutException:
+        return {"ok": False, "galat": "gemini: waktu habis"}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "galat": f"gemini: {type(exc).__name__}"}
+
+    if resp.status_code != 200:
+        # Alasan yang sering muncul: 429 kuota habis, 400 model tidak
+        # dikenal / kunci tidak punya akses, 403 kunci ditolak.
+        alasan = ""
+        try:
+            galat_json = resp.json().get("error") or {}
+            alasan = str(galat_json.get("message") or "")[:160]
+        except Exception:  # noqa: BLE001
+            pass
+        return {
+            "ok": False,
+            "galat": f"gemini: status {resp.status_code} {alasan}".strip(),
+        }
+
+    gambar_bytes = _ambil_gambar_gemini(resp.content or b"")
+    if not gambar_bytes:
+        return {"ok": False, "galat": "gemini: balasan tanpa gambar"}
+
+    if len(gambar_bytes) > GAMBAR_MAKS_BYTE:
+        return {"ok": False, "galat": "gemini: gambar terlalu besar"}
+
+    return {"ok": True, "isi": gambar_bytes}
+
+
 def _tipe_gambar(content_type: str, isi: bytes) -> str:
     """Menentukan MIME gambar dari header atau tanda awal berkas."""
     ct = (content_type or "").split(";")[0].strip().lower()
@@ -1540,26 +1731,60 @@ async def buat_gambar(
     seed: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
-    Mengambil satu gambar dari layanan gambar gratis.
+    Mengambil satu gambar: Gemini lebih dulu, lalu layanan gratis.
 
     Mengembalikan (TIDAK PERNAH melempar exception):
-        {"ok": True,  "data_url": "data:image/jpeg;base64,...", "deskripsi": "..."}
+        {"ok": True,  "data_url": "data:image/jpeg;base64,...",
+         "deskripsi": "...", "mesin": "utama"|"cadangan"}
         {"ok": False, "pesan": "alasan singkat untuk pengguna", "galat": "..."}
 
-    Penting: kegagalan di sini TIDAK boleh menggagalkan chat. Pemanggil
-    tetap menjawab dengan teks biasa bila `ok` bernilai False.
+    MENGAPA BERURUTAN, BUKAN MEMILIH SATU
+    --------------------------------------
+    Gemini memberi hasil yang jauh lebih patuh pada deskripsi dan tanpa
+    logo penyedia, tetapi kuota gratisnya terbatas. Layanan gratis selalu
+    tersedia tetapi hasilnya lebih kasar.
+
+    Dengan mencoba Gemini lalu jatuh ke layanan gratis, pengguna selalu
+    mendapat gambar — kualitas terbaik saat kuota ada, dan tetap ada
+    gambar saat kuota habis. Ini yang diminta pemilik situs: "lebih baik
+    menunggu lebih lama asal hasilnya benar", tanpa fitur yang bisa mati.
+
+    Field `mesin` hanya untuk log/uji internal; TIDAK dikirim ke UI.
     """
     bersih = (deskripsi or "").strip()
     if not bersih:
         return {"ok": False, "pesan": "Deskripsi gambarnya belum jelas.", "galat": "kosong"}
 
     ukuran = ukuran or GAMBAR_UKURAN_DEFAULT
+
+    galat_gemini = ""
+
+    # ---------------- 1. MESIN UTAMA: GEMINI ----------------
+    if gemini_tersedia():
+        hasil_gemini = await _gambar_ke_gemini(bersih)
+        if hasil_gemini.get("ok"):
+            isi = hasil_gemini["isi"]
+            # Gemini TIDAK menempelkan logo di piksel gambar, jadi tidak
+            # perlu dipangkas. Pemangkasan 6% justru memotong isi gambar
+            # yang sah. Tanda air gungdev tetap ditambahkan.
+            isi = _gambar_watermark(isi)
+            tipe = _tipe_gambar("", isi)
+            return {
+                "ok": True,
+                "data_url": f"data:{tipe};base64,{base64.b64encode(isi).decode('ascii')}",
+                "deskripsi": bersih,
+                "mesin": "utama",
+            }
+        galat_gemini = hasil_gemini.get("galat", "gemini gagal")
+        logger.warning("Mesin gambar utama gagal (%s) — memakai cadangan.", galat_gemini)
+
+    # ---------------- 2. CADANGAN: LAYANAN GRATIS ----------------
     # Seed tetap membuat hasil bisa diulang (mis. saat regenerasi),
     # tetapi berbeda untuk setiap deskripsi.
     if seed is None:
         seed = abs(hash(bersih)) % 2_000_000
 
-    galat_terakhir = ""
+    galat_terakhir = galat_gemini
     for percobaan in range(GAMBAR_PERCOBAAN):
         # Jeda makin panjang tiap percobaan, memberi waktu layanan reda.
         if percobaan > 0:
@@ -1568,7 +1793,10 @@ async def buat_gambar(
         url = _bangun_url(bersih, ukuran, seed + percobaan)
         try:
             async with httpx.AsyncClient(
-                timeout=httpx.Timeout(GAMBAR_TIMEOUT_DETIK, connect=15.0),
+                timeout=httpx.Timeout(
+                    GAMBAR_CADANGAN_TIMEOUT if gemini_tersedia() else GAMBAR_TIMEOUT_DETIK,
+                    connect=15.0,
+                ),
                 follow_redirects=True,
             ) as klien:
                 resp = await klien.get(url)
@@ -1597,10 +1825,8 @@ async def buat_gambar(
                 galat_terakhir = "bukan berkas gambar"
                 continue
 
-            # Buang tanda air layanan gambar, lalu ganti dengan tanda air
-            # milik aplikasi ini ("gungdev"). Dua langkah terpisah:
-            # pemangkasan membuang milik penyedia, watermark menambahkan
-            # milik kita.
+            # Layanan gratis MENEMPELKAN tanda airnya sendiri di piksel,
+            # jadi strip bawah harus dipangkas. Gemini tidak perlu ini.
             isi = _pangkas_bawah(isi)
             isi = _gambar_watermark(isi)
             # Kedua langkah menghasilkan JPEG, jadi tipenya ikut menyesuaikan.
@@ -1611,6 +1837,7 @@ async def buat_gambar(
                 "ok": True,
                 "data_url": f"data:{tipe};base64,{b64}",
                 "deskripsi": bersih,
+                "mesin": "cadangan",
             }
 
         except httpx.TimeoutException:
@@ -1688,4 +1915,8 @@ def daftar_kemampuan() -> Dict[str, Any]:
         "buat_gambar": True,
         "ukuran": GAMBAR_UKURAN_DEFAULT,
         "gratis": True,
+        # Mesin utama memakai kunci yang sudah ada; bila kosong, gambar
+        # tetap bisa dibuat lewat cadangan gratis. Nilai ini hanya
+        # menandai kemampuan, bukan nama penyedia.
+        "kualitas_tinggi": gemini_tersedia(),
     }

@@ -1,4 +1,4 @@
-# Fitur "Buat Gambar" Ã¢â‚¬â€ Panduan Lengkap
+# Fitur "Buat Gambar" ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â Panduan Lengkap
 
 Dokumen ini menjelaskan cara kerja fitur pembuatan gambar di GungDev:
 apa yang terjadi saat pengguna meminta gambar, mengapa jatahnya
@@ -28,7 +28,7 @@ Yang **tidak** berubah:
 - Jatah chat (52 pesan/24 jam) tidak tersentuh oleh gambar.
 
 Selama gambarnya dibuat, pengguna melihat animasi **"Sedang
-menggambar"** Ã¢â‚¬â€ kisi titik yang terisi bertahap dengan lonceng persen Ã¢â‚¬â€
+menggambar"** ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â kisi titik yang terisi bertahap dengan lonceng persen ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â
 bukan animasi "Berpikir".
 
 ---
@@ -63,11 +63,80 @@ Karena itu ada tiga pengaman di kode:
 2. **Kegagalan tidak memakan jatah.** Percobaan yang gagal bukan salah
    pengguna, jadi jatahnya tidak berkurang.
 3. **Kegagalan tidak menggagalkan chat.** Bila gambar gagal, pengguna
-   mendapat penjelasan yang tenang Ã¢â‚¬â€ bukan halaman error.
+   mendapat penjelasan yang tenang ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â bukan halaman error.
 
 ---
 
-## 3. Mengapa jatah gambar DIPISAH dari jatah chat
+## 3. Mesin gambar: Gemini dulu, layanan gratis sebagai cadangan
+
+Gambar dibuat oleh **dua mesin berurutan**, bukan satu:
+
+| Urutan | Mesin | Kapan dipakai | Ciri hasil |
+|---|---|---|---|
+| 1 | Gemini (model gambar) | selalu dicoba lebih dulu bila kuncinya ada | paling patuh pada deskripsi, tanpa logo penyedia |
+| 2 | Layanan gratis | bila Gemini gagal / kuota habis | tanda air penyedia dipangkas, diganti `gungdev` |
+
+MENGAPA BEGINI Ã¢â‚¬â€ hasil uji nyata pada permintaan pemilik situs:
+
+> "buatkan gambar kucing sedang tidur di sofa"
+
+| Mesin | Hasil |
+|---|---|
+| Layanan gratis | kucing **duduk**, tanda air penyedia masih menempel |
+| Gemini (mesin utama) | kucing **tidur**, latar sofa, tanpa logo penyedia |
+
+Tetapi kuota gambar gratis Gemini terbatas. Kalau hanya Gemini yang
+dipakai, fitur gambar akan **mati total** begitu kuotanya habis. Karena
+itu cadangan gratis selalu tersedia: pengguna selalu mendapat gambar,
+kualitas terbaik saat kuota ada, tetap ada gambar saat kuota habis.
+
+### Kunci yang dipakai
+
+`GEMINI_API_KEY` yang **sudah ada** untuk penyedia teks. Pemilik situs
+tidak perlu mendaftar layanan baru. Perbedaannya hanya nama model:
+
+| Keperluan | Model | Endpoint |
+|---|---|---|
+| Obrolan (teks) | `gemini-3.5-flash-lite` | `chat/completions` (kompatibel OpenAI) |
+| **Membuat gambar** | `gemini-3.1-flash-image` | `generateContent` (bentuk berbeda) |
+
+Model teks di atas **tidak bisa** membuat gambar Ã¢â‚¬â€ itu bukan kerusakan,
+memang bukan mesin gambar.
+
+### Yang sengaja diperiksa ketat
+
+**HTTP 200 tidak menjamin ada gambar.** Gemini bisa membalas 200 dengan
+bagian teks saja (mis. menolak permintaan). Bila itu dianggap berhasil,
+pengguna menerima pesan "gambar berhasil" tanpa gambar. Karena itu
+`_ambil_gambar_gemini()` hanya menerima bagian yang benar-benar berisi
+berkas gambar (`inlineData` dengan tanda awal JPEG/PNG).
+
+### Pemangkasan hanya untuk cadangan
+
+| Mesin | Pangkas 6% bawah? | Alasan |
+|---|---|---|
+| Gemini | **tidak** | tidak menempelkan logo; memangkas justru memotong isi sah |
+| Layanan gratis | ya | logo penyedia menyatu di piksel, harus dibuang |
+
+### Menandai gambar lama
+
+Gambar di riwayat yang dibuat **sebelum** perbaikan ini masih membawa
+tanda air penyedia Ã¢â‚¬â€ gambarnya tersimpan permanen dan tidak berubah
+sendiri. Server kini menyimpan `mesin` bersama setiap gambar baru, dan UI
+memakai penanda itu untuk menampilkan keterangan:
+
+> Gambar ini dibuat sebelum kualitas gambar ditingkatkan, jadi tanda
+> airnya mungkin masih terlihat. Minta gambar yang sama lagi untuk
+> mendapat versi baru yang bersih.
+
+**Tidak menebak dari ukuran berkas.** Percobaan pertama memakai ukuran
+berkas dan itu salah: gambar baru dari cadangan juga kecil, sehingga
+gambar baru diberi peringatan palsu. Peringatan palsu lebih buruk
+daripada tidak ada peringatan.
+
+---
+
+## 4. Mengapa jatah gambar DIPISAH dari jatah chat
 
 Ini permintaan langsung pemilik situs: *"jatah gambar dipisah dengan
 jatah chat harian agar tidak boros di gambar saja"*.
@@ -76,7 +145,7 @@ jatah chat harian agar tidak boros di gambar saja"*.
 |---|---|---|
 | Chat (akun) | 52 pesan / 24 jam | `gungdev:usage:u:<sub>:<jendela>` |
 | **Gambar (akun)** | **3 gambar / 24 jam** | `gungdev:usage:gambar:<sub>:<jendela>` |
-| Gambar (tamu) | 0 | Ã¢â‚¬â€ |
+| Gambar (tamu) | 0 | ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â |
 
 Karena kuncinya **berbeda**, keduanya tidak mungkin saling
 memengaruhi. Yang terjadi:
@@ -104,12 +173,12 @@ angka mentah:
 
 ```
 Batas obrolan                            92% sisa
-Diperbarui dalam 5 jam 12 menit Ã‚Â· 48 dari 52
-Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“Ë†Ã¢â€“â€˜Ã¢â€“â€˜Ã¢â€“â€˜
+Diperbarui dalam 5 jam 12 menit ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· 48 dari 52
+ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€¹Ã¢â‚¬Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‹Å“ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‹Å“ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‹Å“
 ```
 
 Alasannya sederhana: *"sisa 47 pesan"* tidak berarti apa-apa bagi
-pengguna baru Ã¢â‚¬â€ ia tidak tahu 47 itu banyak atau sedikit. **"92% sisa"
+pengguna baru ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ia tidak tahu 47 itu banyak atau sedikit. **"92% sisa"
 langsung terbaca.** Angka pastinya tetap ada di baris keterangan kecil
 (`48 dari 52`), jadi pengguna yang ingin hitungan tepat tidak
 kehilangan apa pun.
@@ -120,12 +189,12 @@ Aturan tampilannya:
 |---|---|
 | Yang ditonjolkan | **Sisa**, bukan terpakai (100% = masih penuh) |
 | Bilah mengisi | Sesuai sisa (bilah panjang = jatah banyak) |
-| Warna | Aksen biasa Ã¢â€ â€™ `is-rendah` (Ã¢â€°Â¤30%) Ã¢â€ â€™ `is-kritis` (Ã¢â€°Â¤10%) |
+| Warna | Aksen biasa ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ `is-rendah` (ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â°Ãƒâ€šÃ‚Â¤30%) ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ `is-kritis` (ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â°Ãƒâ€šÃ‚Â¤10%) |
 | Buta warna | Persen selalu **tertulis**, warna hanya penegas |
 | Saat bilah kecil | Isi minimal 2% agar tidak terlihat kosong padahal ada |
 | `prefers-reduced-motion` | Transisi dimatikan |
 
-Ada **dua bilah terpisah** Ã¢â‚¬â€ obrolan dan gambar Ã¢â‚¬â€ karena keduanya
+Ada **dua bilah terpisah** ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â obrolan dan gambar ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â karena keduanya
 memang tidak saling mengurangi. Digabung menjadi satu bilah, pengguna
 akan mengira membuat gambar memotong jatah chat.
 
@@ -142,17 +211,17 @@ Data bilah berasal dari `/usage`:
 ```
 
 `reset.pada` (detik epoch) dipakai browser untuk menghitung mundur
-**sendiri tiap detik** Ã¢â‚¬â€ tanpa permintaan tambahan ke server. Bila
+**sendiri tiap detik** ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â tanpa permintaan tambahan ke server. Bila
 waktu reset tercapai, panel mengambil data sekali lagi supaya jatah yang
 pulih langsung terlihat.
 
 Bila pembacaan jatah gambar gagal (penyimpanan bermasalah), panel
-**tetap** menampilkan jatah obrolan Ã¢â‚¬â€ kegagalan itu tidak boleh
+**tetap** menampilkan jatah obrolan ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â kegagalan itu tidak boleh
 menggagalkan seluruh panel.
 
 ---
 
-## 4. Bagaimana server mengenali permintaan gambar
+## 5. Bagaimana server mengenali permintaan gambar
 
 Ini bagian yang paling rawan. Bila salah kira, jatah gambar pengguna
 terbuang hanya karena ia **bertanya**.
@@ -162,9 +231,9 @@ gambar daripada membuat gambar padahal pengguna hanya bertanya.
 
 **Dikenali sebagai permintaan gambar:**
 
-- "buatkan gambar kucing oranyeÃ¢â‚¬Â¦"
-- "gambarkan pemandangan pantaiÃ¢â‚¬Â¦"
-- "tolong buat ilustrasi logoÃ¢â‚¬Â¦"
+- "buatkan gambar kucing oranyeÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦"
+- "gambarkan pemandangan pantaiÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦"
+- "tolong buat ilustrasi logoÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦"
 - "bikin gambar poster konser"
 - "edit gambar ini jadi gaya anime" (ada lampiran gambar)
 
@@ -173,7 +242,7 @@ gambar daripada membuat gambar padahal pengguna hanya bertanya.
 - "apa itu gambar vektor?"
 - "jelaskan cara membuat gambar dengan AI"
 - "berapa harga gambar digital?"
-- "gambaran umum ekonomi Indonesia" Ã¢â€ Â "gambaran", bukan "gambar"
+- "gambaran umum ekonomi Indonesia" ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â Ãƒâ€šÃ‚Â "gambaran", bukan "gambar"
 
 ### Jebakan yang sudah diperbaiki
 
@@ -183,48 +252,48 @@ Pencocokan frasa sempat memakai **substring biasa**. Akibatnya
 menggambar dan memakan jatah gambar.
 
 Perbaikannya: semua pencocokan memakai **batas kata**
-(`(?<![\w-])Ã¢â‚¬Â¦(?![\w-])`). Diuji oleh `uji_gambar.py` bagian 2.
+(`(?<![\w-])ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦(?![\w-])`). Diuji oleh `uji_gambar.py` bagian 2.
 
 ---
 
-## 5. Bagaimana gambar sampai ke layar
+## 6. Bagaimana gambar sampai ke layar
 
 ```
 Pengguna mengetik "buatkan gambar kucing tidur di sofa"
-        Ã¢â€â€š
-        Ã¢â€“Â¼
+        ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡
+        ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€šÃ‚Â¼
 Frontend  POST /chat/stream  (kontrak lama, tidak berubah)
-        Ã¢â€â€š
-        Ã¢â€“Â¼
-Backend   perlu_gambar()  Ã¢â€ â€™ ya
-        Ã¢â€â€š
-        Ã¢â€“Â¼
-SSE   data: {"meta": {"gambar_dimulai": {...}}}   Ã¢â€ Â DIKIRIM DULU
-        Ã¢â€â€š                                          (animasi mulai di sini)
-        Ã¢â€“Â¼
+        ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡
+        ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€šÃ‚Â¼
+Backend   perlu_gambar()  ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ ya
+        ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡
+        ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€šÃ‚Â¼
+SSE   data: {"meta": {"gambar_dimulai": {...}}}   ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â Ãƒâ€šÃ‚Â DIKIRIM DULU
+        ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡                                          (animasi mulai di sini)
+        ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€šÃ‚Â¼
 Backend   siapkan_gambar()
-        Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ usage.periksa_jatah_gambar()  Ã¢â€ â€™ habis? Ã¢â€ â€™ pesan tenang, chat tetap jalan
-        Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ gambar.deskripsi_gambar() Ã¢â€ â€™ terjemahkan IDÃ¢â€ â€™EN (lihat bagian 6)
-        Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ gambar.buat_gambar()      Ã¢â€ â€™ ambil dari layanan gratis (enhance=true)
-        Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ gambar._pangkas_bawah()   Ã¢â€ â€™ buang tanda air layanan
-        Ã¢â€Å“Ã¢â€â‚¬Ã¢â€â‚¬ gambar._gambar_watermark()Ã¢â€ â€™ gambar tanda air "gungdev" sendiri
-        Ã¢â€â€Ã¢â€â‚¬Ã¢â€â‚¬ usage.catat_gambar()      Ã¢â€ â€™ catat HANYA bila berhasil
-        Ã¢â€â€š
-        Ã¢â€“Â¼
-SSE   data: {"meta": {"gambar": {...}}}    Ã¢â€ Â gambar utuh (tidak bisa streaming)
+        ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒâ€¦Ã¢â‚¬Å“ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ usage.periksa_jatah_gambar()  ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ habis? ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ pesan tenang, chat tetap jalan
+        ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒâ€¦Ã¢â‚¬Å“ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ gambar.deskripsi_gambar() ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ terjemahkan IDÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢EN (lihat bagian 6)
+        ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒâ€¦Ã¢â‚¬Å“ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ gambar.buat_gambar()      ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ ambil dari layanan gratis (enhance=true)
+        ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒâ€¦Ã¢â‚¬Å“ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ gambar._pangkas_bawah()   ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ buang tanda air layanan
+        ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒâ€¦Ã¢â‚¬Å“ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ gambar._gambar_watermark()ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ gambar tanda air "gungdev" sendiri
+        ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ usage.catat_gambar()      ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ catat HANYA bila berhasil
+        ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡
+        ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€šÃ‚Â¼
+SSE   data: {"meta": {"gambar": {...}}}    ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â Ãƒâ€šÃ‚Â gambar utuh (tidak bisa streaming)
       data: {"delta": "Ini gambar yang Anda minta..."}
       data: {"done": true}
-        Ã¢â€â€š
-        Ã¢â€“Â¼
-Frontend  Message.jsx Ã¢â€ â€™ GambarHasil.jsx
+        ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡
+        ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€šÃ‚Â¼
+Frontend  Message.jsx ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ GambarHasil.jsx
 ```
 
 ### Mengapa `gambar_dimulai` dikirim lebih dulu
 
-Membuat gambar butuh 10Ã¢â‚¬â€œ40 detik. Kalau penanda "proses dimulai" baru
+Membuat gambar butuh 10ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ40 detik. Kalau penanda "proses dimulai" baru
 dikirim bersama hasilnya, pengguna melihat animasi "Berpikir" (atau layar
 diam) selama puluhan detik, lalu animasi gambar muncul sesaat sebelum
-gambarnya Ã¢â‚¬â€ animasi yang tidak berguna.
+gambarnya ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â animasi yang tidak berguna.
 
 Karena itu niatnya dideteksi lebih dulu (`perlu_gambar()`), penanda
 dikirim, **baru** gambarnya dibuat. Frontend memakai penanda ini untuk
@@ -233,10 +302,10 @@ lagi setelah selesai/gagal.
 
 ### Animasi "Sedang menggambar"
 
-`Menggambar.jsx` menampilkan judul kecil, kisi 15Ãƒâ€”9 titik yang terisi
+`Menggambar.jsx` menampilkan judul kecil, kisi 15ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â9 titik yang terisi
 bertahap, dan lonceng persen.
 
-**Soal persentase Ã¢â‚¬â€ penting:** server tidak bisa melaporkan kemajuan
+**Soal persentase ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â penting:** server tidak bisa melaporkan kemajuan
 sungguhan, karena layanan gambar baru mengirim hasilnya sekali di akhir.
 Persen di sini adalah **perkiraan waktu**, bukan kemajuan nyata. Supaya
 tidak menipu:
@@ -257,13 +326,13 @@ ada batas ukuran (lihat bagian 7).
 
 ---
 
-## 6. Deskripsi diterjemahkan ke bahasa Inggris
+## 7. Deskripsi diterjemahkan ke bahasa Inggris
 
-**Ini bukan hiasan Ã¢â‚¬â€ inilah perbaikan kualitas yang paling berpengaruh.**
+**Ini bukan hiasan ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â inilah perbaikan kualitas yang paling berpengaruh.**
 
 Kasus nyata yang melatarbelakanginya:
 
-> "buatkan gambar kucing sedang tidur di sofa" Ã¢â€ â€™ kucing **berdiri** di sofa.
+> "buatkan gambar kucing sedang tidur di sofa" ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ kucing **berdiri** di sofa.
 
 Penyebabnya bukan modelnya "bodoh". Model gambar dilatih dengan bahasa
 Inggris, dan frasa "sedang tidur" tidak dikenali. Model hanya menangkap
@@ -274,9 +343,9 @@ Perbaikannya, di `deskripsi_gambar()`:
 1. Kalimat perintah dibuang ("tolong buatkan gambar ...").
 2. Kata kunci diterjemahkan lewat kamus kecil: pose, warna, objek, latar,
    gaya, dan kata sambung.
-3. Frasa **terpanjang menang**, supaya "anak kucing" Ã¢â€ â€™ `kitten` (bukan
+3. Frasa **terpanjang menang**, supaya "anak kucing" ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ `kitten` (bukan
    `child` + `cat`).
-4. Kata yang tidak ada di kamus **dibiarkan** Ã¢â‚¬â€ permintaan tidak pernah
+4. Kata yang tidak ada di kamus **dibiarkan** ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â permintaan tidak pernah
    hilang hanya karena tidak dikenali.
 5. Gaya foto bawaan ditambahkan bila pengguna tidak memilih gaya sendiri:
 
@@ -292,7 +361,7 @@ Contoh hasil:
 
 ```
 "buatkan saya sebuah gambar kucing sedang tidur di sofa"
-Ã¢â€ â€™ "a cat lying down asleep, eyes closed on sofa, highly detailed,
+ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ "a cat lying down asleep, eyes closed on sofa, highly detailed,
    sharp focus, professional photography, natural soft lighting,
    shallow depth of field, 8k, no text, no watermark, ..."
 ```
@@ -312,16 +381,16 @@ Permintaan nyata sering penuh basa-basi dan salah ketik:
 
 Kata seperti ini **tidak bisa ditafsirkan** model gambar, dan yang lebih
 buruk: ia **mengaburkan** kata yang penting. Inilah penyebab nyata
-permintaan "poster pricelist" berubah menjadi foto semangkuk mie Ã¢â‚¬â€ kata
+permintaan "poster pricelist" berubah menjadi foto semangkuk mie ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â kata
 "mie goreng" satu-satunya kata benda yang dikenali model.
 
 `_bersihkan_kata_sampah()` bekerja konservatif:
 
 - **membuang** basa-basi ("dll nya yaa", "berikan", "terbaik"),
 - **memperbaiki** salah ketik umum lewat `_SALAH_KETIK`
-  (`pioster` Ã¢â€ â€™ poster, `bgfaus` Ã¢â€ â€™ bagus, `sayaa` Ã¢â€ â€™ saya),
+  (`pioster` ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ poster, `bgfaus` ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ bagus, `sayaa` ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ saya),
 - **membawa** kata asing/bahasa daerah yang ejaannya wajar
-  (`tipat`, `rujak`, `warung`) Ã¢â‚¬â€ lebih baik membawa kata yang tidak
+  (`tipat`, `rujak`, `warung`) ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â lebih baik membawa kata yang tidak
   dikenal daripada membuang kata yang penting.
 
 Bila pembersihan menghabiskan seluruh deskripsi, teks asli dipakai
@@ -337,7 +406,7 @@ Permintaan desain **tidak** memakai gaya foto. Alasannya nyata:
 | Negatif | `no text, ...` | **tanpa** `no text` |
 
 Foto tidak punya tata letak, dan `no text` justru **melarang** model
-menulis apa pun Ã¢â‚¬â€ padahal teks adalah isi utama poster. Karena itu
+menulis apa pun ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â padahal teks adalah isi utama poster. Karena itu
 `_KRIA_DESAIN` memisahkan keduanya.
 
 Untuk **pricelist/daftar harga/menu**, arahan gayanya lebih spesifik
@@ -354,9 +423,9 @@ pengguna mengira aplikasinya rusak.
 
 ---
 
-## 7. Tanda air: milik gungdev sendiri
+## 8. Tanda air: milik gungdev sendiri
 
-Dua langkah terpisah Ã¢â‚¬â€ sengaja, supaya kalau satu gagal yang lain tetap
+Dua langkah terpisah ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â sengaja, supaya kalau satu gagal yang lain tetap
 jalan:
 
 | Langkah | Fungsi | Tujuan |
@@ -364,7 +433,7 @@ jalan:
 | 1. Pangkas | `_pangkas_bawah()` | Buang tanda air penyedia |
 | 2. Watermark | `_gambar_watermark()` | Tambah tanda air "gungdev" |
 
-### Langkah 1 Ã¢â‚¬â€ kenapa memangkas, bukan sekadar menimpa
+### Langkah 1 ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â kenapa memangkas, bukan sekadar menimpa
 
 Layanan gambar gratis yang dipakai **selalu** menempelkan tanda air
 ("pollinations.ai") di pojok kanan bawah. Parameter `nologo=true` yang
@@ -372,18 +441,18 @@ dulu menghilangkannya **sudah tidak berpengaruh**.
 
 Tanda air itu sudah menyatu di piksel, jadi satu-satunya cara
 menghilangkannya adalah memotong strip bawahnya. Dipotong **6%**
-(`PANGKAS_BAWAH`) Ã¢â‚¬â€ pada gambar 1024 px hanya ~61 px, biasanya area
+(`PANGKAS_BAWAH`) ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â pada gambar 1024 px hanya ~61 px, biasanya area
 lantai/latar, bukan objek utama.
 
 Kalau pemangkasan ini dimatikan, tanda air penyedia akan tetap terlihat
 dan bertumpuk dengan watermark gungdev.
 
-### Langkah 2 Ã¢â‚¬â€ watermark gungdev
+### Langkah 2 ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â watermark gungdev
 
 Setelah dipangkas, aplikasi menggambar tanda airnya sendiri di pojok
 kanan bawah:
 
-- teks kecil putih dengan bayangan gelap tipis Ã¢â‚¬â€ tetap terbaca di latar
+- teks kecil putih dengan bayangan gelap tipis ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â tetap terbaca di latar
   terang (mis. sofa putih) maupun gelap;
 - satu titik aksen kecil di kiri teks sebagai penanda merek;
 - ukuran dan jarak tepi mengikuti tinggi gambar, jadi proporsional di
@@ -396,7 +465,7 @@ Nama penyedia **tidak pernah** muncul di sini.
 
 Kedua fungsi mengembalikan **gambar asli apa adanya** bila gagal
 (Pillow tidak terpasang, format tak dikenal). Tanda air lebih baik
-daripada gambar rusak atau hilang Ã¢â‚¬â€ dan kegagalan tidak pernah
+daripada gambar rusak atau hilang ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â dan kegagalan tidak pernah
 menggagalkan chat.
 
 Catatan: JPEG bersifat *lossy*, jadi menyimpan ulang mengubah setiap
@@ -405,24 +474,24 @@ di luar area watermark", bukan "identik".
 
 ---
 
-## 8. Batas waktu dan `maxDuration` Vercel
+## 9. Batas waktu dan `maxDuration` Vercel
 
 `GAMBAR_TIMEOUT` bawaan **52 detik**. Ini bukan angka sembarangan:
 `maxDuration` fungsi serverless Vercel adalah **60 detik** (lihat
 `vercel.json`), dan tidak bisa dinaikkan di paket gratis.
 
 Kalau batas waktu di server lebih besar dari `maxDuration`, Vercel
-memutus koneksi lebih dulu dan pengguna melihat galat koneksi Ã¢â‚¬â€ bukan
+memutus koneksi lebih dulu dan pengguna melihat galat koneksi ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â bukan
 pesan yang jelas. Karena itu selalu **di bawah** 60, dengan sisa waktu
 untuk menyiapkan jawaban.
 
 ---
 
-## 9. Batas ukuran gambar di riwayat
+## 10. Batas ukuran gambar di riwayat
 
 | Batas | Nilai | Alasan |
 |---|---|---|
-| Satu gambar | 400 KB (base64) | Cukup untuk gambar 1024Ãƒâ€”1024 |
+| Satu gambar | 400 KB (base64) | Cukup untuk gambar 1024ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â1024 |
 | Satu sesi | 900 KB (`MAKS_PESAN_SESI`) | Batas lama, tidak diubah |
 
 Gambar yang lebih besar dari 400 KB **dibuang diam-diam** dari riwayat
@@ -434,7 +503,7 @@ salinannya di server setelah halaman dimuat ulang.
 
 ---
 
-## 10. Pengaturan lewat environment variable
+## 11. Pengaturan lewat environment variable
 
 Semua opsional. Tanpa diisi, semuanya memakai nilai bawaan yang wajar.
 
@@ -443,7 +512,7 @@ Semua opsional. Tanpa diisi, semuanya memakai nilai bawaan yang wajar.
 | `JATAH_GAMBAR_PER_AKUN` | `3` | Gambar per akun per 24 jam |
 | `JATAH_GAMBAR_TAMU` | `0` | Gambar untuk tamu (0 = perlu login) |
 | `GAMBAR_UKURAN` | `1024` | Ukuran gambar (piksel, persegi) |
-| `GAMBAR_TIMEOUT` | `52` | Batas waktu permintaan (detik) Ã¢â‚¬â€ harus < 60 |
+| `GAMBAR_TIMEOUT` | `52` | Batas waktu permintaan (detik) ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â harus < 60 |
 | `GAMBAR_PERCOBAAN` | `3` | Berapa kali dicoba bila gagal |
 | `GAMBAR_JEDA` | `1.5` | Jeda antar percobaan (detik) |
 | `GAMBAR_PANGKAS_BAWAH` | `0.06` | Porsi bawah yang dipotong (0 = jangan) |
@@ -453,13 +522,17 @@ Semua opsional. Tanpa diisi, semuanya memakai nilai bawaan yang wajar.
 | `GAMBAR_MODEL` | `flux` | Model gambar layanan |
 | `GAMBAR_BASE_URL` | *(layanan bawaan)* | Ganti penyedia tanpa ubah kode |
 | `GAMBAR_MAKS_BYTE` | `6000000` | Batas ukuran berkas gambar diterima |
+| `GEMINI_GAMBAR_MODEL` | `gemini-3.1-flash-image` | Model **gambar** Gemini (kosongkan = matikan mesin utama) |
+| `GEMINI_GAMBAR_UKURAN` | `1K` | Ukuran keluaran Gemini: `512`/`1K`/`2K`/`4K` |
+| `GEMINI_GAMBAR_TIMEOUT` | `40` | Batas waktu satu permintaan Gemini (detik) |
+| `GAMBAR_CADANGAN_TIMEOUT` | `45` | Batas waktu cadangan gratis setelah Gemini gagal |
 
-Untuk pindah penyedia gambar nanti, cukup ubah `GAMBAR_BASE_URL` Ã¢â‚¬â€
+Untuk pindah penyedia gambar nanti, cukup ubah `GAMBAR_BASE_URL` ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â
 logika niat, jatah, dan tampilan tidak perlu disentuh.
 
 ---
 
-## 11. Kalau ingin pindah ke layanan berbayar nanti
+## 12. Kalau ingin pindah ke layanan berbayar nanti
 
 Yang perlu diubah **hanya** `gambar.buat_gambar()`:
 
@@ -472,16 +545,16 @@ Niat, jatah, penyimpanan, dan tampilan **tidak perlu diubah**.
 
 ---
 
-## 12. Menjalankan uji
+## 13. Menjalankan uji
 
 ```bash
 cd chatbot-saya/backend
-python uji_gambar.py          # 143 pemeriksaan (backend, tanpa jaringan)
+python uji_gambar.py          # 160 pemeriksaan (backend, tanpa jaringan)
 ```
 
 ```bash
 cd chatbot-saya/frontend
-node uji_gambar_browser.mjs   # 41 pemeriksaan (browser + UI)
+node uji_gambar_browser.mjs   # 52 pemeriksaan (browser + UI)
 ```
 
 `uji_gambar_browser.mjs` memakai gambar tiruan dari `server_uji.py`,
@@ -508,11 +581,11 @@ Endpoint ini **hanya ada di `server_uji.py`**, tidak di produksi.
 
 ---
 
-## 13. Daftar berkas yang terlibat
+## 14. Daftar berkas yang terlibat
 
 | Berkas | Perannya |
 |---|---|
-| `backend/gambar.py` | Deteksi niat, penerjemah IDÃ¢â€ â€™EN, ambil gambar, pangkas + watermark |
+| `backend/gambar.py` | Deteksi niat, penerjemah IDÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢EN, ambil gambar, pangkas + watermark |
 | `backend/usage.py` | Jatah gambar (terpisah dari jatah chat) |
 | `backend/main.py` | `perlu_gambar()`, `siapkan_gambar()`, `/chat` & `/chat/stream` |
 | `backend/penyimpanan.py` | Menyimpan gambar di riwayat (+ batas ukuran) |
@@ -526,12 +599,12 @@ Endpoint ini **hanya ada di `server_uji.py`**, tidak di produksi.
 | `frontend/src/App.jsx` | Menangkap `meta.gambar_dimulai` & `meta.gambar` |
 | `frontend/src/hooks/useSessions.js` | Menyimpan gambar & tanda fase gambar |
 | `frontend/src/App.css` | Tampilan gambar, animasi `.menggambar*`, bilah `.jatah-bar*` |
-| `backend/uji_gambar.py` | 143 pemeriksaan backend |
-| `frontend/uji_gambar_browser.mjs` | 41 pemeriksaan browser |
+| `backend/uji_gambar.py` | 160 pemeriksaan backend |
+| `frontend/uji_gambar_browser.mjs` | 52 pemeriksaan browser |
 
 ---
 
-## 14. Catatan penting untuk pengembangan berikutnya
+## 15. Catatan penting untuk pengembangan berikutnya
 
 - **Nama penyedia gambar tidak boleh muncul di UI.** Jangan pernah
   menampilkan `meta.gambar.label` (isinya hanya "gungdev") atau URL
@@ -539,16 +612,29 @@ Endpoint ini **hanya ada di `server_uji.py`**, tidak di produksi.
 - **Jangan mencatat jatah sebelum gambar berhasil.** Kalau dicatat di
   awal, pengguna kehilangan jatah hanya karena layanan sedang ramai.
 - **Jangan memakai kunci jatah chat untuk gambar.** Itu yang membuat
-  jatah bercampur Ã¢â‚¬â€ persis yang ingin dihindari.
+  jatah bercampur ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â persis yang ingin dihindari.
 - **Tanda fase gambar harus dilepas lagi.** `setMessageImagePhase(id, null)`
   dipanggil setelah selesai/gagal. Kalau lupa, animasi "Sedang
   menggambar" tertinggal di layar meskipun gambarnya sudah tampil.
 - **Jatah tampil sebagai bilah persen, bukan angka mentah.** Judul bilah
   + "N% sisa" + keterangan reset + bilah tipis; angka pastinya hanya di
   baris keterangan kecil. Bilah menonjolkan **sisa**, bukan terpakai.
+- **Jangan memakai model teks Gemini untuk membuat gambar.** Itu mesin
+  obrolan; gambar butuh model gambar (`gemini-3.1-flash-image`) dan
+  endpoint `generateContent`.
+- **Cadangan gratis jangan dihapus.** Tanpanya, fitur gambar mati total
+  saat kuota Gemini habis. Selalu uji jalur "Gemini gagal → cadangan".
+- **Pemangkasan 6% hanya untuk mesin cadangan.** Gemini tidak menempelkan
+  logo, jadi memangkasnya justru memotong isi gambar yang sah.
+- **Field `mesin` harus ikut tersimpan** di `useSessions.js` dan
+  `penyimpanan.py`. Bila tertinggal, gambar baru kehilangan penandanya
+  dan UI menampilkan peringatan "gambar lama" yang palsu.
+- **Penanda gambar lama tidak boleh ditebak dari ukuran berkas.** Gambar
+  baru dari cadangan juga kecil; itulah sebabnya percobaan pertama
+  memberi peringatan palsu. Pakai `mesin`.
 - **Jangan menampilkan dua animasi untuk satu proses.** Saat membuat
   gambar, `Berpikir` di dalam pesan, petunjuk bawah composer, dan
-  indikator kosong harus diam Ã¢â‚¬â€ semuanya dikendalikan `membuatGambar`.
+  indikator kosong harus diam ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â semuanya dikendalikan `membuatGambar`.
 - **`server_uji.py` mengganti endpoint `/chat`.** Bila menambah logika
   di `/chat` produksi, tambahkan juga di stub `chat_uji` dan
   `chat_stream_uji`; kalau tidak, uji browser tidak menguji apa pun

@@ -301,6 +301,153 @@ async def uji_ringkasan():
 
 asyncio.run(uji_ringkasan())
 
+
+# =====================================================================
+print("\n=== 4c. MESIN UTAMA GEMINI + CADANGAN GRATIS ===")
+# =====================================================================
+# MENGAPA DIUJI: kunci Gemini di produksi bisa habis kuotanya kapan saja.
+# Kalau kesalahan penanganannya membuat fitur gambar MATI total, pengguna
+# kehilangan fitur yang sudah ada. Uji ini memastikan dua hal:
+#   1. Gemini dibaca dengan ketat (HTTP 200 tanpa gambar = GAGAL);
+#   2. bila Gemini gagal, cadangan gratis tetap dipakai.
+import json as _json  # noqa: E402
+from io import BytesIO  # noqa: E402
+from unittest.mock import patch as _patch  # noqa: E402
+
+from PIL import Image  # noqa: E402
+
+import base64  # noqa: E402  (dipakai untuk tiruan respons Gemini)
+
+
+def _balasan_gemini(parts):
+    return _json.dumps(
+        {"candidates": [{"content": {"parts": parts}, "finishReason": "STOP"}]}
+    ).encode()
+
+
+_png_kecil = BytesIO()
+Image.new("RGB", (320, 320), (200, 120, 60)).save(_png_kecil, format="PNG")
+_b64_png = base64.b64encode(_png_kecil.getvalue()).decode()
+
+_g = gambar._ambil_gambar_gemini(
+    _balasan_gemini([{"text": "Here."}, {"inlineData": {"mimeType": "image/png", "data": _b64_png}}])
+)
+cek("gemini: gambar diambil dari inlineData", bool(_g) and _g[:8] == b"\x89PNG\r\n\x1a\n")
+cek(
+    "gemini: bentuk snake_case juga diterima",
+    bool(gambar._ambil_gambar_gemini(_balasan_gemini([{"inline_data": {"data": _b64_png}}]))),
+)
+cek(
+    "gemini: teks saja dianggap GAGAL (HTTP 200 bukan jaminan)",
+    gambar._ambil_gambar_gemini(_balasan_gemini([{"text": "cannot create"}])) is None,
+)
+cek("gemini: JSON rusak tidak melempar", gambar._ambil_gambar_gemini(b"bukan json") is None)
+cek(
+    "gemini: base64 rusak diabaikan",
+    gambar._ambil_gambar_gemini(_balasan_gemini([{"inlineData": {"data": "!!!bukan"}}])) is None,
+)
+cek(
+    "gemini: isi bukan gambar diabaikan",
+    gambar._ambil_gambar_gemini(
+        _balasan_gemini([{"inlineData": {"data": base64.b64encode(b"bukan gambar").decode()}}])
+    )
+    is None,
+)
+cek("gemini tidak aktif bila kunci kosong", gambar.gemini_tersedia() is False)
+
+
+class _KlienGagal:
+    """Klien tiruan: Gemini 429, cadangan gratis 200."""
+
+    _jpeg = BytesIO()
+    Image.new("RGB", (300, 300), (60, 120, 200)).save(_jpeg, format="JPEG", quality=90)
+    JPEG = _jpeg.getvalue()
+
+    def __init__(self, *a, **k):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    async def post(self, url, **k):
+        class _Tolak:
+            status_code = 429
+            content = b'{"error":{"message":"quota exceeded"}}'
+
+        return _Tolak()
+
+    async def get(self, url):
+        class _Ok:
+            status_code = 200
+            content = _KlienGagal.JPEG
+            headers = {"content-type": "image/jpeg"}
+
+        return _Ok()
+
+
+class _KlienUtama:
+    """Klien tiruan: Gemini 200 dengan gambar PNG."""
+
+    def __init__(self, *a, **k):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    async def post(self, url, **k):
+        class _Ok:
+            status_code = 200
+            content = _balasan_gemini(
+                [{"inlineData": {"mimeType": "image/png", "data": _b64_png}}]
+            )
+
+        return _Ok()
+
+    async def get(self, url):  # tidak boleh dipanggil bila Gemini berhasil
+        raise AssertionError("cadangan tidak boleh dipanggil saat Gemini berhasil")
+
+
+async def uji_dua_mesin():
+    kunci_asli, jeda_asli = gambar.GEMINI_API_KEY, gambar.GAMBAR_JEDA_DETIK
+    gambar.GEMINI_API_KEY = "kunci-tiruan"
+    gambar.GAMBAR_JEDA_DETIK = 0
+    try:
+        with _patch.object(gambar.httpx, "AsyncClient", _KlienGagal):
+            h = await gambar.buat_gambar("a cat lying down asleep on sofa")
+        cek("gemini gagal -> cadangan tetap membuat gambar", h.get("ok") is True)
+        cek("cadangan ditandai 'cadangan'", h.get("mesin") == "cadangan", str(h.get("mesin")))
+        cek("gambar cadangan tetap berwatermark", len(h.get("data_url") or "") > 2000)
+
+        with _patch.object(gambar.httpx, "AsyncClient", _KlienUtama):
+            h2 = await gambar.buat_gambar("a cat lying down asleep on sofa")
+        cek("gemini berhasil dipakai lebih dulu", h2.get("mesin") == "utama", str(h2.get("mesin")))
+        cek("gambar utama berupa data URL", (h2.get("data_url") or "").startswith("data:image/"))
+    finally:
+        gambar.GEMINI_API_KEY, gambar.GAMBAR_JEDA_DETIK = kunci_asli, jeda_asli
+
+
+asyncio.run(uji_dua_mesin())
+
+# Mesin gambar tidak boleh membocorkan nama penyedia lewat meta.
+_ringkas = gambar.ringkas_untuk_meta({"deskripsi": "a cat", "mesin": "utama"})
+cek("meta tidak membocorkan mesin/penyedia", "mesin" not in _ringkas, str(sorted(_ringkas)))
+cek("label meta tetap gungdev", _ringkas.get("label") == "gungdev", str(_ringkas.get("label")))
+
+# Kata penegasan seperti "sekeren mungkin" harus dibuang — inilah penyebab
+# nyata permintaan "kucing tidur" menghasilkan kucing DUDUK.
+d_keren = gambar.deskripsi_gambar(
+    "buatkan saya sebuah gambar kucing sedang tidur di sofa buatkan sekeren mungkin yaa"
+)
+cek("'sekeren mungkin' dibuang dari deskripsi", "keren" not in d_keren, d_keren[:90])
+cek("pose tidur tetap terjaga", "asleep" in d_keren and "lying down" in d_keren, d_keren[:90])
+cek("'seindah mungkin' juga dibuang", "indah" not in gambar.deskripsi_gambar("pantai seindah mungkin"))
+
 # =====================================================================
 print("\n=== 5. TANDA AIR LAYANAN GAMBAR DIBUANG ===")
 # =====================================================================

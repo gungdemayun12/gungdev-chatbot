@@ -300,6 +300,16 @@ def bersihkan_sesi(sesi: Any) -> Optional[dict]:
                         "deskripsi": str(g.get("deskripsi") or "")[:600],
                         "sunting": bool(g.get("sunting")),
                     }
+                    # Penanda mesin pembuat gambar.
+                    #
+                    # Disimpan khusus supaya UI bisa membedakan gambar
+                    # lama (yang tanda air penyedianya masih menempel) dari
+                    # gambar baru — dengan PASTI, bukan menebak dari ukuran
+                    # berkas. Data lama tidak punya field ini, dan itu
+                    # memang penanda yang dipakai.
+                    mesin = str(g.get("mesin") or "")
+                    if mesin in ("utama", "cadangan"):
+                        gambar["mesin"] = mesin
 
         satu_pesan = {
             "id": str(m.get("id") or ""),

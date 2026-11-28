@@ -324,6 +324,9 @@ async def chat_uji(request: main.ChatRequest, authorization: str | None = main.H
                 "data_url": hasil_gambar["data_url"],
                 "deskripsi": hasil_gambar["deskripsi"],
                 "sunting": hasil_gambar["sunting"],
+                # Sama seperti produksi (lihat main.py): penanda mesin
+                # dipakai UI untuk membedakan gambar baru dari gambar lama.
+                "mesin": hasil_gambar.get("mesin"),
             },
         }
     if hasil_gambar and hasil_gambar["jenis"] in ("jatah_habis", "gagal"):
@@ -376,6 +379,7 @@ async def chat_stream_uji(request: main.ChatRequest, authorization: str | None =
                     "data_url": hasil_gambar["data_url"],
                     "deskripsi": hasil_gambar["deskripsi"],
                     "sunting": hasil_gambar["sunting"],
+                    "mesin": hasil_gambar.get("mesin"),
                 }}})
                 yield sse({"delta": hasil_gambar["pesan"]})
             elif hasil_gambar:

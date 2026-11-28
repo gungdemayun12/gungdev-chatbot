@@ -111,6 +111,13 @@ function sanitizeSessions(value) {
                   data_url: m.gambar.data_url,
                   deskripsi: String(m.gambar.deskripsi || '').slice(0, 600),
                   sunting: Boolean(m.gambar.sunting),
+                  // Penanda mesin pembuat gambar. WAJIB ikut disimpan:
+                  // tanpa ini, gambar BARU kehilangan penandanya saat
+                  // riwayat ditulis ulang, lalu UI menganggapnya gambar
+                  // lama dan menampilkan peringatan palsu.
+                  ...(m.gambar.mesin === 'utama' || m.gambar.mesin === 'cadangan'
+                    ? { mesin: m.gambar.mesin }
+                    : {}),
                 },
               }
             : {}),
