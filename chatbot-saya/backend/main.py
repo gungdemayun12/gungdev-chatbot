@@ -3310,9 +3310,14 @@ async def buat_judul(request: "JudulRequest"):
         pintar = judul_mod.bersihkan_judul(mentah)
         if pintar:
             return {"judul": pintar, "sumber": "model"}
+        logger.info("Judul dari model ditolak pembersih: %r", mentah)
+        return {"judul": cadangan, "sumber": "lokal", "debug_mentah": repr(mentah)}
     except Exception as exc:  # noqa: BLE001
         # Terminal: judul tidak boleh menggagalkan apa pun.
         logger.info("Judul dari model gagal (%s); memakai cadangan lokal.", exc)
+        return {"judul": cadangan, "sumber": "lokal", "debug_error": repr(exc)}
+
+    return {"judul": cadangan, "sumber": "lokal"}
 
     return {"judul": cadangan, "sumber": "lokal"}
 
