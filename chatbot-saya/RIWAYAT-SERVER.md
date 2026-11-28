@@ -785,6 +785,53 @@ setelah halaman dimuat ulang atau dibuka di perangkat lain.
 Bila model lupa menulis penanda, kartu sumber tetap ditampilkan —
 pengguna tetap tahu dari mana jawaban itu diambil.
 
+### Membaca sampai halaman DETAIL (paket / post), bukan domain utama
+
+Dulu hasil riset sering menyebut satu domain berulang kali, misalnya
+"beetrip.co.id", padahal informasi paketnya ada di halaman
+`/view/paket-honeymoon-4h3m-private-pool-villa`. Penyebabnya: `_teks_dari_html`
+membuang SEMUA tag, termasuk `<a href>`, sehingga tautan halaman detail tidak
+pernah terlihat dan tidak pernah dibuka.
+
+Sekarang riset menelusuri tautan:
+
+1. **Tingkat 1** — dari halaman yang sudah dibaca, kumpulkan tautan halaman
+   dalam (`/view/`, `/tour/`, `/article/`, `/blog/`, `/produk/`, ...).
+   Tautan sampah dibuang: css/js/gambar, `/tag/`, `/kontak`, `/login`,
+   dan tautan ke domain lain.
+2. **Tingkat 2** — bila halaman depan hanya memuat tautan kategori
+   (umum di situs katalog seperti beetrip.co.id), halaman `/category/...`
+   yang paling relevan dibuka dulu, lalu tautan paket di dalamnya diambil.
+   Tingkat ini hanya dijalankan bila tingkat 1 belum menemukan apa pun,
+   supaya riset tetap cepat.
+3. Halaman detail yang terpilih **dibaca isinya** (maks 3 halaman) dan
+   dijadikan **sumber tersendiri**, ditaruh di depan agar `[1]` menunjuk
+   halaman paketnya.
+
+Pemilihan tautan memakai TF-IDF sederhana: kata yang muncul di banyak tautan
+(mis. "bali", "paket") berbobot kecil, kata pembeda (mis. "honeymoon")
+berbobot besar. Tanpa ini, tautan yang kebetulan memuat kata umum selalu
+menang dan halaman yang benar tidak pernah dibaca.
+
+Judul kartu sumber diambil dari `<h1>` halaman (lalu `<title>`), bukan teks
+anchor yang sering generik seperti "Selengkapnya" atau "Promo".
+
+Aturan ke model juga dipertegas: bila sebuah bagian jawaban bersumber dari
+halaman detail, nomor halaman detail itulah yang dipakai — bukan nomor
+halaman depan situsnya.
+
+Bukti nyata (diuji langsung ke beetrip.co.id):
+
+```
+[2] Paket Tour Bali Komplit 3H2M  -> beetrip.co.id/view/paket-tour-bali-komplit-3h2m
+[3] Paket Tour Bali Hemat 3H2M    -> beetrip.co.id/view/paket-tour-bali-hemat-3h2m
+[4] Paket Honeymoon 3H2M Private Pool Villa
+                                  -> beetrip.co.id/view/paket-honeymoon-3h2m-private-pool-villa
+```
+
+Halaman `/view/paket-honeymoon-4h3m-private-pool-villa` terbaca 9.429
+karakter berisi itinerari, harga, dan ulasan — bukan sekadar nama domain.
+
 ### Chip sumber sebaris (menempel di ujung kalimat)
 
 Selain kartu di bawah, setiap kalimat yang memakai sumber diberi **chip
@@ -847,6 +894,7 @@ python uji_jatah.py               # 78 pemeriksaan jatah, reset & kerahasiaan
 python uji_routing_penyedia.py    # 14 pemeriksaan routing model -> penyedia
 python uji_gemini.py              # 40 pemeriksaan Gemini & failover antar penyedia
 python uji_nvidia.py              # 60 pemeriksaan penyedia keempat (NVIDIA NIM)
+python uji_riset_detail.py        # 26 pemeriksaan riset menelusuri halaman paket/post
 python uji_unik_model.py          # 6 pemeriksaan id model tidak bentrok antar penyedia
 python uji_terpotong.py           # 29 pemeriksaan deteksi & sambung jawaban terpotong
 python uji_riset.py               # 20 pemeriksaan riset web NYATA (mencari di internet sungguhan)

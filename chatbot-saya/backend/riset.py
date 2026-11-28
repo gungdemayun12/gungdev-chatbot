@@ -64,6 +64,13 @@ logger = logging.getLogger("gungdev-riset")
 MAKS_SUMBER = 4
 MAKS_KARAKTER_SUMBER = 1800
 MAKS_KARAKTER_TOTAL = 7000
+# Halaman paket/post biasanya lebih pendek dari halaman depan, tapi isinya
+# yang paling berguna (harga, fasilitas). Diberi jatah sendiri.
+MAKS_KARAKTER_DETAIL = 1600
+# HTML mentah dipotong sebelum dicari tautannya, agar memori & waktu aman.
+MAKS_HTML = 400_000
+# Berapa halaman detail yang dibaca per putaran riset.
+MAKS_DETAIL = 3
 TIMEOUT_CARI = 10.0
 TIMEOUT_BACA = 9.0
 BAHASA_WIKI = ("id", "en")
@@ -509,8 +516,19 @@ async def _wiki_ringkas(http: httpx.AsyncClient, bahasa: str, judul: str) -> str
 # ---------------------------------------------------------------------
 # MEMBACA HALAMAN LANGSUNG
 # ---------------------------------------------------------------------
-async def _baca(http: httpx.AsyncClient, url: str, maks: int = MAKS_KARAKTER_SUMBER) -> str:
-    """Mengambil inti teks satu halaman. Gagal -> string kosong."""
+async def _baca(
+    http: httpx.AsyncClient,
+    url: str,
+    maks: int = MAKS_KARAKTER_SUMBER,
+    simpan_html: bool = False,
+) -> str:
+    """
+    Mengambil inti teks satu halaman. Gagal -> string kosong.
+
+    Bila `simpan_html` True, HTML mentahnya (dipotong) ikut dibaca oleh
+    pemanggil lewat `_baca_html`. Dipakai agar tautan detail di dalam
+    halaman bisa ditelusuri — bukan hanya teksnya.
+    """
     if not _url_aman(url):
         return ""
     try:
@@ -531,7 +549,358 @@ async def _baca(http: httpx.AsyncClient, url: str, maks: int = MAKS_KARAKTER_SUM
     jenis = (res.headers.get("content-type") or "").lower()
     if "html" not in jenis and "text/plain" not in jenis:
         return ""
+    if simpan_html:
+        return res.text[:MAKS_HTML]
     return _teks_dari_html(res.text)[:maks]
+
+
+# ---------------------------------------------------------------------
+# TELUSUR TAUTAN DETAIL (halaman paket / post / artikel)
+# ---------------------------------------------------------------------
+# MASALAH YANG DIPERBAIKI: `_teks_dari_html` membuang SEMUA tag, termasuk
+# <a href>. Akibatnya riset hanya membaca teks halaman depan, lalu model
+# menyebut "kategori paketnya antara lain ..." tanpa pernah membuka halaman
+# paketnya. Sumber yang dilaporkan pun jatuh ke domain utama saja, padahal
+# informasi sesungguhnya ada di halaman detail seperti
+# https://contoh.co.id/view/paket-honeymoon-4h3m
+#
+# Sekarang tautan di dalam halaman DIKUMPULKAN dan halaman detail yang
+# relevan ikut DIBACA, sehingga sumber yang dikirim ke pengguna menunjuk
+# halaman paket itu sendiri.
+_RE_HREF = re.compile(r'<a\s[^>]*href="([^"#]+)"[^>]*>(.*?)</a>', re.S | re.I)
+
+# Bagian alamat yang menandakan halaman DETAIL, bukan halaman daftar.
+_POLA_DETAIL = re.compile(
+    r"/(view|detail|produk|product|paket|package|tour|tours|post|posts|"
+    r"artikel|article|berita|news|wisata|promo|destinasi|item|blog|"
+    r"category|kategori|services|layanan|p|tour-package)/",
+    re.I,
+)
+
+# Berkas & bagian situs yang tidak berguna untuk riset.
+_POLA_ABAIKAN = re.compile(
+    r"(\.(css|js|png|jpe?g|gif|svg|webp|ico|pdf|zip|rar|mp4|mp3|woff2?|ttf)$|"
+    r"/(tag|tags|author|penulis|search|cari|login|masuk|daftar|register|"
+    r"keranjang|cart|checkout|feed|rss|sitemap|privacy|kebijakan|"
+    r"terms|syarat|kontak|contact|about|tentang)(/|$))",
+    re.I,
+)
+
+# Halaman tingkat-1 yang HANYA berupa daftar: tidak dibaca sebagai sumber
+# karena isinya cuma menu, bukan paket/produk tertentu. Contoh: /promo,
+# /tour, /services. Yang dianggap halaman spesifik adalah alamat dengan
+# 2 bagian atau lebih, mis. /tour/paket-honeymoon atau /view/paket-4h3m.
+_SEGMENT_DAFTAR = {
+    "promo", "promosi", "tour", "tours", "paket", "package", "packages",
+    "produk", "product", "products", "blog", "artikel", "article",
+    "category", "kategori", "services", "layanan", "wisata", "destinasi",
+    "berita", "news", "post", "posts", "item", "view", "detail",
+    "p", "index", "home", "id", "en",
+}
+
+# Segmen PEMBUKA yang selalu berarti halaman daftar, sebanyak apa pun
+# bagian di belakangnya. /category/x, /tag/x, /blog/x bukan halaman paket.
+# (Sebaliknya /view/x, /tour/x, /produk/x biasanya halaman isi.)
+_SEGMENT_DAFTAR_PEMBUKA = {
+    "category", "kategori", "tag", "tags", "author", "penulis", "page",
+    "search", "cari", "index", "arsip", "archive",
+}
+
+
+def _judul_dari_anchor(dalam: str) -> str:
+    """Mengambil judul tautan dari isi <a>...</a> yang masih berisi HTML."""
+    teks = html.unescape(_RE_TAG.sub(" ", dalam or ""))
+    return re.sub(r"\s+", " ", teks).strip()
+
+
+_RE_TITLE = re.compile(r"<title[^>]*>(.*?)</title>", re.S | re.I)
+_RE_H1 = re.compile(r"<h1[^>]*>(.*?)</h1>", re.S | re.I)
+
+
+def _judul_halaman(isi_html: str) -> str:
+    """
+    Mengambil judul halaman HTML: <h1> lebih dipercaya daripada <title>.
+
+    <title> sering memuat nama situs ("Promo - Beetrip"), sedangkan <h1>
+    biasanya adalah nama paketnya. Tanpa ini, kartu sumber hanya menampilkan
+    kata generik seperti "Promo".
+    """
+    if not isi_html:
+        return ""
+    for pola in (_RE_H1, _RE_TITLE):
+        cocok = pola.search(isi_html)
+        if not cocok:
+            continue
+        teks = html.unescape(_RE_TAG.sub(" ", cocok.group(1)))
+        teks = re.sub(r"\s+", " ", teks).strip()
+        # Buang embel-embel nama situs di judul: "Paket X | Beetrip".
+        teks = re.split(r"\s+[|\u2013\u2014-]\s+", teks)[0].strip() if "|" in teks else teks
+        if len(teks) >= 4:
+            return teks[:200]
+    return ""
+
+
+def _tautan_detail(isi_html: str, url_halaman: str, batas: int = 12) -> List[dict]:
+    """
+    Mengumpulkan tautan halaman DETAIL yang ada di dalam sebuah halaman.
+
+    Hanya tautan yang berada di domain yang SAMA dengan halaman asal, karena
+    tautan ke situs lain biasanya iklan/media sosial dan bukan isi situs itu.
+    Hasil diurutkan: yang alamatnya paling mirip kata kunci halaman didahulukan
+    (lihat `_pilih_tautan_detail`).
+
+    Mengembalikan list {"url", "judul"} tanpa duplikat.
+    """
+    if not isi_html:
+        return []
+    try:
+        asal = urlparse(url_halaman)
+    except ValueError:
+        return []
+    host = (asal.hostname or "").lower().replace("www.", "")
+    if not host:
+        return []
+
+    akar = f"{asal.scheme}://{asal.netloc}"
+    keluaran: List[dict] = []
+    terlihat: set = set()
+
+    for cocok in _RE_HREF.finditer(isi_html):
+        href = html.unescape(cocok.group(1).strip())
+        if not href:
+            continue
+        if href.startswith("//"):
+            href = f"{asal.scheme}:{href}"
+        elif href.startswith("/"):
+            href = f"{akar}{href}"
+        elif not href.lower().startswith("http"):
+            continue
+
+        try:
+            p = urlparse(href)
+        except ValueError:
+            continue
+        if (p.hostname or "").lower().replace("www.", "") != host:
+            continue
+        if not _POLA_DETAIL.search(p.path or "/"):
+            continue
+        if _POLA_ABAIKAN.search(p.path or ""):
+            continue
+
+        bersih = f"{p.scheme}://{p.netloc}{p.path}".rstrip("/")
+        if not bersih or bersih in terlihat:
+            continue
+        # Jangan masukkan halaman itu sendiri.
+        if bersih == url_halaman.split("#")[0].rstrip("/"):
+            continue
+
+        # Halaman hanya dianggap SPESIFIK bila alamatnya minimal 2 bagian
+        # dan ada bagian yang bukan sekadar nama menu. Contoh yang DITERIMA:
+        # /view/paket-honeymoon-4h3m, /tour/paket-bali, /blog/paket-hemat.
+        # Contoh yang DITOLAK: /promo, /tour, /services/layanan.
+        bagian = [x for x in (p.path or "").split("/") if x]
+        if len(bagian) < 2:
+            continue
+        if all(b.lower() in _SEGMENT_DAFTAR for b in bagian):
+            continue
+        # Halaman kategori DIPERBOLEHKAN sebagai perantara (lihat
+        # _tautan_dari_kategori): di banyak situs, tautan paket sesungguhnya
+        # hanya muncul di /category/..., bukan di halaman depan.
+
+        terlihat.add(bersih)
+        keluaran.append({"url": bersih, "judul": _judul_dari_anchor(cocok.group(2))})
+        if len(keluaran) >= batas * 3:
+            break
+
+    return keluaran
+
+
+def _pilih_tautan_detail(daftar: List[dict], kueri: str, batas: int) -> List[dict]:
+    """
+    Memilih tautan detail yang paling relevan dengan pertanyaan pengguna.
+
+    Skor memakai TF-IDF sederhana: kata yang muncul di BANYAK tautan (misal
+    "bali", "paket") berbobot kecil, sedangkan kata yang jarang (misal
+    "honeymoon") berbobot besar. Tanpa ini, tautan yang kebetulan memuat kata
+    umum akan selalu menang dan halaman yang benar tidak pernah dibaca.
+
+    Tautan dengan skor 0 tetap dipertahankan sebagai cadangan (urutan asli).
+    """
+    kunci = _kunci_relevan(kueri)
+    if not daftar or not kunci:
+        return daftar[:batas]
+
+    teks_semua = [
+        f"{t.get('url', '')} {t.get('judul', '')}".lower() for t in daftar
+    ]
+    jumlah = len(teks_semua)
+
+    berbobot = []
+    for i, (t, teks) in enumerate(zip(daftar, teks_semua)):
+        skor = 0.0
+        for k in kunci:
+            if k in teks:
+                muncul = sum(1 for x in teks_semua if k in x)
+                # Kata yang muncul di semua tautan hampir tidak membedakan.
+                skor += 1.0 / (1.0 + muncul / max(jumlah, 1))
+        berbobot.append((skor, -i, t))  # -i agar urutan asli jadi penentu akhir
+
+    berbobot.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    return [t for _, _, t in berbobot[:batas]]
+
+
+def _tautan_kategori(isi_html: str, url_halaman: str, batas: int = 6) -> List[dict]:
+    """
+    Mengumpulkan tautan HALAMAN KATEGORI/DAFTAR dari sebuah halaman.
+
+    Di banyak situs (mis. beetrip.co.id), halaman depan hanya memuat tautan
+    /category/..., dan tautan paket sesungguhnya (/view/...) baru muncul di
+    halaman kategori itu. Tanpa tingkat ini, halaman paket tidak pernah
+    ditemukan.
+    """
+    if not isi_html:
+        return []
+    try:
+        asal = urlparse(url_halaman)
+    except ValueError:
+        return []
+    host = (asal.hostname or "").lower().replace("www.", "")
+    if not host:
+        return []
+
+    akar = f"{asal.scheme}://{asal.netloc}"
+    keluaran: List[dict] = []
+    terlihat: set = set()
+    for cocok in _RE_HREF.finditer(isi_html):
+        href = html.unescape(cocok.group(1).strip())
+        if href.startswith("//"):
+            href = f"{asal.scheme}:{href}"
+        elif href.startswith("/"):
+            href = f"{akar}{href}"
+        elif not href.lower().startswith("http"):
+            continue
+        try:
+            p = urlparse(href)
+        except ValueError:
+            continue
+        if (p.hostname or "").lower().replace("www.", "") != host:
+            continue
+        bagian = [x for x in (p.path or "").split("/") if x]
+        if len(bagian) < 2 or bagian[0].lower() not in _SEGMENT_DAFTAR_PEMBUKA:
+            continue
+        if _POLA_ABAIKAN.search(p.path or ""):
+            continue
+        bersih = f"{p.scheme}://{p.netloc}{p.path}".rstrip("/")
+        if not bersih or bersih in terlihat:
+            continue
+        terlihat.add(bersih)
+        keluaran.append({"url": bersih, "judul": _judul_dari_anchor(cocok.group(2))})
+        if len(keluaran) >= batas:
+            break
+    return keluaran
+
+
+async def _telusuri_detail(
+    http: httpx.AsyncClient,
+    sumber: List[dict],
+    kueri: str,
+    maks_tambahan: int = 3,
+) -> List[dict]:
+    """
+    Membaca halaman DETAIL dari situs-situs yang muncul di hasil pencarian.
+
+    Untuk setiap sumber yang benar-benar terbaca, ambil tautan detailnya
+    (halaman paket/post/artikel), pilih yang paling relevan, lalu BACA isinya.
+    Halaman detail itu dikembalikan sebagai sumber tersendiri sehingga nomor
+    sitasi yang dipakai model menunjuk halaman yang tepat.
+
+    Tidak pernah melempar exception: kegagalan penelusuran hanya berarti
+    tidak ada tambahan sumber.
+    """
+    if not sumber or maks_tambahan <= 0:
+        return []
+
+    # Hanya halaman yang isinya terbaca DAN belum berupa halaman detail.
+    kandidat = [
+        s
+        for s in sumber
+        if (s.get("isi") or "").strip()
+        and not s.get("hanya_cuplikan")
+        and not s.get("bahasa")  # Wikipedia tidak perlu ditelusuri
+    ]
+    if not kandidat:
+        return []
+
+    # Kumpulkan tautan detail dari tiap kandidat (maks 2 situs agar cepat).
+    semua: List[dict] = []
+    for s in kandidat[:2]:
+        try:
+            isi_html = s.get("_html") or ""
+            if not isi_html:
+                continue
+            semua.extend(_tautan_detail(isi_html, s["url"]))
+        except Exception as exc:  # noqa: BLE001
+            logger.info("Gagal membaca tautan %s: %s", s.get("url"), exc)
+
+    # TINGKAT KEDUA: bila halaman yang terbaca hanya memuat tautan kategori
+    # (umum di situs katalog seperti beetrip.co.id), buka kategori yang
+    # paling relevan lalu ambil tautan paket di dalamnya. Hanya dijalankan
+    # bila tingkat pertama belum menemukan apa pun, agar tetap cepat.
+    if not semua and kandidat:
+        kategori: List[dict] = []
+        for s in kandidat[:1]:
+            kategori.extend(_tautan_kategori(s.get("_html") or "", s["url"]))
+        if kategori:
+            pilih_kat = _pilih_tautan_detail(kategori, kueri, 2)
+            logger.info(
+                "Membuka halaman kategori: %s",
+                "; ".join(k["url"][:70] for k in pilih_kat),
+            )
+
+            async def ambil_dari_kategori(k: dict) -> List[dict]:
+                html_kat = await _baca(http, k["url"], simpan_html=True)
+                return _tautan_detail(html_kat, k["url"])
+
+            hasil_kat = await asyncio.gather(
+                *[ambil_dari_kategori(k) for k in pilih_kat],
+                return_exceptions=True,
+            )
+            for bagian in hasil_kat:
+                if isinstance(bagian, list):
+                    semua.extend(bagian)
+
+    if not semua:
+        return []
+
+    pilihan = _pilih_tautan_detail(semua, kueri, maks_tambahan)
+    if not pilihan:
+        return []
+
+    # Baca isi halaman detail BERSAMAAN agar tidak menambah waktu berlipat.
+    # HTML-nya ikut diambil supaya JUDUL halaman asli bisa dipakai (teks
+    # anchor di halaman depan sering cuma "Promo" atau "Selengkapnya").
+    async def baca(s: dict) -> dict:
+        html_mentah = await _baca(http, s["url"], simpan_html=True)
+        judul_asli = _judul_halaman(html_mentah)
+        teks = _teks_dari_html(html_mentah)[:MAKS_KARAKTER_DETAIL] if html_mentah else ""
+        return {
+            "judul": (judul_asli or s.get("judul") or s["url"])[:200],
+            "url": s["url"],
+            "situs": (urlparse(s["url"]).hostname or "").replace("www.", ""),
+            "isi": teks,
+            "cuplikan": "",
+            "asal": "detail",
+            "detail": True,
+        }
+
+    hasil_baca = await asyncio.gather(
+        *[baca(t) for t in pilihan], return_exceptions=True
+    )
+    keluaran: List[dict] = []
+    for h in hasil_baca:
+        if isinstance(h, dict) and (h.get("isi") or "").strip():
+            keluaran.append(h)
+    return keluaran
 
 
 # ---------------------------------------------------------------------
@@ -601,6 +970,8 @@ async def cari_dan_baca(kueri: str, maks_sumber: int = MAKS_SUMBER) -> dict:
 
         # Isi tiap sumber: artikel Wikipedia diambil lewat REST resmi
         # (bersih & cepat), sisanya dibaca langsung dari halaman.
+        # HTML mentah halaman ikut disimpan agar TAUTAN detail di dalamnya
+        # bisa ditelusuri (lihat _telusuri_detail).
         async def isi_dari(s: dict) -> str:
             if s.get("hanya_cuplikan"):
                 # Tautan Google News tidak bisa dibaca sebagai artikel;
@@ -610,7 +981,12 @@ async def cari_dan_baca(kueri: str, maks_sumber: int = MAKS_SUMBER) -> dict:
                 teks = await _wiki_ringkas(http, s["bahasa"], s["judul"])
                 if teks:
                     return teks[:MAKS_KARAKTER_SUMBER]
-            return await _baca(http, s["url"])
+                return ""
+            html_mentah = await _baca(http, s["url"], simpan_html=True)
+            if html_mentah:
+                s["_html"] = html_mentah
+                return _teks_dari_html(html_mentah)[:MAKS_KARAKTER_SUMBER]
+            return ""
 
         if unik:
             isi_semua = await asyncio.gather(
@@ -622,6 +998,29 @@ async def cari_dan_baca(kueri: str, maks_sumber: int = MAKS_SUMBER) -> dict:
             # lebih baik membaca 3 halaman utuh daripada 6 cuplikan.
             unik.sort(key=lambda s: 0 if (s.get("isi") or "").strip() else 1)
             hasil["sumber"] = unik
+
+            # TELUSUR TAUTAN DETAIL: halaman depan sering hanya memuat daftar
+            # kategori. Halaman paket/post-nya yang berisi harga & fasilitas,
+            # jadi ikut dibaca dan menjadi sumber tersendiri.
+            try:
+                detail = await _telusuri_detail(http, unik, kueri, MAKS_DETAIL)
+            except Exception as exc:  # noqa: BLE001
+                logger.info("Penelusuran detail dilewati: %s", exc)
+                detail = []
+            if detail:
+                # Halaman detail DITARUH DI DEPAN: isinya paling spesifik,
+                # sehingga nomor sitasi [1] menunjuk halaman paketnya.
+                # Batas jumlah dibuat cukup agar detail tidak terbuang.
+                gabung = detail + [
+                    s for s in unik if (s.get("url") or "") not in {d["url"] for d in detail}
+                ]
+                hasil["sumber"] = gabung[: max(6, maks_sumber)]
+                logger.info(
+                    "Riset '%s': %d halaman detail ikut dibaca (%s)",
+                    kueri[:50],
+                    len(detail),
+                    "; ".join(d["url"][:60] for d in detail),
+                )
 
     hasil["teks"] = _susun_teks(hasil["sumber"])
     logger.info(
@@ -643,6 +1042,8 @@ def _susun_teks(sumber: List[dict]) -> str:
         if not badan:
             continue
         kepala = f"[Sumber {i}] {s.get('judul') or s['url']}"
+        if s.get("detail"):
+            kepala += " (HALAMAN DETAIL — pakai nomor ini untuk bagian ini)"
         if s.get("situs"):
             kepala += f" — {s['situs']}"
         if s.get("tanggal"):
@@ -719,10 +1120,14 @@ def konteks_untuk_model(hasil: dict) -> Optional[str]:
         "4. Bila satu kalimat memakai beberapa sumber, tulis berurutan: "
         "[1][3].\n"
         "5. Bila sumber saling bertentangan, sebutkan perbedaannya.\n"
-        "6. Bila sumber tidak memuat jawabannya, katakan terus terang, lalu "
+        "6. Bila sebuah bagian jawaban (misalnya satu paket, produk, atau "
+        "artikel) bersumber dari halaman DETAIL, pakai nomor halaman detail "
+        "itu, bukan nomor halaman depan situsnya. Jangan menyebut alamat "
+        "domain utama bila halaman detailnya sudah tersedia di sumber.\n"
+        "7. Bila sumber tidak memuat jawabannya, katakan terus terang, lalu "
         "jawab sebisamu dari pengetahuan sendiri dan tandai bagian itu.\n"
-        "7. Jangan menyebut kata 'konteks', 'sistem', atau 'prompt'.\n"
-        "8. DILARANG berkata bahwa kamu tidak bisa membuka web atau tidak "
+        "8. Jangan menyebut kata 'konteks', 'sistem', atau 'prompt'.\n"
+        "9. DILARANG berkata bahwa kamu tidak bisa membuka web atau tidak "
         "bisa menelusuri internet: sumber di atas SUDAH dibaca untukmu. "
         "Kalau ada yang belum terjawab, cukup sebutkan bagian mana yang "
         "belum ada di sumber."
