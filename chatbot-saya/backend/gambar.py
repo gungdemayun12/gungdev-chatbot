@@ -897,6 +897,61 @@ _GAYA_FOTO = (
 # bagian kalimat; ini mengurangi hasil aneh (anatomi salah, teks acak).
 _NEGATIF = "no text, no watermark, no distorted anatomy, no extra limbs"
 
+# ---------------------------------------------------------------------
+# KARYA DESAIN: poster, pricelist, logo, banner, dll.
+# ---------------------------------------------------------------------
+# MENGAPA DIPISAH DARI FOTO — kasus nyata:
+#   "buatkan poster pricelist warung saya, ada tipat cantok, es gula,
+#    mie goreng, ..."
+#   → yang keluar foto semangkuk mie, bukan poster daftar harga.
+#
+# Penyebabnya: deskripsi diberi gaya "professional photography" dan
+# negatif "no text". Model foto tidak menyusun tata letak dan justru
+# DILARANG menulis teks. Padahal poster pricelist JUSTRU butuh tata
+# letak dan teks.
+#
+# Karena itu karya desain mendapat gaya dan negatif sendiri. Perhatikan
+# `_NEGATIF_DESAIN` TIDAK memuat "no text" — teks adalah isi utamanya.
+_KRIA_DESAIN = re.compile(
+    r"(?<![\w-])(?:"
+    r"poster|pricelist|price\s*list|daftar\s*harga|brosur|banner|"
+    r"logo|ikon|icon|sampul|cover|kemasan|packaging|label|"
+    r"kartu\s*nama|kartu\s*ucapan|menu|mading|x-?banner|"
+    r"spanduk|plakat|stiker|flyer|pamflet|infografis|infographic|"
+    r"desain\s*grafis|graphic\s*design|mockup|kaos|tshirt|t-?shirt"
+    r")(?![\w-])",
+    re.IGNORECASE,
+)
+
+# Gaya yang menuntun model ke arah TATA LETAK, bukan foto.
+_GAYA_DESAIN = (
+    "flat graphic design layout, clean typographic poster design, "
+    "well organized composition, balanced negative space, "
+    "crisp legible lettering, modern professional print design"
+)
+
+# Negatif untuk karya desain. TIDAK memuat "no text" (teks justru isi
+# utamanya), tetapi tetap memuat penanda air & anatomi.
+_NEGATIF_DESAIN = "no watermark, no distorted anatomy, no watermark logo"
+
+# Daftar harga butuh STRUKTUR yang berbeda dari poster biasa.
+#
+# MENGAPA DIPISAH: poster biasa cukup "gambar besar + judul". Daftar
+# harga butuh baris-baris yang rapi. Tanpa arahan ini, model menumpuk
+# semua makanan di tengah dan hasilnya poster makanan — bukan daftar
+# harga.
+_DAFTAR_HARGA = re.compile(
+    r"(?<![\w-])(?:pricelist|price\s*list|daftar\s*harga|menu|harga)(?![\w-])",
+    re.IGNORECASE,
+)
+
+_GAYA_DAFTAR_HARGA = (
+    "price list menu board layout, rows of menu items with dotted leader "
+    "lines to prices, neat aligned two column list, small food photos in a "
+    "grid, large elegant heading at the top, generous white space, "
+    "minimalist editorial graphic design, flat clean background"
+)
+
 # Kata sambung & kata umum yang tidak perlu diterjemahkan (sudah berupa
 # kata Inggris atau memang dibiarkan).
 _LEWATI = {
@@ -1086,6 +1141,250 @@ def _beri_awalan(kerja: str) -> str:
     return teks
 
 
+# Salah ketik yang sering muncul, dipetakan ke kata sebenarnya.
+#
+# MENGAPA PERLU: heuristik bentuk kata tidak bisa menangkap semuanya.
+# "bgfaus" secara statistik mirip kata sah (2 vokal dari 6 huruf), jadi
+# lolos penyaringan. Padahal maksudnya jelas "bagus".
+#
+# Sengaja PENDEK dan hanya berisi kata yang sudah terbukti muncul. Jangan
+# menambah tebakan jauh — salah menebak lebih buruk daripada membiarkan.
+_SALAH_KETIK = {
+    "bgfaus": "bagus",
+    "bgus": "bagus",
+    "baguss": "bagus",
+    "pioster": "poster",
+    "posterr": "poster",
+    "gambr": "gambar",
+    "gamba": "gambar",
+    "warnaa": "warna",
+    "kuceng": "kucing",
+    "kucingg": "kucing",
+    "priselist": "pricelist",
+    "pricelis": "pricelist",
+    "prc": "pricelist",
+    "makanann": "makanan",
+    "minumaan": "minuman",
+}
+
+
+def _bersihkan_kata_sampah(teks: str) -> str:
+    """
+    Membuang kata yang tidak berguna bagi model gambar.
+
+    MENGAPA PERLU — contoh nyata yang gagal:
+
+        "buatkan pioster pricelist yang bgfaus yaa, beriakan saya
+         gambar terbaik nya yaaa"
+
+    Kata seperti "bgfaus", "beriakan", "sayaa", "dll nya yaa" adalah
+    salah ketik / basa-basi. Model gambar tidak bisa menafsirkannya, dan
+    kata-kata itu MENGABURKAN kata yang penting. Hasilnya model memilih
+    subjek yang salah: yang diminta poster pricelist, yang keluar foto
+    semangkuk mie — karena kata "mie goreng" adalah satu-satunya kata
+    benda yang dikenali.
+
+    Prinsipnya: buang yang jelas sampah, JANGAN buang yang mungkin
+    penting. Kata yang tidak dikenal tetapi terlihat seperti kata benda
+    (mis. "tipat", "rujak") tetap dibawa.
+
+    Tidak pernah melempar exception.
+    """
+    if not teks:
+        return teks
+
+    hasil = teks
+
+    # 1. Normalisasi salah ketik DULU, supaya penyaringan di langkah
+    #    berikutnya bisa mengenali katanya.
+    #
+    #    Urutan ini penting dan pernah salah: kalau "sayaa" disaring
+    #    sebelum dinormalisasi, ia tidak cocok dengan "saya" sehingga
+    #    lolos ke deskripsi gambar.
+    #
+    #    Dua pola, karena keduanya muncul di dunia nyata:
+    #      a. huruf kembar di TENGAH/akhir: "sayaa" -> "saya",
+    #         "bgfaus" -> "bgfaus" (tidak berubah, ditangani langkah 3)
+    #      b. kata yang diulang utuh: "gambar gambar" -> "gambar"
+    hasil = re.sub(r"(\w)\1{2,}", r"\1", hasil)  # "sayaaa" -> "saya"
+    hasil = re.sub(r"\b(\w+)\s+\1\b", r"\1", hasil, flags=re.IGNORECASE)
+    # Huruf vokal kembar di ujung kata: "sayaa" -> "saya",
+    # "yaaa" -> "ya". Hanya vokal, supaya "ball" atau "grass" (kata
+    # Inggris yang sah) tidak ikut dipangkas.
+    #
+    # `re.sub` dengan pola ini sudah berlaku untuk SETIAP kata di dalam
+    # kalimat (bukan hanya di awal), karena `$` di sini cocok dengan
+    # akhir baris — dan kalimat ini satu baris. Jadi "warung sayaa,"
+    # ikut menjadi "warung saya,".
+    hasil = re.sub(r"([aeiou])\1+\b", r"\1", hasil, flags=re.IGNORECASE)
+
+    # 2. Basa-basi & penegasan yang tidak menambah isi gambar.
+    #    Dicocokkan dengan batas kata supaya "yang" tidak memotong
+    #    "sayang", dan "dll" tidak memotong kata lain.
+    basa_basi = (
+        r"yang\s+dimana",
+        r"dimana",
+        r"dll\s*nya",
+        r"dllnya",
+        r"dan\s+lain\s+lain",
+        r"dan\s+lainnya",
+        r"dsb",
+        r"nya\s+yaa?",
+        r"nya",
+        r"yaaa*",
+        r"yah",
+        r"dong",
+        r"deh",
+        r"sih",
+        r"nih",
+        r"kak",
+        r"bang",
+        r"min",
+        r"saya",
+        r"aku",
+        r"gua",
+        r"gue",
+        r"punya\s+saya",
+        r"terbaik",
+        r"terbagus",
+        r"berikan",
+        r"beriakan",
+        r"berikanlah",
+        r"kasih",
+        r"tolong",
+        r"mohon",
+        r"buatkan",
+        r"bikinkan",
+        r"gambarkan",
+        r"sebuah",
+        r"yang",
+        r"dengan",
+        r"untuk",
+        r"ada",
+        r"dimana",
+        r"yaa?",
+        r"gambar",
+        r"gambarnya",
+        r"foto",
+        r"gambarannya",
+    )
+    for pola in basa_basi:
+        hasil = re.sub(
+            r"(?<![\w-])" + pola + r"(?![\w-])",
+            " ",
+            hasil,
+            flags=re.IGNORECASE,
+        )
+
+    # 4. Buang kata yang tidak mungkin menambah apa pun bagi model gambar.
+    #
+    #    Contoh nyata: "bgfaus", "pioster". Model tidak mengenalinya, dan
+    #    kata seperti ini MENGABURKAN kata yang penting — ia menjadi
+    #    "kebisingan" yang membuat model memilih subjek yang salah.
+    #
+    #    Lihat _kata_berarti(): patokannya sengaja konservatif supaya
+    #    nama makanan/tempat yang tidak dikenal model tetap dibawa.
+    bersih_kata: List[str] = []
+    for kata in hasil.split():
+        if not _kata_berarti(kata):
+            continue
+        # Buang pengulangan persis: "pricelist ... pricelist".
+        if bersih_kata and kata.lower() == bersih_kata[-1].lower():
+            continue
+        if kata.lower() in {k.lower() for k in bersih_kata}:
+            continue
+        bersih_kata.append(kata)
+    hasil = " ".join(bersih_kata)
+
+    # 6. Perbaiki salah ketik yang sering muncul pada permintaan gambar.
+    #
+    #    MENGAPA: heuristik bentuk kata tidak bisa menangkap semuanya.
+    #    "bgfaus" secara statistik mirip kata sah (2 vokal dari 6 huruf),
+    #    jadi tidak tersaring. Tetapi manusia langsung tahu maksudnya
+    #    "bagus". Peta kecil ini menangani kasus yang paling sering
+    #    muncul tanpa menebak-nebak berlebihan.
+    #    Kata yang tidak ada di peta dibiarkan apa adanya.
+    for salah, benar in _SALAH_KETIK.items():
+        hasil = re.sub(
+            r"(?<![\w-])" + re.escape(salah) + r"(?![\w-])",
+            benar,
+            hasil,
+            flags=re.IGNORECASE,
+        )
+
+    # 5. Buang tanda baca berlebih & rapikan spasi.
+    hasil = re.sub(r"[^\w\s\-]", " ", hasil)
+    return re.sub(r"\s+", " ", hasil).strip()
+
+
+def _kata_berarti(kata: str) -> bool:
+    """
+    Apakah satu kata layak dikirim ke model gambar?
+
+    MENGAPA PERLU — contoh nyata:
+        "buatkan pioster pricelist yang bgfaus yaa"
+    "pioster" dan "bgfaus" adalah salah ketik. Model gambar tidak
+    mengenalinya, dan kata seperti ini MENGABURKAN kata yang penting
+    (poster, pricelist) sehingga model memilih subjek yang salah.
+
+    Patokannya sengaja KONSERVATIF — lebih baik membawa kata asing yang
+    tidak dikenal daripada membuang kata yang penting:
+      - "tipat", "rujak", "warung" dibawa (ejaannya wajar, mungkin nama
+        makanan atau tempat);
+      - "bgfaus" dibuang (tidak ada pola vokal yang wajar);
+      - "pioster" dibawa (ejaannya wajar — lebih aman dibawa daripada
+        berisiko membuang kata sah).
+
+    Angka tetap dibawa: harga adalah isi utama pricelist.
+    """
+    if not kata:
+        return False
+
+    # Angka/harga: selalu penting.
+    if re.search(r"\d", kata):
+        return True
+
+    inti = re.sub(r"[^a-zA-Z]", "", kata)
+    if not inti:
+        return False
+
+    # Kata sangat pendek (mis. "es", "di") tetap dibawa.
+    if len(inti) <= 2:
+        return True
+
+    vokal = re.search(r"[aeiou]", inti, re.IGNORECASE)
+    # Tidak ada vokal sama sekali pada kata >= 3 huruf: bukan kata.
+    if not vokal:
+        return False
+
+    # Deret konsonan >= 4 berturut-turut: hampir pasti bukan kata
+    # ("bgfaus" punya "bgf"). Kata Indonesia/Inggris yang sah punya
+    # paling banyak 3 konsonan berderet ("instruksi": "nstr").
+    if re.search(r"[bcdfghjklmnpqrstvwxyz]{4,}", inti, re.IGNORECASE):
+        return False
+
+    # Rasio vokal terlalu kecil: "bgfaus" = 2 vokal dari 6 huruf.
+    # Kata sah biasanya >= 1/4 vokal.
+    jumlah_vokal = len(re.findall(r"[aeiou]", inti, re.IGNORECASE))
+    if jumlah_vokal / len(inti) < 0.2:
+        return False
+
+    return True
+
+
+def _sisa_kata_berarti(teks: str) -> bool:
+    """
+    Apakah masih ada kata yang layak dikirim ke model gambar?
+
+    Dipakai untuk berjaga-jaga: kalau pembersihan menghabiskan seluruh
+    deskripsi, teks asli dipakai kembali. Lebih baik deskripsi kotor
+    daripada deskripsi kosong yang membuat gambar acak.
+    """
+    if not teks:
+        return False
+    return any(len(k) >= 2 for k in re.split(r"\s+", teks.strip()))
+
+
 def deskripsi_gambar(pesan: str, sunting: bool = False) -> str:
     """
     Mengubah pesan pengguna menjadi deskripsi gambar yang layak dipakai.
@@ -1115,6 +1414,13 @@ def deskripsi_gambar(pesan: str, sunting: bool = False) -> str:
 
     # Buang sisa kata yang menggantung di ujung.
     bersih = re.sub(r"\s+(?:ya|yah|dong|nih|deh)$", "", bersih, flags=re.IGNORECASE)
+
+    # Buang basa-basi & salah ketik yang mengaburkan isi permintaan.
+    # Lihat _bersihkan_kata_sampah(): tanpa langkah ini, permintaan
+    # "poster pricelist" bisa berakhir menjadi gambar semangkuk mie.
+    setelah_bersih = _bersihkan_kata_sampah(bersih)
+    if _sisa_kata_berarti(setelah_bersih):
+        bersih = setelah_bersih
 
     if not bersih:
         bersih = t.strip() or "ilustrasi"
@@ -1169,6 +1475,19 @@ def deskripsi_gambar(pesan: str, sunting: bool = False) -> str:
         # yang penting perubahannya jelas dan gambar aslinya dihormati.
         inti = f"edit this image: {kerja}" if not kerja.lower().startswith("edit") else kerja
         return f"{inti}, keep composition, {_NEGATIF}"[:900]
+
+    # --- Apakah ini KARYA DESAIN (poster, pricelist, logo, dll)? ---
+    # Penting: gaya "foto realistik" justru MERUSAK permintaan seperti
+    # poster pricelist. Foto tidak punya tata letak, dan model foto tidak
+    # berusaha menyusun daftar harga — hasilnya gambar makanan acak,
+    # bukan daftar harga.
+    if _KRIA_DESAIN.search(asli):
+        # Untuk pricelist/daftar harga, arahkan model ke STRUKTUR yang
+        # benar: grid, baris, dan ruang kosong. Tanpa ini, model
+        # menumpuk semua makanan di tengah dan hasilnya poster makanan.
+        if _DAFTAR_HARGA.search(asli + " " + kerja):
+            return f"{kerja}, {_GAYA_DAFTAR_HARGA}, {_NEGATIF_DESAIN}"[:900]
+        return f"{kerja}, {_GAYA_DESAIN}, {_NEGATIF_DESAIN}"[:900]
 
     if pilihan_gaya:
         # Gaya pilihan pengguna dihormati; jangan ditimpa gaya foto.
@@ -1319,12 +1638,25 @@ def pesan_berhasil(deskripsi: str) -> str:
 
     Sengaja singkat dan tenang: pengguna sudah melihat gambarnya, jadi
     tidak perlu penjelasan panjang. Nama penyedia gambar TIDAK disebut.
+
+    Untuk karya desain (poster, pricelist, dll), ada satu kalimat
+    tambahan yang JUJUR: huruf di gambar itu hiasan, bukan teks yang
+    bisa dibaca. Tanpa penjelasan ini pengguna mengira aplikasinya rusak,
+    padahal ini keterbatasan nyata model gambar gratis.
     """
-    return (
+    dasar = (
         "Ini gambar yang Anda minta. Klik gambarnya bila ingin melihat "
         "lebih besar atau menyimpannya.\n\n"
         f"Deskripsi: {deskripsi}"
     )
+    if _KRIA_DESAIN.search(deskripsi or ""):
+        dasar += (
+            "\n\nCatatan: pada poster/pricelist, tulisan di dalam gambar "
+            "hanya berupa hiasan — model gambar belum bisa menulis huruf "
+            "yang benar-benar terbaca. Untuk daftar harga yang rapi dan "
+            "bisa diubah, saya bantu susun sebagai teks."
+        )
+    return dasar
 
 
 def pesan_tidak_tersedia() -> str:

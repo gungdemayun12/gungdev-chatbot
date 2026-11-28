@@ -250,6 +250,55 @@ Kata posenya sekarang tidak bisa disalahtafsirkan: `lying down`,
 Bila pengguna menyebut gayanya sendiri ("gaya anime", "kartun"), gaya
 itulah yang dipakai dan gaya foto tidak ditambahkan.
 
+### Membuang kata sampah
+
+Permintaan nyata sering penuh basa-basi dan salah ketik:
+
+> "buatkan pioster pricelist yang **bgfaus** yaa, beriakan saya gambar
+> terbaik **nya yaaa**"
+
+Kata seperti ini **tidak bisa ditafsirkan** model gambar, dan yang lebih
+buruk: ia **mengaburkan** kata yang penting. Inilah penyebab nyata
+permintaan "poster pricelist" berubah menjadi foto semangkuk mie — kata
+"mie goreng" satu-satunya kata benda yang dikenali model.
+
+`_bersihkan_kata_sampah()` bekerja konservatif:
+
+- **membuang** basa-basi ("dll nya yaa", "berikan", "terbaik"),
+- **memperbaiki** salah ketik umum lewat `_SALAH_KETIK`
+  (`pioster` → poster, `bgfaus` → bagus, `sayaa` → saya),
+- **membawa** kata asing/bahasa daerah yang ejaannya wajar
+  (`tipat`, `rujak`, `warung`) — lebih baik membawa kata yang tidak
+  dikenal daripada membuang kata yang penting.
+
+Bila pembersihan menghabiskan seluruh deskripsi, teks asli dipakai
+kembali. Deskripsi kotor lebih baik daripada deskripsi kosong.
+
+### Karya desain: poster, pricelist, logo
+
+Permintaan desain **tidak** memakai gaya foto. Alasannya nyata:
+
+| | Foto | Karya desain |
+|---|---|---|
+| Gaya | `professional photography` | `flat graphic design layout` |
+| Negatif | `no text, ...` | **tanpa** `no text` |
+
+Foto tidak punya tata letak, dan `no text` justru **melarang** model
+menulis apa pun — padahal teks adalah isi utama poster. Karena itu
+`_KRIA_DESAIN` memisahkan keduanya.
+
+Untuk **pricelist/daftar harga/menu**, arahan gayanya lebih spesifik
+lagi (`_GAYA_DAFTAR_HARGA`): baris menu dengan garis titik-titik ke
+harga, kolom rata, grid foto kecil, judul besar di atas. Tanpa ini
+model menumpuk semua makanan di tengah dan hasilnya poster makanan,
+bukan daftar harga.
+
+**Batas jujur:** model gambar gratis bisa meniru *tata letak* poster,
+tetapi **belum bisa menulis huruf yang benar-benar terbaca**. Karena itu
+`pesan_berhasil()` menambahkan satu kalimat jujur untuk karya desain,
+dan menawarkan menyusun daftar harga sebagai teks. Tanpa penjelasan ini
+pengguna mengira aplikasinya rusak.
+
 ---
 
 ## 7. Tanda air: milik gungdev sendiri
@@ -374,7 +423,7 @@ Niat, jatah, penyimpanan, dan tampilan **tidak perlu diubah**.
 
 ```bash
 cd chatbot-saya/backend
-python uji_gambar.py          # 102 pemeriksaan (backend, tanpa jaringan)
+python uji_gambar.py          # 130 pemeriksaan (backend, tanpa jaringan)
 ```
 
 ```bash
@@ -422,7 +471,7 @@ Endpoint ini **hanya ada di `server_uji.py`**, tidak di produksi.
 | `frontend/src/App.jsx` | Menangkap `meta.gambar_dimulai` & `meta.gambar` |
 | `frontend/src/hooks/useSessions.js` | Menyimpan gambar & tanda fase gambar |
 | `frontend/src/App.css` | Tampilan gambar & animasi `.menggambar*` |
-| `backend/uji_gambar.py` | 102 pemeriksaan backend |
+| `backend/uji_gambar.py` | 130 pemeriksaan backend |
 | `frontend/uji_gambar_browser.mjs` | 25 pemeriksaan browser |
 
 ---

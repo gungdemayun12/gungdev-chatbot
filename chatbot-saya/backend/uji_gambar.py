@@ -135,6 +135,59 @@ d6 = gambar.deskripsi_gambar("ubah gambar ini jadi hitam putih", sunting=True)
 cek("suntingan menyebut edit", "edit" in d6.lower(), d6)
 cek("suntingan menyebut hitam putih", "black and white" in d6, d6)
 
+# ---------------------------------------------------------------------
+# KARYA DESAIN (poster / pricelist / logo)
+# ---------------------------------------------------------------------
+# Kasus nyata yang gagal sebelum ini: permintaan "poster pricelist"
+# menghasilkan foto semangkuk mie. Penyebabnya: deskripsi diberi gaya
+# "professional photography" dan negatif "no text", padahal poster
+# justru butuh tata letak dan teks.
+POSTER = (
+    "buatkan saya sebuah poster untuk pricelist warung sayaa, yang dimana "
+    "ada tipat cantok, es gula, mie goreng, rujak bali, minuman, jajan, "
+    "dll nya yaa, buatkan pioster pricelist yang bgfaus yaa"
+)
+dp = gambar.deskripsi_gambar(POSTER)
+cek("poster TIDAK diberi gaya foto", "professional photography" not in dp, dp)
+cek("poster diberi gaya desain", "graphic design" in dp or "layout" in dp, dp)
+cek("poster TIDAK dilarang berteks", "no text" not in dp, dp)
+cek("poster tetap memuat judul poster", "poster" in dp, dp)
+cek("poster tetap memuat isi warung", "warung" in dp, dp)
+cek("poster tetap memuat nama makanan", "tipat" in dp and "rujak" in dp, dp)
+# Salah ketik dibersihkan supaya tidak mengaburkan isi permintaan.
+cek("salah ketik 'pioster' diperbaiki", "pioster" not in dp, dp)
+cek("salah ketik 'bgfaus' diperbaiki", "bgfaus" not in dp, dp)
+cek("salah ketik 'sayaa' diperbaiki", "sayaa" not in dp, dp)
+cek("basa-basi 'yaaa' dibuang", "yaaa" not in dp, dp)
+cek("kata 'dll nya yaa' dibuang", "dll" not in dp, dp)
+# Daftar harga harus dapat arahan STRUKTUR, bukan hanya "poster".
+cek("daftar harga diberi arahan baris harga", "price list" in dp or "leader lines" in dp, dp)
+
+# Logo juga karya desain, tetapi bukan daftar harga.
+dl = gambar.deskripsi_gambar("desain logo kopi hitam putih")
+cek("logo diberi gaya desain", "graphic design" in dl or "layout" in dl, dl)
+cek("logo TIDAK diberi arahan daftar harga", "leader lines" not in dl, dl)
+
+# FOTO tetap memakai gaya foto seperti sebelumnya (tidak ikut berubah).
+df = gambar.deskripsi_gambar("buatkan gambar kucing sedang tidur di sofa")
+cek("foto tetap memakai gaya foto", "professional photography" in df, df)
+cek("foto tetap memakai negatif 'no text'", "no text" in df, df)
+
+# Pesan pendamping harus JUJUR soal teks di poster, dan TIDAK
+# menyebutkannya untuk foto biasa.
+pp = gambar.pesan_berhasil(dp)
+cek("pesan poster jujur soal tulisan", "hiasan" in pp or "terbaca" in pp, pp)
+cek("pesan poster menawarkan versi teks", "teks" in pp, pp)
+pf = gambar.pesan_berhasil(df)
+cek("pesan foto tidak menyebut poster", "pricelist" not in pf and "hiasan" not in pf, pf)
+cek("pesan tidak membocorkan nama penyedia", "pollinations" not in pp.lower())
+
+# Pembersih kata tidak boleh membuang kata yang penting.
+for kata in ("tipat", "rujak", "warung", "kucing", "goreng", "mie"):
+    cek(f"kata '{kata}' dianggap berarti", gambar._kata_berarti(kata), kata)
+cek("kata acak 'bgfaus' tidak dianggap berarti (sebelum koreksi)", gambar._SALAH_KETIK.get("bgfaus") == "bagus")
+cek("deskripsi kosong tidak membuat sampah", gambar._bersihkan_kata_sampah("") == "")
+
 
 # =====================================================================
 print("\n=== 4. JATAH GAMBAR TERPISAH DARI JATAH CHAT ===")
