@@ -67,6 +67,9 @@ _KATA_ABAIKAN = {
     "minta", "sertakan", "sertakanlah", "beserta", "termasuk", "lengkap",
     "detail", "rinci", "jelas", "terbaru", "terkini", "terbaik", "murah",
     "penting", "utama", "umum", "secara", "beserta", "yaitu", "ialah",
+    # pembuka jawaban asisten — bukan topik
+    "berikut", "ini", "adalah", "merupakan", "tentu", "baiklah", "silakan",
+    "kisaran", "sekitar", "beberapa", "antara", "lain", "sebagai",
 }
 
 # Kata yang menandakan judul sudah bagus bila muncul.
@@ -148,9 +151,6 @@ def judul_lokal(teks: Iterable[str], maks_kata: int = MAKS_KATA) -> str:
     for k in semua:
         hitung[k] = hitung.get(k, 0) + 1
 
-    # Urutan pencarian: potongan terakhir dulu, lalu sisanya.
-    urutan = list(reversed(daftar_kata))
-
     terpilih: List[str] = []
     terlihat: set = set()
 
@@ -163,12 +163,14 @@ def judul_lokal(teks: Iterable[str], maks_kata: int = MAKS_KATA) -> str:
             terlihat.add(k)
             terpilih.append(k)
 
-    # 1) Potongan terakhir (inti pertanyaan) lebih dulu.
-    if urutan:
-        tambah(urutan[0])
-    # 2) Kata yang berulang di percakapan (topik utama).
+    # 0) PERTANYAAN PENGGUNA lebih dulu: judul harus menggambarkan apa
+    #    yang DITANYAKAN, bukan cara asisten membuka jawabannya. Tanpa
+    #    ini, kata pembuka jawaban seperti "berikut" bisa masuk judul.
+    if daftar_kata:
+        tambah(daftar_kata[0])
+    # 1) Kata yang berulang di percakapan (topik utama).
     tambah([k for k in semua if hitung.get(k, 0) > 1])
-    # 3) Sisanya, urut asli percakapan.
+    # 2) Sisanya, urut asli percakapan.
     tambah(semua)
 
     judul = _rapikan(terpilih)
