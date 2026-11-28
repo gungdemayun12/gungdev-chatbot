@@ -146,7 +146,7 @@ export default function Settings({
                   onChange={(e) => updateSettings({ language: e.target.value })}
                 >
                   <option value="id">Bahasa Indonesia</option>
-                  <option value="en">English (segera)</option>
+                  <option value="en">English</option>
                 </select>
               </Field>
 

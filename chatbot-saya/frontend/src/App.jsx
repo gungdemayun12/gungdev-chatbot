@@ -17,6 +17,7 @@ import UsagePanel from './components/UsagePanel.jsx'
 import Modal from './components/Modal.jsx'
 import ToastStack from './components/Toast.jsx'
 import LoginModal from './components/LoginModal.jsx'
+import LanguageProvider from './components/LanguageProvider.jsx'
 
 import { useSettings, resolveApiUrl } from './hooks/useSettings.js'
 import { useSessions } from './hooks/useSessions.js'
@@ -834,6 +835,7 @@ export default function App() {
   )
 
   return (
+    <LanguageProvider language={settings.language}>
     <div className={`app ${sidebarCollapsed ? 'app--collapsed' : ''}`}>
       <Sidebar
         open={sidebarOpen}
@@ -1071,6 +1073,7 @@ export default function App() {
 
       <ToastStack toasts={toasts} onDismiss={dismiss} />
     </div>
+    </LanguageProvider>
   )
 }
 
