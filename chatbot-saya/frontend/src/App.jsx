@@ -88,7 +88,7 @@ export default function App() {
   /* Alamat unik per percakapan (/c/<token>). Hook ini menjaga URL tetap
      sejalan dengan sesi yang sedang dibuka, dua arah: URL dibuka ->
      sesi dibuka, dan sesi diganti -> URL ikut berganti. */
-  useUrlSesi({ activeSession, sessions, selectSession, loaded })
+  useUrlSesi({ activeSession, sessions, selectSession, loaded, tamu: !user })
 
   const { toasts, toast, dismiss } = useToasts()
 

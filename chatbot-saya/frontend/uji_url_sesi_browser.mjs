@@ -203,6 +203,27 @@ async function jalankan() {
     cek('menu sesi punya "Salin tautan"', false, 'tidak ada item sesi di sidebar')
   }
 
+  console.log('\n=== 8. TAMU JUGA MENDAPAT ALAMAT ===')
+  /* Sesi tanpa login: riwayat tidak disimpan, tetapi selama halaman
+     terbuka percakapan tetap harus punya alamat sendiri. */
+  const konteksTamu = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+  const pageTamu = await konteksTamu.newPage()
+  await pageTamu.goto(URL_APP, { waitUntil: 'domcontentloaded' })
+  await pageTamu.waitForTimeout(2500)
+  await kirimPesan(pageTamu, 'Sebutkan satu hewan.')
+  await pageTamu.waitForTimeout(1500)
+  const jalurTamu = new URL(pageTamu.url()).pathname
+  cek('tamu mendapat alamat /c/<uuid> setelah mengirim pesan', POLA_SESI.test(jalurTamu), jalurTamu)
+
+  /* Tamu membuka token asing: URL harus dibersihkan juga. */
+  await pageTamu.goto(`${URL_APP.replace(/\/$/, '')}/c/ffffffff-ffff-4fff-8fff-ffffffffffff`, {
+    waitUntil: 'domcontentloaded',
+  })
+  await pageTamu.waitForTimeout(3000)
+  const jalurTamuAsing = new URL(pageTamu.url()).pathname
+  cek('tamu membuka token asing -> URL dibersihkan', jalurTamuAsing === '/', jalurTamuAsing)
+  await konteksTamu.close()
+
   await browser.close()
 
   console.log('\n' + '='.repeat(64))

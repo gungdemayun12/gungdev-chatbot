@@ -86,8 +86,9 @@ function tulisUrl(token) {
  * @param {Array} argumen.sessions   semua sesi (untuk mencari token dari URL)
  * @param {Function} argumen.selectSession  dipanggil bila URL menunjuk sesi lain
  * @param {boolean} argumen.loaded   data sesi sudah termuat
+ * @param {boolean} argumen.tamu    pengguna belum login (riwayat tidak disimpan)
  */
-export function useUrlSesi({ activeSession, sessions, selectSession, loaded }) {
+export function useUrlSesi({ activeSession, sessions, selectSession, loaded, tamu = false }) {
   /* Token yang URL-nya sudah kita tulis sendiri. Dipakai agar efek
      berikutnya tidak menulis alamat yang sama berulang kali. */
   const terakhirDitulis = useRef(undefined)
@@ -109,10 +110,13 @@ export function useUrlSesi({ activeSession, sessions, selectSession, loaded }) {
       return
     }
 
-    /* Bila daftar sesi masih kosong, jangan putuskan apa pun: token bisa
-       saja sah tetapi datanya belum turun dari server. Menandai "sudah
-       dicocokkan" sekarang akan membuat tautan itu tidak pernah dibuka. */
-    if (sessions.length === 0) return
+    /* Bila daftar sesi masih kosong, putuskan berdasarkan SIAPA pengguna:
+       - Tamu: riwayatnya memang tidak pernah ada, jadi sesi kosong adalah
+         keadaan FINAL. Token di URL tidak akan pernah cocok, jadi bersihkan
+         (jangan biarkan alamat yang tidak menunjuk apa pun).
+       - Login: sesi kosong bisa berarti riwayatnya belum turun dari server.
+         Jangan putuskan apa pun dulu, nanti dicoba lagi. */
+    if (sessions.length === 0 && !tamu) return
     sudahCocokkan.current = true
 
     const cocok = sessions.find((s) => s.token === tokenUrl)
@@ -133,7 +137,7 @@ export function useUrlSesi({ activeSession, sessions, selectSession, loaded }) {
     tulisUrl(null)
     terakhirDitulis.current = null
     urlFinal.current = true
-  }, [loaded, sessions, activeSession, selectSession])
+  }, [loaded, sessions, activeSession, selectSession, tamu])
 
   /* ------------------------------------------------------------------
      LANGKAH 2 (setiap kali sesi aktif berganti): STATE -> URL
@@ -158,7 +162,7 @@ export function useUrlSesi({ activeSession, sessions, selectSession, loaded }) {
     if (token === terakhirDitulis.current) return
     terakhirDitulis.current = token
     tulisUrl(token)
-  }, [loaded, activeSession?.token, activeSession?.id, sessions.length])
+  }, [loaded, activeSession?.token, activeSession?.id, sessions.length, tamu])
 
   /* ------------------------------------------------------------------
      LANGKAH 3: tombol Kembali / Maju browser.

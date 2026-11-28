@@ -266,6 +266,23 @@ cek('token tidak dikenal tidak menyebabkan error', errorAsing === null, String(e
 cek('URL dibersihkan saat token tidak dikenal', lokasi.pathname === '/', lokasi.pathname)
 cek('tidak ada sesi yang dipilih untuk token asing', k4.dipilih.length === 0, JSON.stringify(k4.dipilih))
 
+/* TAMU: riwayatnya memang tidak pernah ada, jadi sesi kosong adalah
+   keadaan final. Token di URL harus dibersihkan juga (temuan dari uji
+   produksi: di produksi pengguna tamu, URL asing tertinggal selamanya). */
+lokasi.pathname = '/c/ffffffff-ffff-4fff-8fff-ffffffffffff'
+const k4t = buatKomponen({ activeSession: sesiA, sessions: [], loaded: true, tamu: true })
+k4t.render()
+cek('tamu dengan token asing -> URL dibersihkan', lokasi.pathname === '/', lokasi.pathname)
+
+/* ------------------------------------------------------------------ */
+console.log('\n=== 4b. TAMU: saat pesan dikirim, alamat tetap terbentuk ===')
+/* ------------------------------------------------------------------ */
+const sesiTamu = { id: 's_tamu', token: TOKEN_A, messages: [] }
+lokasi.pathname = '/'
+const kt = buatKomponen({ activeSession: sesiTamu, sessions: [sesiTamu], loaded: true, tamu: true })
+kt.render()
+cek('tamu juga mendapat alamat /c/<token>', lokasi.pathname === `/c/${TOKEN_A}`, lokasi.pathname)
+
 /* ------------------------------------------------------------------ */
 console.log('\n=== 5. SESI LAMA TANPA TOKEN ===')
 /* ------------------------------------------------------------------ */
