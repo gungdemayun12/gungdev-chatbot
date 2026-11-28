@@ -25,6 +25,7 @@ import { useAuth } from './hooks/useAuth.js'
 import { LogOut } from './components/icons.jsx'
 import { checkHealth, streamChat, fetchUsage, fetchCapabilities } from './lib/api.js'
 import { getTokenRiwayat } from './lib/riwayat.js'
+import { pulihkanTokenRiwayat } from './lib/auth.js'
 import { gabungKemampuan, modelUntukGambar, cariModel } from './lib/models.js'
 import {
   catatPesanTamu,
@@ -208,6 +209,20 @@ export default function App() {
       let terpotong = false
       let sumberRiset = []
 
+      /* Token yang hilang/kedaluwarsa TIDAK boleh membuat pesan tercatat
+         sebagai tamu. Sebelum mengirim, pastikan token tersedia; bila
+         perlu diperbarui, lakukan diam-diam lebih dulu. Pesan tetap
+         terkirim walau pembaruan gagal — chat tidak boleh ikut gagal. */
+      let tokenKirim = getTokenRiwayat()
+      if (!tokenKirim && masuk) {
+        try {
+          await pulihkanTokenRiwayat()
+        } catch {
+          /* diamkan: chat tetap jalan */
+        }
+        tokenKirim = getTokenRiwayat()
+      }
+
       try {
         await streamChat({
           baseUrl: apiUrl,
@@ -223,7 +238,7 @@ export default function App() {
           // Bila pengguna login, token membuat server mencatat pemakaian
           // atas nama akunnya (usage per akun) — bukan menumpuk ke satu
           // angka global yang dipakai bersama.
-          token: getTokenRiwayat(),
+          token: tokenKirim,
           signal: controller.signal,
           onMeta: (meta) => {
             /* Server memberi tahu bila model diganti otomatis
@@ -323,6 +338,7 @@ export default function App() {
     },
     [
       apiUrl,
+      masuk,
       settings.temperature,
       settings.maxTokens,
       settings.model,

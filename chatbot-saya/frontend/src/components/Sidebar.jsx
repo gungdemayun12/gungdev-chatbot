@@ -428,9 +428,10 @@ export default function Sidebar({
           )}
 
           {/* Status penyimpanan riwayat. Hanya muncul bila ada yang perlu
-              pengguna ketahui: server sedang tidak bisa dipakai, atau
-              sesi login perlu diperbarui. Saat normal tidak ditampilkan
-              agar tampilan tetap bersih. */}
+              pengguna ketahui: server sedang tidak bisa dipakai. Status
+              'sesi' (token sedang disegarkan diam-diam) TIDAK ditampilkan
+              — pengguna memang sudah login dan tidak perlu berbuat apa
+              pun. Saat normal pun tidak ditampilkan agar tampilan bersih. */}
           {user && statusSimpan === 'perangkat' && (
             <div className="sb-simpan is-warning" role="status">
               <CloudOff size={14} aria-hidden="true" />

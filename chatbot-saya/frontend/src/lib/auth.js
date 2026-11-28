@@ -30,7 +30,12 @@
  * di perangkat dan diperbarui diam-diam bila kedaluwarsa.
  */
 import { KEYS, readJSON, writeJSON, removeKey } from './storage.js'
-import { setTokenRiwayat, getTokenRiwayat, lupakanToken } from './riwayat.js'
+import {
+  setTokenRiwayat,
+  getTokenRiwayat,
+  lupakanToken,
+  tokenPerluDiperbarui,
+} from './riwayat.js'
 /** Client ID dibaca dari build (VITE_GOOGLE_CLIENT_ID di Vercel). */
 export const GOOGLE_CLIENT_ID = (import.meta.env?.VITE_GOOGLE_CLIENT_ID || '').trim()
 
@@ -241,11 +246,14 @@ export function pulihkanTokenRiwayat() {
   // Cepat: token tersimpan masih berlaku (jalur normal saat refresh).
   if (getTokenRiwayat()) return Promise.resolve(true)
 
-  /* Belum pernah login di perangkat ini (atau pengguna sudah menekan
-     "Keluar"): jangan ganggu Google sama sekali. Tanpa ini, pemulihan
-     diam-diam bisa menghidupkan kembali sesi yang baru saja diakhiri,
-     dan halaman tamu ikut memanggil Google (One Tap yang membingungkan). */
-  if (!bacaSesiTersimpan()) return Promise.resolve(false)
+  /* Sudah login di perangkat ini? Bisa dibuktikan dua cara:
+       (a) identitas akun tersimpan (30 hari), atau
+       (b) token tersimpan yang hanya perlu diperbarui.
+     (b) penting: tanpa ini, pengguna yang membuka situs setelah beberapa
+     jam (token lewat ~1 jam) dianggap "belum pernah login", sehingga
+     aplikasi diam saja dan ia jatuh ke mode tamu. */
+  const adaSesi = Boolean(bacaSesiTersimpan())
+  if (!adaSesi && !tokenPerluDiperbarui()) return Promise.resolve(false)
   if (typeof navigator !== 'undefined' && navigator.onLine === false) {
     return Promise.resolve(false)
   }
@@ -289,6 +297,12 @@ export function pulihkanTokenRiwayat() {
           client_id: GOOGLE_CLIENT_ID,
           auto_select: true,
           cancel_on_tap_outside: true,
+          /* `use_fedcm_for_prompt` = minta pembaruan token lewat FedCM,
+             yang TIDAK menampilkan jendela pilih akun bila browser masih
+             mengingat pilihan pengguna. Tanpa ini Google menampilkan
+             "Signing you in…" / daftar akun — persis yang mengganggu
+             pemilik situs padahal ia sudah login. */
+          use_fedcm_for_prompt: true,
           callback: (res) => {
             const token = (res?.credential || '').trim()
             if (!token) {
@@ -312,7 +326,9 @@ export function pulihkanTokenRiwayat() {
 
         window.google.accounts.id.prompt((notifikasi) => {
           /* `isNotDisplayed` / `isSkippedMoment` = Google tidak memberi
-             token tanpa interaksi. Itu bukan error. */
+             token tanpa interaksi. Itu bukan error, dan pengguna TIDAK
+             dipaksa memilih akun: aplikasi tetap memakai salinan
+             perangkat dan menganggapnya masih login. */
           if (
             notifikasi?.isNotDisplayed?.() ||
             notifikasi?.isSkippedMoment?.() ||

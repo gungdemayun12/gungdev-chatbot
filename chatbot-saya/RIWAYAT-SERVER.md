@@ -926,6 +926,55 @@ Keamanan: server tetap memverifikasi tanda tangan token ke Google pada
 setiap permintaan riwayat, jadi token palsu tidak bisa dipakai. Token
 dihapus otomatis bila kedaluwarsa dan dihapus saat pengguna keluar.
 
+### Kasus "sudah login tapi diperlakukan sebagai tamu"
+
+Ini keluhan lanjutan yang ditemukan dari tangkapan layar pemilik situs:
+
+> "Saya sudah login, profil akun tampil di kiri bawah. Saya refresh lalu
+> buka lagi setelah beberapa jam. Kenapa muncul 'Signing you in…' seolah
+> saya belum login? Selama itu saya jadi mode tamu, jatah saya jadi 3."
+
+Akar masalahnya: ID token Google hanya berumur **~1 jam**. Kode lama
+**menghapus** token yang sudah kedaluwarsa, sehingga aplikasi kehilangan
+cara membedakan dua keadaan yang sangat berbeda:
+
+| Keadaan | Perlakuan yang benar |
+|---|---|
+| Belum pernah login | Tamu — jatah 3 pesan |
+| **Login, token basi** | **Tetap akun** — hanya token perlu diperbarui |
+
+Karena tidak bisa membedakan, aplikasi jatuh ke mode tamu dan menampilkan
+peringatan "riwayat sementara hanya di perangkat ini" padahal profilnya
+masih tampil. Itu yang membingungkan dan membuat jatah terasa "hilang".
+
+Perbaikannya:
+
+1. **Token basi tidak lagi dibuang.** Ia disimpan sebagai
+   `tokenKedaluwarsa` dan dikenali lewat `tokenPerluDiperbarui()`.
+   Fungsinya: *bukti bahwa perangkat ini memang sudah login*. Ia tidak
+   pernah dikirim ke server (server akan menolaknya), jadi keamanannya
+   tidak berubah.
+2. **Pemulihan token memakai bukti itu.** `pulihkanTokenRiwayat` tidak
+   lagi menganggap "token kosong" sama dengan "belum pernah login".
+3. **Status penyimpanan baru `'sesi'`, bukan `'perangkat'`.** Artinya
+   "login, riwayat menyusul". Status ini **tidak ditampilkan** sebagai
+   peringatan — pengguna memang sudah login dan tidak perlu berbuat apa
+   pun.
+4. **Pembaruan token dilakukan sebelum mengirim pesan.** Tanpa ini, satu
+   pesan bisa tercatat sebagai tamu hanya karena token sedang basi.
+5. **Percobaan ulang otomatis tiap 45 detik** sampai token berhasil
+   diperbarui. Pengguna tidak perlu menekan apa pun.
+6. `use_fedcm_for_prompt: true` pada Google Identity Services, supaya
+   pembaruan token tidak menampilkan jendela pilih akun bila browser
+   masih mengingat pilihan pengguna.
+
+Yang tetap berlaku: **hanya "Keluar" yang mengakhiri sesi.** `lupakanToken`
+menghapus token aktif *dan* `tokenKedaluwarsa`.
+
+Diuji oleh `uji_sesi_kedaluwarsa.mjs` (27 pemeriksaan): token basi 2, 12,
+dan 72 jam — profil tetap tampil, tidak ada ajakan masuk, tidak ada jatah
+tamu, dan pemakaian tamu tidak bertambah saat mengirim pesan.
+
 ## Judul riwayat dari TOPIK percakapan
 
 ### Masalahnya
@@ -1027,6 +1076,7 @@ node uji_alur_lengkap.mjs         # 26 pemeriksaan alur ujung-ke-ujung
 node uji_menu_model.mjs           # 17 pemeriksaan menu model ringkas & rapi
 node uji_sumber_ui.mjs            # 27 pemeriksaan kartu + chip sumber riset (gaya ChatGPT)
 node uji_login_bertahan.mjs       # 22 pemeriksaan sesi login tetap masuk setelah refresh
+node uji_sesi_kedaluwarsa.mjs     # 27 pemeriksaan: token basi TIDAK dianggap tamu
 node uji_judul_riwayat.mjs        # 10 pemeriksaan judul riwayat = topik, bertahan setelah refresh
 ```
 

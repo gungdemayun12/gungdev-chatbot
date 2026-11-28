@@ -79,13 +79,36 @@ function tokenMasihBerlaku(token) {
 let tokenAktif = null
 let sudahMuatToken = false
 
+/* Token yang tersimpan tetapi sudah lewat `exp`.
+ *
+ * Disimpan (tidak dibuang) karena pemiliknya MASIH login di perangkat ini
+ * — ia hanya perlu token segar dari Google. Dibedakan dari `tokenAktif`
+ * supaya token kedaluwarsa tidak pernah ikut dikirim ke server. */
+let tokenKedaluwarsa = null
+
 /* Penanda "pengguna sudah menekan Keluar".
    Selama penanda ini aktif, token yang datang dari pemulihan diam-diam
    DITOLAK — sesi yang sudah diakhiri tidak boleh hidup kembali sendiri.
    Penanda direset hanya saat pengguna menekan tombol login lagi. */
 let dibatalkanPengguna = false
 
-/** Mengisi `tokenAktif` dari perangkat SEKALI (lazy). */
+/**
+ * Mengisi `tokenAktif` dari perangkat SEKALI (lazy).
+ *
+ * PENTING: token yang SUDAH KEDALUWARSA tetap DIMUAT ke `tokenKedaluwarsa`
+ * (bukan dibuang). Alasannya:
+ *
+ *   Pengguna membuka situsnya lagi setelah beberapa jam. ID token Google
+ *   memang sudah lewat `exp` (~1 jam), tetapi SESINYA belum berakhir —
+ *   ia tidak pernah menekan "Keluar". Dulu token itu langsung dihapus,
+ *   sehingga aplikasi tidak punya cara membedakan "belum pernah login"
+ *   dari "login tapi token perlu diperbarui", lalu jatuh ke mode tamu
+ *   (jatah 3 pesan) sambil menampilkan "Signing you in…".
+ *
+ * Dengan menyimpannya sebagai `tokenKedaluwarsa`, pemanggil bisa:
+ *   1. memperbaruinya diam-diam ke Google, dan
+ *   2. menganggap pengguna TETAP login selama pembaruan berjalan.
+ */
 function muatTokenSekali() {
   if (sudahMuatToken) return
   sudahMuatToken = true
@@ -93,10 +116,15 @@ function muatTokenSekali() {
   if (dibatalkanPengguna) return
   const tersimpan = readJSON(KUNCI_TOKEN, null)
   const token = (tersimpan?.token || '').trim()
-  if (token && tokenMasihBerlaku(token)) {
+  if (!token) {
+    if (tersimpan) removeKey(KUNCI_TOKEN)
+    return
+  }
+  if (tokenMasihBerlaku(token)) {
     tokenAktif = token
-  } else if (tersimpan) {
-    removeKey(KUNCI_TOKEN)
+  } else {
+    // Simpan sebagai cadangan untuk diperbarui, JANGAN dihapus.
+    tokenKedaluwarsa = token
   }
 }
 
@@ -114,6 +142,7 @@ export function setTokenRiwayat(token, { paksa = false } = {}) {
   if (bersih && dibatalkanPengguna && !paksa) return
   if (paksa) dibatalkanPengguna = false
   tokenAktif = bersih || null
+  tokenKedaluwarsa = null
   sudahMuatToken = true
   if (tokenAktif) {
     writeJSON(KUNCI_TOKEN, { token: tokenAktif, pada: Date.now() })
@@ -126,15 +155,32 @@ export function setTokenRiwayat(token, { paksa = false } = {}) {
 export function getTokenRiwayat() {
   muatTokenSekali()
   if (tokenAktif && !tokenMasihBerlaku(tokenAktif)) {
+    // Bukan dihapus: hanya butuh diperbarui. Disimpan supaya aplikasi
+    // tahu pengguna MASIH login (lihat `muatTokenSekali`).
+    tokenKedaluwarsa = tokenAktif
     tokenAktif = null
-    removeKey(KUNCI_TOKEN)
   }
   return tokenAktif
+}
+
+/**
+ * True bila ada token tersimpan yang hanya perlu DIPERBARUI.
+ *
+ * Artinya: pengguna sudah login di perangkat ini, sesinya belum berakhir,
+ * tetapi ID token Google sudah lewat `exp` (~1 jam). Pemanggil WAJIB
+ * menganggap pengguna tetap login selama pembaruan berjalan — bukan
+ * menjatuhkannya ke mode tamu.
+ */
+export function tokenPerluDiperbarui() {
+  muatTokenSekali()
+  if (tokenAktif) return false
+  return Boolean(tokenKedaluwarsa)
 }
 
 /** Melupakan token (dipakai saat pengguna benar-benar keluar). */
 export function lupakanToken() {
   tokenAktif = null
+  tokenKedaluwarsa = null
   sudahMuatToken = true
   dibatalkanPengguna = true
   removeKey(KUNCI_TOKEN)

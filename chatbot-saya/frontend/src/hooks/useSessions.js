@@ -144,7 +144,9 @@ export function useSessions(settings, akunSub = null, apiUrl = '') {
   // 'memuat'   = sedang membaca dari server
   // 'server'   = tersimpan di server (sama di semua perangkat)
   // 'perangkat'= server tidak bisa dipakai, riwayat hanya di perangkat ini
-  // 'perluLogin'= token tidak sah lagi; pengguna perlu masuk ulang
+  // 'sesi'     = sudah login, token sedang disegarkan diam-diam.
+  //              Pengguna TETAP login; tidak perlu diapa-apakan dan
+  //              tidak ditampilkan sebagai peringatan.
   const [statusSimpan, setStatusSimpan] = useState(akunSub ? 'memuat' : 'lokal')
 
   /* Menandai bahwa isi state sudah berasal dari server (atau sudah
@@ -255,11 +257,13 @@ export function useSessions(settings, akunSub = null, apiUrl = '') {
           const ulang = await simpanSesiServer(apiRef.current, sesi)
           if (ulang.tersimpan) continue
           if (ulang.perluLogin) {
-            setStatusSimpan('perangkat')
+            // Sudah login, hanya token belum diperbarui. Bukan alasan
+            // menampilkan "riwayat hanya di perangkat".
+            setStatusSimpan('sesi')
             return
           }
         }
-        setStatusSimpan('perangkat')
+        setStatusSimpan('sesi')
         return
       }
       if (!hasil.tersimpan) semuaTersimpan = false
@@ -338,7 +342,12 @@ export function useSessions(settings, akunSub = null, apiUrl = '') {
 
       /* Token sudah tersimpan di perangkat (lihat RiwayatSesi), jadi
          biasanya tidak perlu meminta apa pun ke Google. Bila token
-         kedaluwarsa, `pulihkanTokenRiwayat` memperbaruinya diam-diam. */
+         kedaluwarsa, `pulihkanTokenRiwayat` memperbaruinya diam-diam.
+
+         PENTING: pengguna TETAP login selama pembaruan berjalan. Jangan
+         menurunkan status ke 'perangkat' hanya karena token belum ada —
+         itu yang membuat pengguna melihat "riwayat sementara" padahal
+         profilnya masih tampil dan ia tidak pernah keluar. */
       if (!getTokenRiwayat()) {
         setStatusSimpan('memuat')
         await pulihkanTokenRiwayat()
@@ -365,10 +374,15 @@ export function useSessions(settings, akunSub = null, apiUrl = '') {
             return
           }
         }
-        // Bila Google meminta interaksi, jangan tampilkan peringatan
-        // "Masuk ulang"; tetap gunakan cache perangkat dan retry nanti.
+        /* Google belum memberi token segar (bisa karena browser memblokir
+           One Tap, atau pengguna perlu menyetujui sekali).
+
+           PENTING: ini BUKAN alasan menampilkan "riwayat sementara hanya
+           di perangkat". Pengguna tetap login (profilnya tampil) dan
+           pesannya tetap dihitung sebagai akun. Status 'sesi' berarti
+           "login, riwayat menyusul" — tenang, bukan peringatan. */
         siapSimpanRef.current = false
-        setStatusSimpan('perangkat')
+        setStatusSimpan('sesi')
         return
       }
 
@@ -433,8 +447,35 @@ export function useSessions(settings, akunSub = null, apiUrl = '') {
 
     muat()
 
+    /* Bila pembaruan token belum berhasil (browser memblokir One Tap,
+       sinyal sempat putus, dsb.), coba lagi diam-diam. Pengguna tidak
+       perlu menekan apa pun dan tidak melihat ajakan masuk — ia memang
+       sudah login. */
+    const coba = setInterval(async () => {
+      if (batal) return
+      if (getTokenRiwayat()) {
+        clearInterval(coba)
+        return
+      }
+      const pulih = await pulihkanTokenRiwayat()
+      if (batal || !pulih) return
+      clearInterval(coba)
+      const ulang = await ambilRiwayatServer(apiRef.current)
+      if (batal || !ulang.ok) return
+      if (ulang.sessions.length > 0) {
+        const dariServer = sanitizeSessions(ulang.sessions)
+        setSessions(dariServer)
+        setActiveId((sekarang) =>
+          dariServer.some((s) => s.id === sekarang) ? sekarang : ulang.activeId,
+        )
+      }
+      siapSimpanRef.current = ulang.tersedia
+      setStatusSimpan(ulang.tersedia ? 'server' : 'sesi')
+    }, 45000)
+
     return () => {
       batal = true
+      clearInterval(coba)
       kendali.abort()
     }
   }, [akunSub])
