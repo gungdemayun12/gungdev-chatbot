@@ -41,6 +41,20 @@ function cek(nama, lulus, info = '') {
  * yang jalan sebelum skrip aplikasi, jadi permintaan pertama ke
  * /api/sessions sudah membawa token — persis seperti produksi.
  */
+/**
+ * Menyimpan token riwayat di perangkat SEBELUM aplikasi dimuat.
+ *
+ * Dijalankan di dalam `addInitScript`, jadi token sudah ada saat React
+ * pertama kali membaca riwayat — persis seperti pengguna yang sudah
+ * login lalu membuka kembali situsnya (token memang tersimpan).
+ */
+export const SIMPAN_TOKEN_SEBELUM_MUAT = ({ token }) => {
+  localStorage.setItem(
+    'gungdev:token-riwayat',
+    JSON.stringify({ token, pada: Date.now() }),
+  )
+}
+
 async function bukaSebagai(browser, { sub, name, email, token }, { saveHistory = true } = {}) {
   const ctx = await browser.newContext()
 
@@ -50,6 +64,14 @@ async function bukaSebagai(browser, { sub, name, email, token }, { saveHistory =
         'gungdev:auth',
         JSON.stringify({ sub, name, email, loginPada: Date.now() }),
       )
+      // Token dipasang SEBELUM aplikasi dimuat: inilah keadaan nyata
+      // pengguna yang sudah login lalu membuka situsnya lagi.
+      if (token) {
+        localStorage.setItem(
+          'gungdev:token-riwayat',
+          JSON.stringify({ token, pada: Date.now() }),
+        )
+      }
       if (!saveHistoryFlag) {
         const s = JSON.parse(localStorage.getItem('gungdev:settings') || '{}')
         s.saveHistory = false
@@ -58,7 +80,7 @@ async function bukaSebagai(browser, { sub, name, email, token }, { saveHistory =
       // Token dipasang lewat modul resmi, sama seperti callback GIS.
       window.__siapkanToken = async () => {
         const mod = await import('/src/lib/riwayat.js')
-        mod.setTokenRiwayat(token)
+        mod.setTokenRiwayat(token, { paksa: true })
       }
     },
     { sub, name, email, token, saveHistoryFlag: saveHistory },
@@ -66,13 +88,6 @@ async function bukaSebagai(browser, { sub, name, email, token }, { saveHistory =
 
   const page = await ctx.newPage()
   await page.goto(URL_APP, { waitUntil: 'domcontentloaded' })
-
-  // Pasang token secepat mungkin (setara callback GIS yang datang dini).
-  await page.evaluate(async (t) => {
-    const mod = await import('/src/lib/riwayat.js')
-    mod.setTokenRiwayat(t)
-  }, token)
-
   await page.waitForSelector('.composer__input', { timeout: 20000 })
   return { ctx, page }
 }
@@ -114,7 +129,7 @@ async function jalankan() {
       async ({ api, toks }) => {
         const mod = await import('/src/lib/riwayat.js')
         for (const t of toks) {
-          mod.setTokenRiwayat(t)
+          mod.setTokenRiwayat(t, { paksa: true })
           await mod.hapusRiwayatServer(api, null)
         }
         mod.lupakanToken()
@@ -170,7 +185,7 @@ async function jalankan() {
         const mod = await import('/src/lib/riwayat.js')
         const hasil = []
         for (const t of toks) {
-          mod.setTokenRiwayat(t)
+          mod.setTokenRiwayat(t, { paksa: true })
           /* Hapus berulang: hapusRiwayatServer mengembalikan hasil
              penghapusan, dan satu putaran sudah cukup untuk server uji. */
           for (let i = 0; i < 2; i += 1) await mod.hapusRiwayatServer(api, null)
@@ -210,7 +225,7 @@ async function jalankan() {
       async ({ api, toks }) => {
         const mod = await import('/src/lib/riwayat.js')
         const hitung = async (t) => {
-          mod.setTokenRiwayat(t)
+          mod.setTokenRiwayat(t, { paksa: true })
           const res = await fetch(api + '/api/sessions', {
             headers: { Authorization: `Bearer ${t}` },
           })
@@ -222,7 +237,7 @@ async function jalankan() {
           await tunggu(1200) // biarkan kiriman pagehide mendarat
           hasil = []
           for (const t of toks) {
-            mod.setTokenRiwayat(t)
+            mod.setTokenRiwayat(t, { paksa: true })
             await mod.hapusRiwayatServer(api, null)
             hasil.push(await hitung(t))
           }
@@ -418,7 +433,7 @@ async function jalankan() {
   await p1.reload({ waitUntil: 'domcontentloaded' })
   await p1.evaluate(async (t) => {
     const mod = await import('/src/lib/riwayat.js')
-    mod.setTokenRiwayat(t)
+    mod.setTokenRiwayat(t, { paksa: true })
   }, TOKEN_A)
   await p1.waitForSelector('.composer__input', { timeout: 20000 })
   await p1.waitForTimeout(1200)
@@ -442,7 +457,7 @@ async function jalankan() {
   const hapus = await p2.evaluate(
     async ({ api, t }) => {
       const mod = await import('/src/lib/riwayat.js')
-      mod.setTokenRiwayat(t)
+      mod.setTokenRiwayat(t, { paksa: true })
       return mod.hapusRiwayatServer(api, null)
     },
     { api: API, t: TOKEN_A },
@@ -479,7 +494,7 @@ async function jalankan() {
     await pBersih.evaluate(
       async ({ api, t }) => {
         const mod = await import('/src/lib/riwayat.js')
-        mod.setTokenRiwayat(t)
+        mod.setTokenRiwayat(t, { paksa: true })
         await mod.hapusRiwayatServer(api, null)
       },
       { api: API, t: TOKEN_A },

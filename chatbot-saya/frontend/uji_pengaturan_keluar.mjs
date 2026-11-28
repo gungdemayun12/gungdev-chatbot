@@ -36,7 +36,7 @@ async function resetAkun(sub) {
 async function bukaMasuk(browser) {
   const ctx = await browser.newContext()
   await ctx.addInitScript(
-    ({ sub }) => {
+    ({ sub, token }) => {
       localStorage.setItem(
         'gungdev:auth',
         JSON.stringify({
@@ -46,15 +46,17 @@ async function bukaMasuk(browser) {
           loginPada: Date.now(),
         }),
       )
+      // Token sudah tersimpan sebelum aplikasi dimuat (keadaan nyata
+      // pengguna yang sudah login lalu membuka situsnya lagi).
+      localStorage.setItem(
+        'gungdev:token-riwayat',
+        JSON.stringify({ token, pada: Date.now() }),
+      )
     },
-    { sub: SUB_A },
+    { sub: SUB_A, token: TOKEN_A },
   )
   const page = await ctx.newPage()
   await page.goto(URL_APP, { waitUntil: 'domcontentloaded' })
-  await page.evaluate(async (t) => {
-    const mod = await import('/src/lib/riwayat.js')
-    mod.setTokenRiwayat(t)
-  }, TOKEN_A)
   await page.waitForSelector('.composer__input', { timeout: 20000 })
   return { ctx, page }
 }

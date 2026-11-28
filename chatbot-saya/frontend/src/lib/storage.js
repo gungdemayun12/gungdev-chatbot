@@ -20,6 +20,14 @@ export const KEYS = {
   AUTH: PREFIX + 'auth', // sesi login { sub, name, email, exp }
   GUEST: PREFIX + 'guest', // hitungan pemakaian tamu { hari, terpakai }
 
+  /* ID token Google yang terakhir diterima ({ token, pada }).
+
+     Disimpan supaya sesi login BERTAHAN setelah halaman dimuat ulang.
+     Dulu token hanya ada di memori, sehingga setiap refresh pengguna
+     yang sudah login dianggap belum login dan diminta masuk lagi.
+     Dihapus saat pengguna menekan "Keluar". */
+  TOKEN_RIWAYAT: PREFIX + 'token-riwayat',
+
   /* Awalan kunci riwayat PER AKUN Google:
        gungdev:sessions:<sub>
        gungdev:active-session:<sub>

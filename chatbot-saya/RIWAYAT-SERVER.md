@@ -884,6 +884,93 @@ Yang bertambah hanyalah **token** yang tercatat di panel Usage (karena
 konteks sumber ikut dibaca model), **bukan jumlah pesan**. Pencatatan
 jatah dilakukan sekali di akhir, setelah seluruh proses selesai.
 
+## Sesi login yang bertahan (tidak minta masuk ulang)
+
+### Masalahnya
+
+Keluhan pemilik situs: setiap kali halaman dimuat ulang, ia diminta
+"Sign in with Google" lagi — tidak seperti Claude/ChatGPT, yang sekali
+masuk lalu tetap tersimpan sampai ia sendiri keluar.
+
+### Akar masalah
+
+ID token Google dulu **hanya disimpan di memori** (`let tokenAktif` di
+`riwayat.js`). Memori hilang setiap halaman dimuat ulang, sedangkan
+identitas login (`sub`, nama) disimpan 30 hari. Akibatnya setelah
+refresh aplikasi terlihat seperti "setengah login": sidebar masih
+menampilkan akun, tetapi token tidak ada, riwayat server tidak terbaca,
+dan aplikasi berusaha memulihkan token lewat Google `prompt()` yang bisa
+gagal (diblokir, FedCM, akun tunggal) → UI jatuh ke "riwayat hanya di
+perangkat" dan muncul ajakan masuk.
+
+### Perbaikannya
+
+1. **Token disimpan di perangkat** (`gungdev:token-riwayat`), terpisah
+   dari identitas akun. Saat halaman dibuka, token itu langsung dipakai —
+   tanpa memanggil Google, tanpa jeda, tanpa ajakan masuk.
+2. **Token kedaluwarsa diperbarui diam-diam.** ID token Google berumur
+   ~1 jam. Bila `exp` sudah lewat, `pulihkanTokenRiwayat` meminta token
+   segar lewat One Tap **tanpa popup**. Bila Google meminta interaksi,
+   aplikasi tetap memakai salinan perangkat dan pengguna **tidak**
+   dipaksa masuk.
+3. **Hanya "Keluar" yang mengakhiri sesi.** `lupakanToken` menghapus
+   token dari memori dan perangkat dan memasang penanda
+   `dibatalkanPengguna`, sehingga pemulihan diam-diam (maupun jawaban
+   Google yang datang terlambat) **tidak bisa menghidupkan sesi yang
+   sudah diakhiri**. Penanda dilepas hanya saat pengguna menekan tombol
+   login lagi (`setTokenRiwayat(token, { paksa: true })`).
+4. **Tidak ada "verifying" berulang.** Bila token tersimpan masih
+   berlaku, tidak ada satu pun permintaan ke Google saat memuat halaman.
+
+Keamanan: server tetap memverifikasi tanda tangan token ke Google pada
+setiap permintaan riwayat, jadi token palsu tidak bisa dipakai. Token
+dihapus otomatis bila kedaluwarsa dan dihapus saat pengguna keluar.
+
+## Judul riwayat dari TOPIK percakapan
+
+### Masalahnya
+
+Judul riwayat dulu diambil dengan memotong ±48 karakter pertama prompt.
+Prompt panjang menghasilkan judul seperti
+"Halo, saya mau tanya dong soal paket honeymoon di Bali untuk…" — tidak
+menggambarkan isi sesi dan sulit diingat. Claude/ChatGPT memberi judul
+ringkas yang menyimpulkan topik.
+
+### Cara kerjanya sekarang
+
+Judul dibuat **dua tahap**:
+
+1. **Langsung saat pesan pertama dikirim** — `makeTitle` (cadangan lokal
+   di browser) membuang kata sapaan dan kata perintah ("halo", "tolong",
+   "carikan", "bisa"), lalu menyusun kata topik. Sidebar tidak pernah
+   kosong walau server lambat.
+2. **Setelah jawaban pertama tiba** — `POST /judul` meminta model
+   menuliskan 3–6 kata topik dari pertanyaan **dan** inti jawaban
+   asisten. Inilah yang membuat judulnya seperti "Paket honeymoon Bali
+   dan harga", bukan salinan kalimat pengguna.
+
+`judul.py` menjaga kualitasnya:
+
+| Aturan | Alasan |
+|---|---|
+| Maks 60 karakter, 3–6 kata | Judul harus bisa dipindai mata |
+| Tanpa tanda kutip, emoji, titik akhir | Gaya judul riwayat yang tenang |
+| Keluaran model >42 karakter / >8 kata DITOLAK | Model kadang menyalin kalimat pengguna apa adanya |
+| Bila model gagal → `judul_lokal` | Endpoint tidak pernah gagal |
+| Judul buatan pengguna (`titleLocked`) tidak disentuh | Pilihan pengguna selalu menang |
+
+Endpoint ini **tidak memakai jatah chat**: biayanya beberapa puluh token
+dan dipanggil sekali per sesi baru.
+
+Contoh nyata (diuji di browser): prompt 400+ karakter
+
+> "Halo, selamat sore. Tolong bantu saya ya, saya sedang merencanakan
+> liburan bulan madu ke Bali bulan depan bersama istri saya..."
+
+menjadi judul:
+
+> **Sedang merencanakan liburan bulan madu Bali**
+
 ## Menjalankan uji
 
 ```powershell
@@ -906,6 +993,7 @@ python cek_key.py gemini          # idem untuk Gemini
 python server_uji.py              # jalankan server uji di port 8000
 python uji_api.py                 # 25 pemeriksaan endpoint lama
 python uji_jatah_api.py           # 44 pemeriksaan jatah/reset via HTTP
+python uji_judul.py               # 24 pemeriksaan judul dari TOPIK (bukan potongan prompt)
 
 # Frontend (butuh server_uji.py + npm run dev berjalan)
 cd chatbot-saya/frontend
@@ -916,6 +1004,8 @@ node uji_berpikir.mjs             # 20 pemeriksaan animasi "berpikir"
 node uji_alur_lengkap.mjs         # 26 pemeriksaan alur ujung-ke-ujung
 node uji_menu_model.mjs           # 17 pemeriksaan menu model ringkas & rapi
 node uji_sumber_ui.mjs            # 27 pemeriksaan kartu + chip sumber riset (gaya ChatGPT)
+node uji_login_bertahan.mjs       # 22 pemeriksaan sesi login tetap masuk setelah refresh
+node uji_judul_riwayat.mjs        # 10 pemeriksaan judul riwayat = topik, bertahan setelah refresh
 ```
 
 > **Penting:** `server_uji.py` menyimpan state di memori proses. Restart

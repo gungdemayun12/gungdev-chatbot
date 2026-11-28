@@ -21,10 +21,16 @@
  *   tanda tangan token idealnya dilakukan di server. Karena riwayat
  *   hanya tersimpan di perangkat pengguna sendiri, tidak ada data
  *   milik orang lain yang bisa diakses lewat cara ini.
+ *
+ * KAPAN SESI BERAKHIR
+ * -------------------
+ * HANYA saat pengguna menekan "Keluar" (30 hari tanpa dibuka juga
+ * membuat identitas di perangkat dilupakan). Refresh, menutup tab, atau
+ * kembali beberapa hari kemudian TIDAK mengakhiri sesi: token disimpan
+ * di perangkat dan diperbarui diam-diam bila kedaluwarsa.
  */
 import { KEYS, readJSON, writeJSON, removeKey } from './storage.js'
 import { setTokenRiwayat, getTokenRiwayat, lupakanToken } from './riwayat.js'
-
 /** Client ID dibaca dari build (VITE_GOOGLE_CLIENT_ID di Vercel). */
 export const GOOGLE_CLIENT_ID = (import.meta.env?.VITE_GOOGLE_CLIENT_ID || '').trim()
 
@@ -146,6 +152,20 @@ export function hapusSesi() {
 }
 
 /* ------------------------------------------------------------------ */
+/* 3b. Memeriksa umur token yang tersimpan                              */
+/* ------------------------------------------------------------------ */
+/**
+ * True bila ada token tersimpan yang belum kedaluwarsa.
+ *
+ * Dipakai saat halaman dibuka: bila masih ada, aplikasi langsung memakai
+ * riwayat server TANPA menanyakan apa pun ke Google — tidak ada jeda,
+ * tidak ada ajakan "verifying", tidak ada permintaan masuk ulang.
+ */
+export function tokenTersimpanMasihBerlaku() {
+  return Boolean(getTokenRiwayat())
+}
+
+/* ------------------------------------------------------------------ */
 /* 4. Meminta login ke Google                                          */
 /* ------------------------------------------------------------------ */
 let siapGIS = false
@@ -179,7 +199,11 @@ async function siapkanGIS() {
       // ID token disimpan untuk dikirim ke backend riwayat. Backend
       // memverifikasinya ke Google; tanpa token ini riwayat akun tidak
       // bisa dibaca/ditulis (dan tidak ada akun lain yang bisa diakses).
-      setTokenRiwayat(res?.credential)
+      //
+      // `paksa: true` karena ini login yang DISENGAJA oleh pengguna
+      // (menekan tombol Google) — berbeda dengan pemulihan diam-diam,
+      // yang harus menghormati "Keluar".
+      setTokenRiwayat(res?.credential, { paksa: true })
       const daftar = Array.from(pendengar)
       pendengar.clear()
       daftar.forEach(({ onAkun, onError }) => {
@@ -192,36 +216,41 @@ async function siapkanGIS() {
 }
 
 /**
- * Memulihkan ID token SETELAH halaman dimuat ulang.
+ * Memastikan token riwayat tersedia SETELAH halaman dimuat ulang.
  *
- * MASALAH YANG DIPECAHKAN
- * -----------------------
- * ID token Google hanya hidup di memori (aman, tetapi hilang saat
- * refresh). Status login (`sub`, nama) justru disimpan 30 hari. Akibatnya
- * setelah refresh pengguna masih terlihat "login" tetapi riwayatnya tidak
- * bisa dibaca dari server — dan UI menyuruhnya "masuk ulang", padahal ia
- * tidak pernah keluar. Itu membingungkan.
+ * URUTAN PEMERIKSAAN (dari yang paling murah)
+ * -------------------------------------------
+ * 1. Token tersimpan di perangkat (lihat `riwayat.js`). Bila masih
+ *    berlaku, selesai seketika — TIDAK ada permintaan ke Google, tidak
+ *    ada jeda, tidak ada ajakan masuk. Ini jalur normal setelah refresh.
+ * 2. Token kedaluwarsa (ID token Google berumur ~1 jam): minta token
+ *    segar ke Google TANPA popup lewat `prompt()`/One Tap. Jalur ini juga
+ *    yang membuat sesi tetap hidup bila pengguna kembali setelah lama.
+ * 3. Google meminta interaksi (mis. pengguna logout dari Google). Fungsi
+ *    selesai tanpa token, aplikasi memakai salinan perangkat, dan
+ *    pengguna TIDAK dipaksa masuk. Hanya tombol "Keluar" yang
+ *    mengakhiri sesi.
  *
- * SOLUSI
- * ------
- * Google menyediakan `prompt()` untuk meminta kredensial baru TANPA
- * jendela popup, bila pengguna sebelumnya sudah menyetujui aplikasi ini.
- * Bila Google masih mengingat pilihannya, token baru datang sendiri
- * dalam hitungan detik.
+ * Token disimpan di perangkat hanya sampai kedaluwarsa; lihat penjelasan
+ * panjang di `riwayat.js`.
  *
- * Bila Google memutuskan perlu interaksi (mis. pengguna logout dari
- * Google, atau memakai mode Incognito), fungsi ini selesai tanpa token
- * dan aplikasi memakai salinan perangkat — pengguna tidak dipaksa apa pun.
- *
- * Token TIDAK disimpan di localStorage: token adalah kredensial hidup,
- * bukan data tampilan, dan menyimpannya berarti memperpanjang masa
- * berlakunya jauh melebihi yang seharusnya.
- *
- * @returns {Promise<boolean>} true bila token berhasil dipulihkan
+ * @returns {Promise<boolean>} true bila token tersedia
  */
 export function pulihkanTokenRiwayat() {
   if (!LOGIN_TERSEDIA) return Promise.resolve(false)
+  // Cepat: token tersimpan masih berlaku (jalur normal saat refresh).
   if (getTokenRiwayat()) return Promise.resolve(true)
+
+  /* Belum pernah login di perangkat ini (atau pengguna sudah menekan
+     "Keluar"): jangan ganggu Google sama sekali. Tanpa ini, pemulihan
+     diam-diam bisa menghidupkan kembali sesi yang baru saja diakhiri,
+     dan halaman tamu ikut memanggil Google (One Tap yang membingungkan). */
+  if (!bacaSesiTersimpan()) return Promise.resolve(false)
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return Promise.resolve(false)
+  }
+  // Bila pengguna keluar saat pemulihan sedang berjalan, hasilnya dibuang.
+  const sesiSaatMulai = bacaSesiTersimpan()?.sub || null
 
   return new Promise((resolve) => {
     let selesai = false
@@ -239,6 +268,12 @@ export function pulihkanTokenRiwayat() {
       selesai = true
       clearTimeout(batas)
       resolve(ok)
+    }
+
+    /** Membatalkan hasil bila sesi sudah berakhir di tengah jalan. */
+    const sesiMasihAda = () => {
+      const sekarang = bacaSesiTersimpan()?.sub || null
+      return Boolean(sesiSaatMulai) && sekarang === sesiSaatMulai
     }
 
     muatSkripGoogle()
@@ -260,7 +295,17 @@ export function pulihkanTokenRiwayat() {
               beres(false)
               return
             }
+            // Pengguna bisa menekan "Keluar" selagi Google menjawab.
+            // Token TIDAK boleh dihidupkan kembali dalam keadaan itu.
+            if (!sesiMasihAda()) {
+              beres(false)
+              return
+            }
+            const akun = akunDariToken(res?.credential)
             setTokenRiwayat(token)
+            /* Identitas ikut disegarkan: nama/foto bisa berubah, dan
+               `sub` memastikan akun yang sama tetap dipakai. */
+            if (akun) simpanSesi(akun)
             beres(true)
           },
         })

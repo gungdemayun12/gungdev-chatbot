@@ -42,6 +42,7 @@ import { makeTitle } from '../lib/text.js'
 import { pulihkanTokenRiwayat } from '../lib/auth.js'
 import {
   ambilRiwayatServer,
+  buatJudulServer,
   getTokenRiwayat,
   hapusRiwayatServer,
   simpanAktifServer,
@@ -335,10 +336,9 @@ export function useSessions(settings, akunSub = null, apiUrl = '') {
         setActiveId(lokal.activeId)
       }
 
-      /* Token hanya hidup di memori, jadi setelah refresh belum ada.
-         Minta Google memulihkannya lebih dulu — tanpa ini, pengguna
-         yang masih login akan melihat "Masuk ulang" padahal tidak
-         pernah keluar. */
+      /* Token sudah tersimpan di perangkat (lihat RiwayatSesi), jadi
+         biasanya tidak perlu meminta apa pun ke Google. Bila token
+         kedaluwarsa, `pulihkanTokenRiwayat` memperbaruinya diam-diam. */
       if (!getTokenRiwayat()) {
         setStatusSimpan('memuat')
         await pulihkanTokenRiwayat()
@@ -522,13 +522,62 @@ export function useSessions(settings, akunSub = null, apiUrl = '') {
       updateSession(sessionId, (s) => {
         const messages = [...s.messages, msg]
         const firstUser = messages.find((m) => m.role === 'user')
-        const title =
-          s.titleLocked || !firstUser ? s.title : makeTitle(firstUser.content)
+        // Judul awal: topik pesan pertama (bukan potongan mentah prompt).
+        const title = s.titleLocked || !firstUser ? s.title : makeTitle(firstUser.content)
         return { ...s, messages, title }
       })
       return msg
     },
     [updateSession],
+  )
+
+  /* Sesi yang judulnya sudah diminta ke server (agar tidak berulang). */
+  const judulDimintaRef = useRef(new Set())
+
+  /**
+   * Memperbaiki judul sesi menjadi ringkasan TOPIK dari seluruh percakapan.
+   *
+   * KENAPA SETELAH JAWABAN PERTAMA, BUKAN SAAT PESAN DIKIRIM
+   * --------------------------------------------------------
+   * Judul terbaik menyimpulkan apa yang SEDANG DIBICARAKAN. Pertanyaan
+   * pertama saja belum tentu menggambarkan topik sesi ("Halo, boleh
+   * tanya?"). Setelah ada satu pertanyaan + satu jawaban, server punya
+   * bahan yang cukup untuk menuliskan topiknya.
+   *
+   * Dipanggil sekali per sesi. Judul yang sudah diubah pengguna
+   * (`titleLocked`) atau sesi yang sudah punya judul dari server tidak
+   * disentuh. Bila server tidak menjawab, judul lokal dari `makeTitle`
+   * tetap dipakai — pengguna tidak melihat apa pun yang gagal.
+   */
+  const segarkanJudul = useCallback(
+    async (sessionId) => {
+      if (!sessionId || judulDimintaRef.current.has(sessionId)) return
+      const sesi = sessionsRef.current.find((s) => s.id === sessionId)
+      if (!sesi || sesi.titleLocked) return
+      const pesan = sesi.messages || []
+      if (!pesan.some((m) => m.role === 'user')) return
+      if (!pesan.some((m) => m.role === 'assistant' && (m.content || '').trim())) return
+
+      judulDimintaRef.current.add(sessionId)
+
+      const judul = await buatJudulServer(apiRef.current, pesan.slice(0, 4))
+      if (!judul) {
+        // Gagal: biarkan judul lokal, izinkan percobaan lagi nanti.
+        judulDimintaRef.current.delete(sessionId)
+        return
+      }
+
+      setSessions((prev) =>
+        prev.map((s) => {
+          // Judul buatan pengguna selalu menang.
+          if (s.id !== sessionId || s.titleLocked) return s
+          if (s.title === judul) return s
+          return { ...s, title: judul, updatedAt: Date.now() }
+        }),
+      )
+      jadwalkanSimpan(sessionId)
+    },
+    [jadwalkanSimpan],
   )
 
   /** Menimpa isi satu pesan (dipakai streaming & edit). */
@@ -684,6 +733,7 @@ export function useSessions(settings, akunSub = null, apiUrl = '') {
     setMessageContent,
     setMessageSources,
     setFeedback,
+    segarkanJudul,
     truncateMessages,
     newSession,
     selectSession,

@@ -69,6 +69,7 @@ export default function App() {
     setMessageContent,
     setMessageSources,
     setFeedback,
+    segarkanJudul,
     truncateMessages,
     newSession,
     selectSession,
@@ -312,6 +313,12 @@ export default function App() {
         setStreamingId(null)
         setGenerationPhase('')
         abortRef.current = null
+        /* Judul riwayat disegarkan setelah jawaban tiba: pada titik ini
+           server punya bahan (pertanyaan + jawaban) untuk menyimpulkan
+           TOPIK sesi, bukan sekadar memotong prompt pertama. Berjalan di
+           latar belakang — UI tidak menunggu dan tidak menampilkan apa
+           pun bila gagal. */
+        if (buffer.trim()) segarkanJudul(session.id)
       }
     },
     [
@@ -324,6 +331,7 @@ export default function App() {
       setMessageContent,
       setMessageSources,
       truncateMessages,
+      segarkanJudul,
       activeSession,
       segarkanUsage,
       toast,

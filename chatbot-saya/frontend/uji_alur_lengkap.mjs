@@ -38,7 +38,7 @@ const browser = await chromium.launch()
   await page.evaluate(
     async ({ api, t }) => {
       const mod = await import('/src/lib/riwayat.js')
-      mod.setTokenRiwayat(t)
+      mod.setTokenRiwayat(t, { paksa: true })
       await mod.hapusRiwayatServer(api, null)
     },
     { api: API, t: TOKEN },
@@ -53,23 +53,25 @@ const browser = await chromium.launch()
 /* ---------------------------------------------------------------- */
 const ctx = await browser.newContext()
 await ctx.addInitScript(
-  ({ sub }) => {
+  ({ sub, token }) => {
     localStorage.setItem(
       'gungdev:auth',
       JSON.stringify({ sub, name: 'Akun A', email: 'akun.a@gmail.com', loginPada: Date.now() }),
     )
+    // Token sudah tersimpan sebelum aplikasi dimuat — keadaan nyata
+    // pengguna yang sudah login lalu membuka situsnya lagi.
+    localStorage.setItem(
+      'gungdev:token-riwayat',
+      JSON.stringify({ token, pada: Date.now() }),
+    )
   },
-  { sub: SUB },
+  { sub: SUB, token: TOKEN },
 )
 const page = await ctx.newPage()
 const galatHalaman = []
 page.on('pageerror', (e) => galatHalaman.push(e.message))
 
 await page.goto(URL_APP, { waitUntil: 'domcontentloaded' })
-await page.evaluate(async (t) => {
-  const mod = await import('/src/lib/riwayat.js')
-  mod.setTokenRiwayat(t)
-}, TOKEN)
 await page.waitForSelector('.composer__input', { timeout: 20000 })
 await page.waitForTimeout(1500)
 
@@ -252,10 +254,6 @@ cek('nama penyedia TIDAK bocor di UI', !/openrouter|groq|ollama|upstash/i.test(t
 /* ---------------------------------------------------------------- */
 console.log('\n=== 5. SETELAH REFRESH ===')
 await page.reload({ waitUntil: 'domcontentloaded' })
-await page.evaluate(async (t) => {
-  const mod = await import('/src/lib/riwayat.js')
-  mod.setTokenRiwayat(t)
-}, TOKEN)
 await page.waitForSelector('.composer__input', { timeout: 20000 })
 await page.waitForTimeout(2500)
 

@@ -66,23 +66,23 @@ async function bukaSebagai(browser, { sub, name, token, tamu = false }) {
   const ctx = await browser.newContext()
   if (!tamu) {
     await ctx.addInitScript(
-      ({ sub, name }) => {
+      ({ sub, name, token }) => {
         localStorage.setItem(
           'gungdev:auth',
           JSON.stringify({ sub, name, email: `${sub}@uji.local`, loginPada: Date.now() }),
         )
+        // Token sudah tersimpan sebelum aplikasi dimuat (keadaan nyata
+        // pengguna yang sudah login lalu membuka situsnya lagi).
+        localStorage.setItem(
+          'gungdev:token-riwayat',
+          JSON.stringify({ token, pada: Date.now() }),
+        )
       },
-      { sub, name },
+      { sub, name, token },
     )
   }
   const page = await ctx.newPage()
   await page.goto(URL_APP, { waitUntil: 'domcontentloaded' })
-  if (!tamu) {
-    await page.evaluate(async (t) => {
-      const mod = await import('/src/lib/riwayat.js')
-      mod.setTokenRiwayat(t)
-    }, token)
-  }
   await page.waitForSelector('.composer__input', { timeout: 20000 })
   return { ctx, page }
 }

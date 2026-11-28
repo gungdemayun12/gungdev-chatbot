@@ -31,24 +31,71 @@ export function splitThinking(raw = '') {
   return { thinking: thinking.trim(), answer: answer.replace(/\n{3,}/g, '\n\n').trim() }
 }
 
+/** Kata yang hanya berfungsi sebagai pembuka/penyambung; tidak menerangkan topik. */
+const KATA_ABAIKAN = new Set([
+  'halo', 'hai', 'hi', 'hello', 'selamat', 'pagi', 'siang', 'sore', 'malam',
+  'kak', 'bang', 'min', 'admin', 'oke', 'ok', 'ya', 'nih', 'sih', 'dong',
+  'deh', 'kok', 'kan', 'lah', 'aja', 'saja', 'gitu', 'begitu', 'gimana',
+  'tolong', 'mohon', 'bantu', 'bantuin', 'bisa', 'bisakah', 'dapat',
+  'carikan', 'cari', 'carinya', 'temukan', 'kasih', 'berikan', 'beri',
+  'buatkan', 'buat', 'jelaskan', 'terangkan', 'sebutkan', 'tuliskan',
+  'tulis', 'uraikan', 'rekomendasikan', 'rekomendasi', 'sarankan',
+  'ingin', 'mau', 'pengen', 'butuh', 'perlu', 'saya', 'aku', 'gue',
+  'kami', 'kita', 'kamu', 'anda', 'ada', 'adakah', 'apakah', 'apa', 'itu',
+  'ini', 'yang', 'untuk', 'dengan', 'dan', 'atau', 'di', 'ke', 'dari',
+  'pada', 'dalam', 'tentang', 'soal', 'mengenai', 'seputar', 'kalau',
+  'bila', 'jika', 'supaya', 'agar', 'juga', 'lagi', 'masih', 'sudah',
+  'belum', 'banyak', 'beberapa', 'sekali', 'banget', 'sangat', 'paling',
+  'minta', 'sertakan', 'beserta', 'termasuk', 'bagus', 'cocok', 'seperti',
+  'contoh', 'contohnya',
+])
+
 /**
- * Membuat judul sesi otomatis dari pesan pertama.
- * Dipotong rapi di batas kata + ellipsis.
+ * Membuat judul sesi otomatis dari pesan pertama — CADANGAN LOKAL.
+ *
+ * Dipakai seketika saat pesan pertama dikirim, dan sebagai cadangan bila
+ * judul pintar dari server (`buatJudulServer`) belum/tidak tersedia.
+ *
+ * Cara kerjanya: buang blok kode & markdown, buang kata sapaan dan kata
+ * perintah ("tolong", "carikan", "halo"), lalu susun kata yang tersisa
+ * menjadi judul pendek. Hasilnya adalah TOPIK pesan, bukan potongan
+ * mentah prompt:
+ *
+ *   "Halo tolong carikan paket honeymoon di Bali beserta harganya"
+ *     -> "Paket honeymoon Bali beserta harganya"
  */
-export function makeTitle(text = '', maxLength = 48) {
+export function makeTitle(text = '', maxLength = 60) {
   const clean = text
     .replace(/```[\s\S]*?```/g, ' ') // buang blok kode
-    .replace(/[#*_>`~[\]()]/g, ' ') // buang karakter markdown
+    .replace(/^_[^_]+_$/gm, ' ') // buang baris penanda lampiran
+    .replace(/[#*_>`~[\](){}|\\]/g, ' ') // buang karakter markdown
+    .replace(/[—–]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
 
   if (!clean) return 'Percakapan baru'
-  if (clean.length <= maxLength) return clean
 
-  const cut = clean.slice(0, maxLength)
-  const lastSpace = cut.lastIndexOf(' ')
-  const base = lastSpace > maxLength * 0.6 ? cut.slice(0, lastSpace) : cut
-  return base.trimEnd() + '…'
+  // Kata bermakna saja, urut kemunculan, tanpa kata pembuka.
+  const kata = []
+  const terlihat = new Set()
+  for (const k of clean.toLowerCase().match(/[^\W\d_]+(?:['’-][^\W\d_]+)*/gu) || []) {
+    if (k.length < 3) continue
+    if (KATA_ABAIKAN.has(k)) continue
+    if (terlihat.has(k)) continue
+    terlihat.add(k)
+    kata.push(k)
+    if (kata.length >= 6) break
+  }
+
+  let hasil = kata.length >= 1 ? kata.join(' ') : clean
+  if (hasil.length > maxLength) {
+    const potong = hasil.slice(0, maxLength)
+    const spasi = potong.lastIndexOf(' ')
+    hasil = (spasi > maxLength * 0.5 ? potong.slice(0, spasi) : potong).trimEnd()
+  }
+  hasil = hasil.replace(/[.,;:!?'"]+$/, '').trim()
+  if (!hasil) return 'Percakapan baru'
+  return hasil.charAt(0).toUpperCase() + hasil.slice(1)
 }
 
 /** Format waktu singkat "14:05". */

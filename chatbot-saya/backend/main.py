@@ -58,6 +58,7 @@ import penyimpanan          # riwayat percakapan di server (Upstash Redis)
 import identitas            # verifikasi ID token Google di server
 import usage                # pencatat & penyedia data kuota (usage)
 import riset                # riset web nyata untuk SEMUA model
+import judul as judul_mod   # judul riwayat dari TOPIK percakapan
 
 # python-dotenv hanya dipakai saat pengembangan lokal.
 # Di Vercel/Render variabel masuk lewat environment, bukan file .env.
@@ -735,6 +736,28 @@ class ChatResponse(BaseModel):
     """
     reply: str
     sumber: Optional[List[dict]] = None
+
+
+class PesanJudul(BaseModel):
+    """Satu pesan yang ikut dibaca saat membuat judul riwayat."""
+
+    role: str = "user"
+    content: str = ""
+
+
+class JudulRequest(BaseModel):
+    """
+    Request /judul: percakapan yang akan diberi judul.
+
+    `pesan` sengaja dibuat permisif: hanya butuh role + content, dan
+    pesan asisten dipakai sebagai konteks agar judul menyimpulkan TOPIK,
+    bukan sekadar mengulang pertanyaan pengguna.
+    """
+
+    pesan: List[PesanJudul] = Field(default_factory=list)
+    model: Optional[str] = Field(
+        None, description="Model yang dipakai menulis judul (opsional)"
+    )
 
 
 class HealthResponse(BaseModel):
@@ -3231,6 +3254,67 @@ async def capabilities():
             "maks_file_mb": lampiran.MAKS_FILE_BYTES // (1024 * 1024),
         },
     }
+
+
+# ---------------------------------------------------------------------
+# 12b. ENDPOINT POST /judul  (judul riwayat dari topik percakapan)
+# ---------------------------------------------------------------------
+@app.post("/judul")
+async def buat_judul(request: "JudulRequest"):
+    """
+    Membuat JUDUL RIWAYAT dari topik percakapan.
+
+    Kontrak: {"pesan": [{"role": "user"|"assistant", "content": "..."}]}
+    -> {"judul": "Paket honeymoon Bali"}
+
+    Kenapa di server: judul yang baik perlu MENYIMPULKAN isi percakapan,
+    bukan memotong kalimat pertama. Model bahasa bisa melakukannya dengan
+    baik. Bila model tidak tersedia (kuota habis/jaringan gagal), server
+    tetap mengembalikan judul dari `judul.judul_lokal` — jadi endpoint ini
+    TIDAK PERNAH gagal dan UI tidak perlu menampilkan error.
+
+    Endpoint ini sengaja TIDAK memakai jatah chat: biayanya sangat kecil
+    (beberapa puluh token) dan dipanggil sekali per sesi baru.
+    """
+    pesan = [
+        {"role": str(m.role), "content": str(m.content)}
+        for m in (getattr(request, "pesan", None) or [])
+        if getattr(m, "role", None) in ("user", "assistant")
+        and str(getattr(m, "content", "") or "").strip()
+    ]
+    if not pesan:
+        return {"judul": "Percakapan baru", "sumber": "bawaan"}
+
+    # Cadangan lokal selalu disiapkan lebih dulu: dipakai bila model gagal
+    # atau hasilnya tidak layak. Dengan begitu pengguna selalu dapat judul.
+    cadangan = judul_mod.judul_lokal([m["content"] for m in pesan])
+
+    bahan = judul_mod.bahan_percakapan(pesan)
+    if not bahan.strip():
+        return {"judul": cadangan, "sumber": "lokal"}
+
+    try:
+        mentah = await complete(
+            [
+                {"role": "system", "content": judul_mod.instruksi_judul()},
+                {"role": "user", "content": bahan},
+            ],
+            {
+                "model": request.model or MODEL_NAME,
+                "temperature": 0.2,
+                "max_tokens": 32,
+                "penelitian": False,
+                "perlu_riset": False,
+            },
+        )
+        pintar = judul_mod.bersihkan_judul(mentah)
+        if pintar:
+            return {"judul": pintar, "sumber": "model"}
+    except Exception as exc:  # noqa: BLE001
+        # Terminal: judul tidak boleh menggagalkan apa pun.
+        logger.info("Judul dari model gagal (%s); memakai cadangan lokal.", exc)
+
+    return {"judul": cadangan, "sumber": "lokal"}
 
 
 # ---------------------------------------------------------------------
