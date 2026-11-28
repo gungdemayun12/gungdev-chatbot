@@ -109,10 +109,12 @@ def jalankan() -> None:
         detail = (r.json() or {}).get("detail", "")
     except Exception:  # noqa: BLE001
         detail = r.text
-    cek("Pesan penolakan jelas bagi pengguna", "jatah" in detail.lower(),
+    cek("Pesan penolakan jelas bagi pengguna", "habis" in detail.lower(),
         detail[:90])
-    cek("Pesan menyebut jatah pulih otomatis", "pulih" in detail.lower())
-    cek("Pesan menyebut berapa jatah akun",
+    cek("Pesan menyebut batas pulih otomatis", "pulih" in detail.lower())
+    cek("Pesan tidak lagi memakai kata 'jatah' (berkonotasi uang saku)",
+        "jatah" not in detail.lower(), detail[:110])
+    cek("Pesan menyebut berapa batas akun",
         str(JATAH) in detail, detail[:110])
     cek("Pesan TIDAK membocorkan nama penyedia/model",
         "groq" not in detail.lower() and "gpt" not in detail.lower(),

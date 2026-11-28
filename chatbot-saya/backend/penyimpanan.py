@@ -335,6 +335,23 @@ def bersihkan_sesi(sesi: Any) -> Optional[dict]:
 
     judul = str(sesi.get("title") or "Percakapan baru")[:160]
 
+    # Token acak milik sesi ini (UUID v4 dari frontend). Disimpan apa
+    # adanya agar tautan/pengenal sesi tetap sama di semua perangkat.
+    #
+    # Hanya bentuk yang WAJAR diterima: 8-4-4-4-12 heksadesimal. Selain
+    # itu dibuang dan frontend akan membuat yang baru — lebih baik
+    # daripada menyimpan teks sembarang dari klien ke penyimpanan.
+    token_mentah = sesi.get("token")
+    token = ""
+    if isinstance(token_mentah, str):
+        kandidat = token_mentah.strip().lower()
+        if (
+            len(kandidat) == 36
+            and all(c in "0123456789abcdef-" for c in kandidat)
+            and [len(p) for p in kandidat.split("-")] == [8, 4, 4, 4, 12]
+        ):
+            token = kandidat
+
     hasil = {
         "id": sid,
         "title": judul,
@@ -344,6 +361,8 @@ def bersihkan_sesi(sesi: Any) -> Optional[dict]:
         "updatedAt": diperbarui or dibuat,
         "pinned": bool(sesi.get("pinned")),
     }
+    if token:
+        hasil["token"] = token
 
     if len(json.dumps(hasil, ensure_ascii=False)) > MAKS_PESAN_SESI:
         return None

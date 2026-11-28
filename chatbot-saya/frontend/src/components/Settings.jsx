@@ -406,7 +406,7 @@ export default function Settings({
                 hint={
                   user
                     ? 'Anda masuk. Percakapan tersimpan ke akun Google Anda dan bisa dibuka di perangkat lain.'
-                    : 'Anda memakai mode tamu. Masuk agar percakapan tersimpan dan jatah lebih besar.'
+                    : 'Anda memakai mode tamu. Masuk agar percakapan tersimpan dan batas pemakaian lebih besar.'
                 }
               >
                 {user ? (
@@ -428,8 +428,8 @@ export default function Settings({
               </Field>
 
               <Field
-                label="Jatah saya"
-                hint="Berapa pesan yang masih tersisa dan kapan jatah diperbarui. Membuka panel ini tidak memakai jatah."
+                label="Penggunaan saya"
+                hint="Berapa pesan yang masih tersisa dan kapan batas pemakaian diperbarui. Membuka panel ini tidak memakai jatah pesan."
               >
                 <div className="settings-usage">
                   <UsageContent apiUrl={apiUrl} apiOnline={apiOnline} aktif={open} />

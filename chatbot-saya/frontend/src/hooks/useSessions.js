@@ -55,11 +55,60 @@ function uid(prefix = 'id') {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
 }
 
+/**
+ * Token acak untuk satu sesi percakapan.
+ *
+ * KENAPA ADA
+ * ----------
+ * `id` sesi di atas TIDAK cukup sebagai pengenal rahasia: ia mengandung
+ * timestamp dan hanya 6 karakter acak, sehingga dua sesi yang dibuat
+ * hampir bersamaan bisa ditebak berdekatan. Untuk tautan/alamat sesi
+ * (seperti `.../chat/5a3ed697-b226-4101-8116-27ebf4fcdc34`), pengenal
+ * itu harus TIDAK BISA DITEBAK — kalau bisa, orang lain dapat membuka
+ * percakapan yang bukan miliknya hanya dengan menaikkan angka.
+ *
+ * Karena itu setiap sesi mendapat token acak sendiri dari
+ * `crypto.randomUUID()` (122 bit acak untuk versi 4): tidak berurutan,
+ * tidak memuat waktu pembuatan, dan tidak bisa diturunkan dari token
+ * sesi lain.
+ *
+ * CADANGAN
+ * --------
+ * `crypto.randomUUID` hanya tersedia di konteks aman (https atau
+ * localhost). Bila tidak ada — misalnya halaman dibuka lewat http biasa
+ * di jaringan lokal — dipakai `crypto.getRandomValues`. Bila itu pun
+ * tidak ada (browser sangat tua), barulah Math.random, yang hanya
+ * dipakai sebagai jalan terakhir agar aplikasi tidak berhenti.
+ */
+export function buatTokenSesi() {
+  const acak = globalThis.crypto
+  if (acak && typeof acak.randomUUID === 'function') {
+    return acak.randomUUID()
+  }
+  if (acak && typeof acak.getRandomValues === 'function') {
+    // 16 byte acak, ditulis dalam bentuk UUID v4 yang sama.
+    const b = new Uint8Array(16)
+    acak.getRandomValues(b)
+    b[6] = (b[6] & 0x0f) | 0x40 // versi 4
+    b[8] = (b[8] & 0x3f) | 0x80 // varian RFC 4122
+    const h = [...b].map((x) => x.toString(16).padStart(2, '0')).join('')
+    return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0
+    const v = c === 'x' ? r : (r & 0x3) | 0x8
+    return v.toString(16)
+  })
+}
+
 /** Membuat sesi baru yang kosong. */
 export function createSession() {
   const now = Date.now()
   return {
     id: uid('s'),
+    // Token rahasia sesi ini. Tetap sama sepanjang sesi hidup (tidak
+    // dibuat ulang saat menyimpan), sehingga tautan sesi tidak berubah.
+    token: buatTokenSesi(),
     title: 'Percakapan baru',
     titleLocked: false, // true jika user sudah mengganti nama manual
     messages: [],
@@ -76,6 +125,10 @@ function sanitizeSessions(value) {
     .filter((s) => s && typeof s.id === 'string' && Array.isArray(s.messages))
     .map((s) => ({
       id: s.id,
+      // Sesi lama (dibuat sebelum token ada) belum punya token: beri
+      // token acak baru, sekali saja. Token yang sudah ada TIDAK diubah
+      // agar tautan sesi tetap sah setelah halaman dimuat ulang.
+      token: typeof s.token === 'string' && s.token ? s.token : buatTokenSesi(),
       title: typeof s.title === 'string' && s.title ? s.title : 'Percakapan baru',
       titleLocked: Boolean(s.titleLocked),
       messages: s.messages

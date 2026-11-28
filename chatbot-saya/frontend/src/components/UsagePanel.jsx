@@ -207,19 +207,19 @@ export function UsageContent({ apiUrl, apiOnline, aktif = true }) {
       {memuat && !data && (
         <div className="usage__loading">
           <RefreshCw size={16} className="spin" />
-          <span>Memuat jatah Anda…</span>
+          <span>Memuat penggunaan Anda…</span>
         </div>
       )}
 
       {galat && !memuat && (
         <div className="usage__notice is-danger">
-          Jatah belum bisa dimuat saat ini. Coba lagi sebentar lagi, ya.
+          Penggunaan belum bisa dimuat saat ini. Coba lagi sebentar lagi, ya.
         </div>
       )}
 
       {data && (
         <>
-          {/* --- Ringkasan jatah akun ---
+          {/* --- Ringkasan penggunaan akun ---
                Diganti dari angka menjadi BILAH PERSEN, mengikuti contoh
                yang diminta: judul, "N% sisa", keterangan waktu reset, dan
                bilah. Angka pastinya tetap ada di baris keterangan kecil,
@@ -230,16 +230,16 @@ export function UsageContent({ apiUrl, apiOnline, aktif = true }) {
               <Activity size={18} />
             </div>
             <div className="usage__hero-text">
-              <div className="usage__hero-title">Jatah saya</div>
+              <div className="usage__hero-title">Penggunaan saya</div>
               <div className="usage__hero-sub">
                 {akun ? (
                   <>
                     {akun.requests?.sisa > 0 && !menipisChat ? (
-                      <>Jatah Anda masih lega. Jatah kembali penuh otomatis dalam{' '}</>
+                      <>Penggunaan Anda masih lega. Batas kembali penuh otomatis dalam{' '}</>
                     ) : menipisChat ? (
-                      <>Jatah obrolan tinggal sedikit · kembali penuh dalam{' '}</>
+                      <>Batas obrolan tinggal sedikit · kembali penuh dalam{' '}</>
                     ) : (
-                      <>Jatah obrolan sudah terpakai semua · kembali dalam{' '}</>
+                      <>Batas obrolan sudah terpakai semua · kembali dalam{' '}</>
                     )}
                     <strong>{durasi(sisaDetik)}</strong>.
                   </>
@@ -250,10 +250,10 @@ export function UsageContent({ apiUrl, apiOnline, aktif = true }) {
             </div>
           </div>
 
-          {/* --- Bilah jatah ---
-               SATU bilah per jenis jatah. Chat dan gambar dipisah karena
+          {/* --- Bilah penggunaan ---
+               SATU bilah per jenis batas. Chat dan gambar dipisah karena
                memang tidak saling mengurangi: membuat gambar tidak
-               memotong jatah chat. Menggabungkannya akan menyesatkan. */}
+               memotong batas chat. Menggabungkannya akan menyesatkan. */}
           {akun && (
             <div className="usage__bars">
               <JatahBar
@@ -284,9 +284,9 @@ export function UsageContent({ apiUrl, apiOnline, aktif = true }) {
             <div className="usage__akun">
               {akun.reset?.bergulir && (
                 <div className="usage__akun-note">
-                  Jatah obrolan dan jatah gambar dihitung terpisah: membuat
-                  gambar tidak mengurangi jatah obrolan Anda. Keduanya
-                  berjalan sebagai bekal{' '}
+                  Batas obrolan dan batas gambar dihitung terpisah: membuat
+                  gambar tidak mengurangi batas obrolan Anda. Keduanya
+                  berjalan dalam jendela{' '}
                   {Math.round(akun.reset.jendela_jam || 24)} jam sejak pesan
                   pertama.
                   {akun.requests?.terpakai === 0 && (
@@ -297,14 +297,14 @@ export function UsageContent({ apiUrl, apiOnline, aktif = true }) {
 
               {akun.gambar && akun.gambar.batas === 0 && (
                 <div className="usage__akun-note">
-                  Akun Anda belum mendapat jatah gambar. Masuk dengan Google
+                  Akun Anda belum mendapat batas gambar. Masuk dengan Google
                   agar bisa membuat gambar.
                 </div>
               )}
 
               {akun.gambar && akun.gambar.habis && (
                 <div className="usage__akun-note">
-                  Jatah gambar Anda sudah terpakai semua · kembali dalam{' '}
+                  Batas gambar Anda sudah terpakai semua · kembali dalam{' '}
                   {durasi(detikGambar)}
                   {detikGambar <= 0 && 'sebentar lagi'}. Mengobrol tetap bisa
                   seperti biasa.
@@ -313,7 +313,7 @@ export function UsageContent({ apiUrl, apiOnline, aktif = true }) {
 
               {akun.requests?.dikurangi && (
                 <div className="usage__akun-note">
-                  Hari ini jatah obrolannya sedikit lebih kecil karena sedang
+                  Hari ini batas obrolannya sedikit lebih kecil karena sedang
                   banyak yang memakai —{' '}
                   {angkaRingkas(akun.requests?.batas || 0)} pesan (biasanya{' '}
                   {angkaRingkas(jatahPenuh)}). Kembali normal sendiri, tidak
@@ -323,7 +323,7 @@ export function UsageContent({ apiUrl, apiOnline, aktif = true }) {
 
               {akun.habis && (
                 <div className="usage__akun-habis">
-                  Jatah obrolan Anda sudah terpakai semua. Bisa chat lagi dalam{' '}
+                  Batas obrolan Anda sudah terpakai semua. Bisa chat lagi dalam{' '}
                   {durasi(sisaDetik)}
                   {sisaDetik <= 0 && 'sebentar lagi'} — sementara itu, percakapan
                   lama tetap bisa dibaca.
@@ -352,14 +352,14 @@ export function UsageContent({ apiUrl, apiOnline, aktif = true }) {
 
           {hampirHabis && !akun?.habis && (
             <div className="usage__notice is-warning">
-              Jatah obrolan Anda tinggal sedikit. Tidak masalah — akan kembali
+              Batas obrolan Anda tinggal sedikit. Tidak masalah — akan kembali
               sendiri dalam {durasi(sisaDetik)}.
             </div>
           )}
 
           {menipisGambar && !menipisChat && akun?.gambar && !akun.gambar.habis && (
             <div className="usage__notice is-warning">
-              Jatah gambar Anda tinggal sedikit. Akan kembali sendiri dalam{' '}
+              Batas gambar Anda tinggal sedikit. Akan kembali sendiri dalam{' '}
               {durasi(detikGambar)}.
             </div>
           )}
@@ -371,7 +371,7 @@ export function UsageContent({ apiUrl, apiOnline, aktif = true }) {
             {Math.round(akun?.reset?.jendela_jam || 24)} jam) dan tidak memengaruhi akun
             lain. Hitungannya mulai dari pesan pertama Anda, jadi waktu perbarui tiap
             akun berbeda. Setiap pesan dihitung sama, baik jawabannya panjang maupun
-            pendek. Membuka panel ini tidak memakai jatah.
+            pendek. Membuka panel ini tidak memakai jatah pesan.
           </p>
 
           <button
@@ -392,7 +392,7 @@ export function UsageContent({ apiUrl, apiOnline, aktif = true }) {
 /* ---------------- Panel modal ---------------- */
 export default function UsagePanel({ open, onClose, apiUrl, apiOnline }) {
   return (
-    <Modal open={open} onClose={onClose} title="Jatah Saya" size="md">
+    <Modal open={open} onClose={onClose} title="Penggunaan Saya" size="md">
       <UsageContent apiUrl={apiUrl} apiOnline={apiOnline} aktif={open} />
     </Modal>
   )

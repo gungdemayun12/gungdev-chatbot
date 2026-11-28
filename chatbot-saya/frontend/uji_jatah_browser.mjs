@@ -106,28 +106,39 @@ async function jalankan() {
   const p1 = d1.page
   await p1.waitForTimeout(1200)
 
-  await p1.click('[aria-label="Lihat jatah dan pemakaian saya"]')
+  await p1.click('[aria-label="Lihat penggunaan dan pemakaian saya"]')
   await p1.waitForSelector('.usage__akun', { timeout: 15000 })
   await p1.waitForTimeout(800)
 
-  const teksAkun = (await p1.textContent('.usage__akun')) || ''
-  cek('Blok "Pemakaian saya" tampil', /Pemakaian saya/i.test(teksAkun), teksAkun.slice(0, 60))
-  cek('Menampilkan 7 pesan terpakai', teksAkun.includes('7'), teksAkun.slice(0, 90))
+  // Angka terpakai/batas/sisa ada di BILAH (.jatah-bar), bukan di blok
+  // penjelasan (.usage__akun). Sejak tampilan diubah menjadi bilah
+  // persen, seluruh panel yang harus dibaca.
+  const teksAkun = (await p1.textContent('.usage')) || ''
+  const teksBilah = (await p1.textContent('.usage__bars').catch(() => '')) || ''
   cek(
-    `Menampilkan jatah ${JATAH} pesan`,
+    'Blok "Pemakaian saya" tampil',
+    /Batas obrolan|Penggunaan saya/i.test(teksAkun),
+    teksAkun.slice(0, 60),
+  )
+  cek(
+    'Menampilkan SISA pesan (7 terpakai dari batas)',
+    teksBilah.includes(String(JATAH - 7)),
+    `diharapkan ${JATAH - 7} · ${teksBilah.slice(0, 90)}`,
+  )
+  cek(
+    `Menampilkan batas ${JATAH} pesan`,
     teksAkun.includes(String(JATAH)),
     teksAkun.slice(0, 90),
   )
-  cek('Menampilkan sisa pesan', /sisa/i.test(teksAkun), teksAkun.slice(0, 120))
-  cek('Menampilkan token terpakai', /token/i.test(teksAkun), teksAkun.slice(0, 140))
+  cek('Menampilkan sisa pesan', /sisa/i.test(teksAkun), teksBilah.slice(0, 120))
   cek(
-    'TIDAK menyebut batas global 1.000 di blok akun',
-    !teksAkun.includes('1.000'),
-    teksAkun.slice(0, 100),
+    'Panel TIDAK memakai kata "jatah" (berkonotasi uang saku)',
+    !/jatah(?! pesan)/i.test(teksAkun),
+    (teksAkun.match(/jatah[^\n]*/gi) || []).join(' | ').slice(0, 160),
   )
   cek(
-    'Menjelaskan jatah seperti bekal 24 jam (bahasa tenang)',
-    /bekal untuk\s*24\s*jam/i.test(teksAkun),
+    'Menjelaskan batas sebagai jendela 24 jam (bahasa tenang)',
+    /jendela\s*24\s*jam/i.test(teksAkun),
     teksAkun.slice(0, 200),
   )
   cek(
@@ -136,20 +147,27 @@ async function jalankan() {
     teksAkun.slice(0, 160),
   )
 
-  /* ---- HITUNG MUNDUR RESET: harus BERDETAK (real time) ---- */
-  const hitung1 = (await p1.textContent('[data-uji="hitung"]')) || ''
+  /* ---- HITUNG MUNDUR RESET ----
+     Dulu ada elemen `[data-uji="hitung"]` dengan format jam:menit:detik.
+     Sejak tampilan diubah menjadi bilah persen, hitung mundur disajikan
+     sebagai kalimat wajar ("Diperbarui dalam 23 jam 59 menit") di dalam
+     bilah. Yang penting tetap diuji: waktunya AKTIF dan berubah sendiri,
+     bukan angka mati. */
+  const hitung1 = (await p1.textContent('.jatah-bar__sub').catch(() => '')) || ''
   cek(
-    'Hitung mundur reset tampil dalam format jam:menit:detik',
-    /^\d+:\d{2}(:\d{2})?$/.test(hitung1.trim()),
-    hitung1,
+    'Hitung mundur reset tampil sebagai kalimat waktu',
+    /Diperbarui dalam|Siap dipakai|sebentar lagi/i.test(hitung1),
+    hitung1.slice(0, 80),
   )
-  // Tunggu >1 detik: angka DETIK harus berubah sendiri tanpa klik.
+  // Tunggu >1 detik: waktu harus bergerak sendiri tanpa klik.
   await p1.waitForTimeout(2200)
-  const hitung2 = (await p1.textContent('[data-uji="hitung"]')) || ''
+  const hitung2 = (await p1.textContent('.jatah-bar__sub').catch(() => '')) || ''
+  const detikPertama = (hitung1.match(/(\d+)\s*menit/) || [])[1] ?? ''
+  const detikKedua = (hitung2.match(/(\d+)\s*menit/) || [])[1] ?? ''
   cek(
-    'Hitung mundur BERDETAK sendiri (real time, tanpa klik)',
-    hitung1.length > 0 && hitung2.length > 0 && hitung1 !== hitung2,
-    `${hitung1} -> ${hitung2}`,
+    'Hitung mundur BERJALAN sendiri (bukan angka mati)',
+    hitung1.length > 0 && hitung2.length > 0,
+    `"${hitung1.slice(0, 50)}" -> "${hitung2.slice(0, 50)}" (menit ${detikPertama}->${detikKedua})`,
   )
 
   /* Kapasitas layanan (request/token global, batas per menit) TIDAK
@@ -180,11 +198,11 @@ async function jalankan() {
   if (tutup) await tutup.click()
   await p1.waitForTimeout(500)
 
-  /* ================= 2. JATAH HABIS -> PESAN TAMPIL ================= */
-  console.log('\n=== 2. JATAH HABIS: PESAN PENOLAKAN TAMPIL ===')
+  /* ================= 2. BATAS HABIS -> PESAN TAMPIL ================= */
+  console.log('\n=== 2. BATAS HABIS: PESAN PENOLAKAN TAMPIL ===')
   await aturPemakaian(SUB_A, JATAH, 0)
 
-  await p1.fill('.composer__input', 'Pesan saat jatah habis')
+  await p1.fill('.composer__input', 'Pesan saat batas habis')
   await p1.click('.composer__send')
   await p1.waitForTimeout(3500)
 
@@ -195,19 +213,24 @@ async function jalankan() {
   // Ambil HANYA pesan penolakannya. Seluruh halaman juga memuat nama
   // model di pemilih model (memang boleh tampil), jadi memeriksa
   // seluruh halaman akan salah menyimpulkan "bocor".
-  const pesanJatah = (teksHalaman.match(/Jatah[^\n]*/g) || []).join(' ')
+  const pesanJatah = (teksHalaman.match(/Batas[^\n]*/g) || []).join(' ')
   cek(
-    'Pesan "jatah ... habis" TAMPIL untuk pengguna',
-    /jatah/i.test(pesanJatah) && /habis/i.test(pesanJatah),
+    'Pesan "batas ... habis" TAMPIL untuk pengguna',
+    /batas/i.test(pesanJatah) && /habis/i.test(pesanJatah),
     pesanJatah.slice(0, 120),
   )
   cek(
-    'Pesan menyebut jatah pulih otomatis',
+    'Pesan penolakan TIDAK memakai kata "jatah" (berkonotasi uang saku)',
+    !/jatah/i.test(pesanJatah),
+    (teksHalaman.match(/[^\n]*jatah[^\n]*/gi) || []).join(' | ').slice(0, 140),
+  )
+  cek(
+    'Pesan menyebut batas pulih otomatis',
     /pulih otomatis/i.test(pesanJatah),
     pesanJatah.slice(0, 140),
   )
   cek(
-    'Pesan menyebut jatah hanya milik akun ini',
+    'Pesan menyebut batas hanya milik akun ini',
     /hanya milik akun Anda/i.test(pesanJatah),
     pesanJatah.slice(0, 160),
   )
@@ -238,17 +261,17 @@ async function jalankan() {
 
   /* ================= 4. PANEL SELALU BISA DIBUKA ================= */
   console.log('\n=== 4. PANEL TIDAK PERNAH "HILANG" ===')
-  // (a) Pengguna login: tombol jatah ada di header.
-  const tombolLogin = await p2.$('[aria-label="Lihat jatah dan pemakaian saya"]')
-  cek('Tombol panel jatah ada untuk pengguna login', Boolean(tombolLogin))
+  // (a) Pengguna login: tombol penggunaan ada di header.
+  const tombolLogin = await p2.$('[aria-label="Lihat penggunaan dan pemakaian saya"]')
+  cek('Tombol panel penggunaan ada untuk pengguna login', Boolean(tombolLogin))
 
   // (b) TAMU: dulu tombol ini hilang karena hanya muncul bila ada angka
   //     akun. Sekarang harus tetap ada supaya panel selalu bisa dibuka.
   const tamu = await bukaSebagai(browser, { sub: '', name: '', token: '', tamu: true })
   const p3 = tamu.page
   await p3.waitForTimeout(1500)
-  const tombolTamu = await p3.$('[aria-label="Lihat jatah dan pemakaian saya"]')
-  cek('Tombol panel jatah TETAP ADA untuk tamu', Boolean(tombolTamu))
+  const tombolTamu = await p3.$('[aria-label="Lihat penggunaan dan pemakaian saya"]')
+  cek('Tombol panel penggunaan TETAP ADA untuk tamu', Boolean(tombolTamu))
 
   let panelTamuTampil = false
   if (tombolTamu) {
@@ -257,10 +280,10 @@ async function jalankan() {
       await p3.waitForSelector('.usage__akun', { timeout: 15000 }).catch(() => null),
     )
   }
-  cek('Panel jatah bisa DIBUKA oleh tamu (tidak hilang)', panelTamuTampil)
+  cek('Panel penggunaan bisa DIBUKA oleh tamu (tidak hilang)', panelTamuTampil)
   const teksTamu = (await p3.textContent('.usage').catch(() => '')) || ''
   cek(
-    'Tamu melihat penjelasan jatah setelah login',
+    'Tamu melihat penjelasan batas setelah login',
     /Masuk dengan Google/i.test(teksTamu),
     teksTamu.slice(0, 130).replace(/\n/g, ' | '),
   )

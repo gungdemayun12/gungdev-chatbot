@@ -3098,19 +3098,19 @@ def pesan_jatah_habis(jatah: dict) -> str:
         waktu = f"{int(jam)} detik lagi"
 
     batas = jatah.get("batas")
-    jatah_teks = f" Jatah Anda {batas} pesan per jendela 24 jam." if batas else ""
+    jatah_teks = f" Batas Anda {batas} pesan per jendela 24 jam." if batas else ""
 
     if jatah.get("alasan") == "token":
         # Tidak dipakai lagi (token bukan pembatas), tetapi dipertahankan
         # agar kode lama/pemanggil lain tidak menghasilkan pesan kosong.
         inti = "Pemakaian token Anda sudah mencapai batas."
     else:
-        inti = "Jatah pesan Anda sudah habis."
+        inti = "Batas pesan Anda sudah habis."
 
     return (
-        f"{inti}{jatah_teks} Jatah pulih otomatis dalam {waktu} — yaitu saat "
+        f"{inti}{jatah_teks} Batas pulih otomatis dalam {waktu} — yaitu saat "
         f"jendela 24 jam akun Anda berakhir (dihitung sejak pesan pertama "
-        f"Anda). Jatah ini hanya milik akun Anda, akun lain tidak terpengaruh. "
+        f"Anda). Batas ini hanya milik akun Anda, akun lain tidak terpengaruh. "
         f"Anda masih bisa membaca riwayat percakapan yang sudah ada."
     )
 

@@ -434,6 +434,43 @@ async def jalankan():
     for sid in ("../rahasia", "a:b", "a b", "a/b", ""):
         cek(f"ID sesi berbahaya '{sid}' ditolak", penyimpanan.bersihkan_sesi({"id": sid, "messages": []}) is None)
 
+    # -----------------------------------------------------------------
+    # TOKEN SESI (UUID v4 dari frontend)
+    # -----------------------------------------------------------------
+    # Token disimpan agar tautan/pengenal sesi tetap sama di semua
+    # perangkat. Karena datang dari klien, bentuknya diperiksa ketat.
+    token_sah = "5a3ed697-b226-4101-8116-27ebf4fcdc34"
+    bersih_token = penyimpanan.bersihkan_sesi(
+        {"id": "s_token", "title": "T", "messages": [], "token": token_sah}
+    )
+    cek("Token sesi sah ikut tersimpan", bersih_token.get("token") == token_sah, bersih_token.get("token"))
+
+    bersih_up = penyimpanan.bersihkan_sesi(
+        {"id": "s_token2", "messages": [], "token": token_sah.upper()}
+    )
+    cek("Token disimpan dalam huruf kecil", bersih_up.get("token") == token_sah, bersih_up.get("token"))
+
+    for buruk in (
+        "<script>alert(1)</script>",
+        "bukan-uuid-sama-sekali",
+        "5a3ed697-b226-4101-8116-27ebf4fcdc3",  # kurang 1 karakter
+        "5a3ed697-b226-4101-8116-27ebf4fcdc345",  # lebih 1 karakter
+        "5a3ed697-b226-4101-8116-27ebf4fcdcg4",  # bukan heksadesimal
+        "a" * 500,
+    ):
+        hasil_buruk = penyimpanan.bersihkan_sesi(
+            {"id": "s_token3", "messages": [], "token": buruk}
+        )
+        cek(
+            f"Token tidak sah '{buruk[:18]}…' dibuang",
+            "token" not in hasil_buruk,
+            str(hasil_buruk.get("token")),
+        )
+
+    # Tanpa token sama sekali: sesi tetap sah (sesi lama belum punya token).
+    tanpa_token = penyimpanan.bersihkan_sesi({"id": "s_lama", "messages": []})
+    cek("Sesi lama tanpa token tetap diterima", tanpa_token is not None and "token" not in tanpa_token)
+
     print()
     lulus = sum(1 for _, l, _ in HASIL if l)
     print("=" * 60)

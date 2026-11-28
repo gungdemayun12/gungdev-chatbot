@@ -94,7 +94,6 @@ export default function ChatArea({
   masuk = false,
   guestSisa = null,
   onOpenLogin,
-  onLogout,
 }) {
   const scrollRef = useRef(null)
   const [showScrollBtn, setShowScrollBtn] = useState(false)
@@ -196,10 +195,10 @@ export default function ChatArea({
         </div>
 
         <div className="chat__header-actions">
-          {/* Indikator jatah akun / pintu masuk panel "Jatah Saya".
+          {/* Indikator penggunaan akun / pintu masuk panel "Penggunaan".
               SELALU tampil — termasuk untuk tamu dan saat data belum
               termuat — supaya panel tidak pernah "hilang" bagi pengguna.
-              Bila angka belum tersedia, tampil sebagai "Jatah" saja. */}
+              Bila angka belum tersedia, tampil sebagai "Penggunaan" saja. */}
           <button
             type="button"
             className={`chat__quota ${
@@ -214,14 +213,14 @@ export default function ChatArea({
             onClick={onOpenUsage}
             title={
               usageRingkas
-                ? `Jatah Anda: ${usageRingkas.persen}% terpakai. Klik untuk rincian.`
-                : 'Lihat jatah dan pemakaian saya'
+                ? `Penggunaan Anda: ${usageRingkas.persen}% terpakai. Klik untuk rincian.`
+                : 'Lihat penggunaan dan pemakaian saya'
             }
-            aria-label="Lihat jatah dan pemakaian saya"
+            aria-label="Lihat penggunaan dan pemakaian saya"
           >
             <span className="chat__quota-dot" aria-hidden="true" />
             <span>
-              {usageRingkas ? `${usageRingkas.persen}% jatah` : 'Jatah'}
+              {usageRingkas ? `${usageRingkas.persen}% penggunaan` : 'Penggunaan'}
             </span>
           </button>
 
@@ -235,9 +234,14 @@ export default function ChatArea({
             <Share2 size={17} />
           </button>
 
-          {/* Login / nama akun. Tamu melihat tombol "Masuk" yang jelas;
-              pengguna login melihat namanya dan bisa keluar dari menu. */}
-          {!masuk ? (
+          {/* Login. Tamu melihat tombol "Masuk" yang jelas.
+              Pengguna yang sudah login TIDAK lagi melihat tombol "Keluar"
+              di sini: tombol keluar dipindahkan ke samping ikon gear di
+              pojok kiri bawah (Sidebar), berupa ikon saja. Alasannya,
+              tombol teks di header terlalu menonjol untuk tindakan yang
+              jarang dipakai — dan berdekatan dengan tombol berbagi
+              sehingga mudah tertekan tanpa sengaja. */}
+          {!masuk && (
             <button
               type="button"
               className="chat__login"
@@ -245,15 +249,6 @@ export default function ChatArea({
               title="Masuk dengan Google agar riwayat tersimpan"
             >
               Masuk
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="chat__account"
-              onClick={onLogout}
-              title={`Keluar dari ${nickname || 'akun Google'}`}
-            >
-              Keluar
             </button>
           )}
 

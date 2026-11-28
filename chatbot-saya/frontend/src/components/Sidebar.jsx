@@ -442,15 +442,39 @@ export default function Sidebar({
               memulihkannya diam-diam; karena itu tidak menampilkan ajakan
               "Masuk ulang" selama sesi aplikasi masih aktif. */}
 
-          <button
-            type="button"
-            className="icon-btn"
-            onClick={onOpenSettings}
-            aria-label="Buka pengaturan"
-            title="Pengaturan"
-          >
-            <Settings size={17} />
-          </button>
+          {/* Baris tindakan di pojok kiri bawah: ikon saja, tanpa teks.
+              Urutan: Pengaturan, lalu Keluar. Tombol Keluar HANYA tampil
+              bila pengguna sudah masuk — tamu tidak punya sesi untuk
+              diakhiri, jadi tombolnya akan membingungkan.
+
+              Sengaja ikon saja: tindakan ini jarang dipakai, dan menaruh
+              tulisan "Keluar" di sini membuatnya terlihat seperti menu
+              utama. Konfirmasi tetap muncul (lihat App.jsx) supaya tidak
+              ada yang keluar karena salah tekan. */}
+          <div className="sb-footer__aksi">
+            <button
+              type="button"
+              className="icon-btn"
+              onClick={onOpenSettings}
+              aria-label="Buka pengaturan"
+              title="Pengaturan"
+            >
+              <Settings size={17} />
+            </button>
+
+            {user && (
+              <button
+                type="button"
+                className="icon-btn"
+                onClick={onLogout}
+                aria-label="Keluar dari akun"
+                title={`Keluar dari ${nickname || 'akun Google'}`}
+                data-uji="keluar-sidebar"
+              >
+                <LogOut size={17} />
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Tombol masuk / status tamu — selalu di bawah, mudah ditemukan */}

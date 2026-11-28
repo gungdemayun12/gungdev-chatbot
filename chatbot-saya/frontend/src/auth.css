@@ -380,26 +380,6 @@
   transform: scale(0.96);
 }
 
-.chat__account {
-  display: inline-flex;
-  align-items: center;
-  height: 30px;
-  padding: 0 var(--sp-3);
-  border-radius: var(--r-full);
-  border: 1px solid var(--border-strong);
-  background-color: var(--surface);
-  color: var(--text-secondary);
-  font-size: var(--fs-xs);
-  font-weight: 500;
-  white-space: nowrap;
-  transition: background-color var(--t-fast), color var(--t-fast);
-}
-
-.chat__account:hover {
-  background-color: var(--bg-hover);
-  color: var(--text);
-}
-
 /* --- 6. Pengaturan: kartu akun --- */
 .set-account {
   display: flex;
@@ -487,10 +467,13 @@
 }
 
 @media (max-width: 420px) {
-  /* Layar sempit: tombol Keluar di header disembunyikan agar judul
-     percakapan tetap terbaca. Keluar tetap tersedia lewat menu akun
-     di sidebar dan halaman Pengaturan. */
-  .chat__header-actions .chat__account {
+  /* Layar sempit: tombol "Masuk" di header disembunyikan agar judul
+     percakapan tetap terbaca. Tombol masuk tetap tersedia di sidebar.
+
+     Catatan: tombol Keluar tidak lagi ada di header sama sekali — ia
+     dipindahkan ke samping ikon gear di pojok kiri bawah, berupa ikon
+     saja, sehingga tetap muat di layar sempit tanpa perlu disembunyikan. */
+  .chat__header-actions .chat__login {
     display: none;
   }
 }

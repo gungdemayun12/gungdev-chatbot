@@ -61,21 +61,34 @@ async function bukaMasuk(browser) {
   return { ctx, page }
 }
 
-/** Apakah UI sedang dalam keadaan masuk (tombol "Keluar" ada, "Masuk" tidak). */
+/**
+ * Apakah UI sedang dalam keadaan masuk.
+ *
+ * Sejak tombol "Keluar" dipindahkan ke samping ikon gear (pojok kiri
+ * bawah, ikon saja tanpa kata), penanda "keluar" tidak bisa lagi dicari
+ * lewat TEKS. Yang dipakai sekarang: tombol keluar ber-`data-uji` ada
+ * (hanya dirender untuk pengguna yang sudah masuk), dan tombol "Masuk"
+ * tidak ada.
+ */
 async function sedangMasuk(page) {
   return page.evaluate(() => {
-    const teks = document.body.innerText
-    const adaKeluar = /Keluar/.test(teks)
+    const adaTombolKeluar = Boolean(document.querySelector('[data-uji="keluar-sidebar"]'))
     const tombolMasuk = Array.from(document.querySelectorAll('button')).some(
       (b) => b.textContent.trim() === 'Masuk',
     )
-    return adaKeluar && !tombolMasuk
+    return adaTombolKeluar && !tombolMasuk
   })
 }
 
-/** Klik tombol Keluar pertama yang terlihat di header. */
+/**
+ * Klik tombol Keluar di samping ikon gear (pojok kiri bawah).
+ *
+ * Tombol ini IKON SAJA — tidak ada teks "Keluar" untuk dicari. Karena
+ * itu dipakai `data-uji="keluar-sidebar"`, yang juga dipasang di produksi
+ * supaya uji ini tetap bisa dijalankan terhadap UI sungguhan.
+ */
 async function klikKeluar(page) {
-  const tombol = page.locator('button:has-text("Keluar")').first()
+  const tombol = page.locator('[data-uji="keluar-sidebar"]').first()
   await tombol.click()
 }
 
@@ -229,7 +242,7 @@ async function jalankan() {
   }
   const teksAkunTab = pengaturanTerbuka ? (await page.textContent('.settings__panel')) || '' : ''
   cek('Tab Akun menampilkan status akun', /Terhubung/i.test(teksAkunTab), teksAkunTab.slice(0, 100))
-  cek('Tab Akun menampilkan panel jatah', /Jatah saya/i.test(teksAkunTab))
+  cek('Tab Akun menampilkan panel penggunaan', /Penggunaan saya/i.test(teksAkunTab))
   cek('Tab Akun menjelaskan privasi', /Privasi/i.test(teksAkunTab))
   cek('Tab Akun punya tombol Keluar', /Keluar/i.test(teksAkunTab))
 
@@ -237,17 +250,22 @@ async function jalankan() {
   await page.keyboard.press('Escape')
   await page.waitForTimeout(400)
 
-  /* ============ 3. BAHASA JATAH TENANG ============ */
-  console.log('\n=== 3. BAHASA PANEL JATAH TENANG ===')
-  await page.click('[aria-label="Lihat jatah dan pemakaian saya"]')
+  /* ============ 3. BAHASA PANEL PENGGUNAAN TENANG ============ */
+  console.log('\n=== 3. BAHASA PANEL PENGGUNAAN TENANG ===')
+  await page.click('[aria-label="Lihat penggunaan dan pemakaian saya"]')
   await page.waitForSelector('.usage__akun', { timeout: 15000 })
   await page.waitForTimeout(600)
   const teksJatah = (await page.textContent('.usage')) || ''
 
   cek(
-    'Memakai bahasa "bekal" (mudah dibaca)',
-    /bekal untuk\s*24\s*jam/i.test(teksJatah),
+    'Memakai bahasa "jendela 24 jam" (mudah dibaca)',
+    /jendela\s*24\s*jam/i.test(teksJatah),
     teksJatah.slice(0, 120).replace(/\n/g, ' | '),
+  )
+  cek(
+    'Panel TIDAK lagi memakai kata "jatah" (berkonotasi uang saku)',
+    !/jatah(?! pesan)/i.test(teksJatah),
+    (teksJatah.match(/jatah[^\n]*/gi) || []).join(' | ').slice(0, 160),
   )
   cek(
     'Hitung mundur memakai kata "diperbarui"',

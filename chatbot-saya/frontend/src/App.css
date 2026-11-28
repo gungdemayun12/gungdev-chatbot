@@ -454,6 +454,19 @@
   flex-wrap: wrap;
 }
 
+/* Baris ikon tindakan (Pengaturan + Keluar) di pojok kanan footer.
+   `margin-left: auto` mendorongnya ke kanan tanpa menggeser profil,
+   dan `nowrap` menjaga kedua ikon tetap sebaris walau layar sempit —
+   sebelumnya tombol Keluar berupa teks panjang sehingga mudah melipat. */
+.sb-footer__aksi {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+  margin-left: auto;
+  order: 2;
+}
+
 /* --- Status penyimpanan riwayat (hanya bila ada masalah) --- */
 .sb-simpan {
   display: flex;

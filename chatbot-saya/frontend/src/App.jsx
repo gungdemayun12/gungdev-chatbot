@@ -587,9 +587,13 @@ export default function App() {
   /**
    * Tombol "Keluar" hanya MEMBUKA konfirmasi.
    *
-   * Keluar tanpa sengaja dulu berarti kembali ke mode tamu (jatah 3 pesan,
+   * Keluar tanpa sengaja dulu berarti kembali ke mode tamu (batas 3 pesan,
    * riwayat tidak tersimpan) hanya karena salah klik. Sekarang pengguna
    * sempat membaca apa yang terjadi dan memilih Batal.
+   *
+   * Tombolnya kini berupa ikon di samping gear (Sidebar, pojok kiri bawah).
+   * Karena ikon tidak menjelaskan dirinya sendiri seperti tulisan "Keluar",
+   * konfirmasi ini menjadi semakin penting — bukan sekadar kehati-hatian.
    */
   const mintaKeluar = useCallback(() => {
     setLogoutOpen(true)
@@ -857,7 +861,6 @@ export default function App() {
           masuk={masuk}
           guestSisa={masuk ? null : tamu.sisa}
           onOpenLogin={() => openLogin(tamu.habis ? 'batas' : 'info')}
-          onLogout={mintaKeluar}
         />
       </main>
 
@@ -933,7 +936,7 @@ export default function App() {
       </Modal>
 
       {/* Konfirmasi keluar — mencegah salah klik yang membuat pengguna
-          kembali ke mode tamu (jatah 3 pesan, riwayat tidak tersimpan). */}
+          kembali ke mode tamu (batas 3 pesan, riwayat tidak tersimpan). */}
       <Modal
         open={logoutOpen}
         onClose={() => setLogoutOpen(false)}
@@ -959,7 +962,7 @@ export default function App() {
           Anda masuk dengan akun yang sama.
         </p>
         <p className="modal__text modal__text--muted">
-          Setelah keluar Anda memakai mode tamu: riwayat tidak tersimpan dan jatah
+          Setelah keluar Anda memakai mode tamu: riwayat tidak tersimpan dan batas
           pesan lebih sedikit.
         </p>
       </Modal>

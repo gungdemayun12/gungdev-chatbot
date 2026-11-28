@@ -481,10 +481,10 @@ console.log('\n=== 8. PANEL JATAH: INDIKATOR PERSEN ===')
   const sesi8 = await buka()
   const { page: page8 } = sesi8
 
-  // Buka panel "Jatah Saya" dari tombol di header.
+  // Buka panel "Penggunaan Saya" dari tombol di header.
   await page8.evaluate(() => {
     const tombol = Array.from(document.querySelectorAll('button')).find((b) =>
-      /jatah/i.test(b.getAttribute('aria-label') || ''),
+      /penggunaan/i.test(b.getAttribute('aria-label') || ''),
     )
     if (tombol) tombol.click()
   })
@@ -539,7 +539,7 @@ console.log('\n=== 8. PANEL JATAH: INDIKATOR PERSEN ===')
   const { page: page8b } = sesi8b
   await page8b.evaluate(() => {
     const tombol = Array.from(document.querySelectorAll('button')).find((b) =>
-      /jatah/i.test(b.getAttribute('aria-label') || ''),
+      /penggunaan/i.test(b.getAttribute('aria-label') || ''),
     )
     if (tombol) tombol.click()
   })
@@ -559,6 +559,173 @@ console.log('\n=== 8. PANEL JATAH: INDIKATOR PERSEN ===')
 
   await sesi8.ctx.close()
   await sesi8b.ctx.close()
+  await resetAkun(SUB_A)
+}
+
+/* =====================================================================
+   BAGIAN 9: TOMBOL KELUAR & TOKEN SESI
+   =====================================================================
+   Tiga hal yang diperiksa, semuanya adalah permintaan langsung pemilik
+   situs:
+
+   1. Tombol "Keluar" TIDAK ADA lagi di header atas.
+   2. Tombol keluar ADA di samping ikon gear (pojok kiri bawah sidebar),
+      berupa IKON SAJA — tidak boleh ada tulisan "Keluar" di sana.
+   3. Setiap sesi percakapan baru punya token acak SENDIRI, dan token
+      itu tidak berurutan/berpola waktu (bukan timestamp).
+*/
+{
+  const sesi9 = await buka()
+  const { page: page9 } = sesi9
+
+  const header = await page9.evaluate(() => {
+    const area = document.querySelector('.chat__header-actions')
+    if (!area) return { ada: false }
+    const teksTombol = Array.from(area.querySelectorAll('button')).map((b) =>
+      (b.textContent || '').trim(),
+    )
+    return {
+      ada: true,
+      teksTombol,
+      adaTeksKeluar: teksTombol.some((t) => /keluar/i.test(t)),
+    }
+  })
+  cek(
+    'header TIDAK lagi memuat tombol "Keluar"',
+    header.ada && !header.adaTeksKeluar,
+    header.ada ? header.teksTombol.join(' | ') : 'header tidak ditemukan',
+  )
+
+  const sidebar = await page9.evaluate(() => {
+    const tombol = document.querySelector('[data-uji="keluar-sidebar"]')
+    if (!tombol) return { ada: false }
+    // Apakah tombolnya berada di dalam footer sidebar, tepat setelah gear?
+    const footer = tombol.closest('.sb-footer')
+    const aksi = tombol.parentElement
+    const saudara = aksi ? Array.from(aksi.children) : []
+    const posisi = saudara.indexOf(tombol)
+    const gear = saudara.find(
+      (b) => b.tagName === 'BUTTON' && /pengaturan/i.test(b.getAttribute('aria-label') || ''),
+    )
+    return {
+      ada: true,
+      diFooter: Boolean(footer),
+      adaTeks: (tombol.textContent || '').trim().length > 0,
+      setelahGear: Boolean(gear) && posisi > saudara.indexOf(gear),
+      ukuranIkon: tombol.querySelector('svg') ? 'ada-svg' : 'tanpa-svg',
+      label: tombol.getAttribute('aria-label') || '',
+    }
+  })
+  cek('tombol keluar ADA di sidebar (pojok kiri bawah)', sidebar.ada, JSON.stringify(sidebar))
+  cek('tombol keluar berada di footer, bukan header', sidebar.diFooter === true, '')
+  cek('tombol keluar memakai IKON saja (tanpa kata)', sidebar.ada === true && !sidebar.adaTeks, '')
+  cek(
+    'tombol keluar ada di samping ikon gear',
+    sidebar.setelahGear === true,
+    `label="${sidebar.label}"`,
+  )
+
+  /* Token per sesi: buat tiga percakapan SUNGGUHAN, lalu bandingkan
+     tokennya. Sesi dibaca dari localStorage karena di situlah riwayat
+     disalin lebih dulu (lebih cepat daripada menunggu server).
+
+     CATATAN PENTING: `newSession()` sengaja MEMAKAI ULANG sesi kosong
+     yang sedang aktif — menekan "Percakapan Baru" berkali-kali tanpa
+     mengetik apa pun tetap menghasilkan SATU sesi. Itu perilaku yang
+     benar (tidak menumpuk sesi kosong). Karena itu setiap percakapan
+     dikirimi satu pesan dulu, supaya benar-benar menjadi sesi baru. */
+  const kunciSesi = await page9.evaluate(() => {
+    const k = Object.keys(localStorage).find(
+      (k) => /sessions/i.test(k) && !/aktif|active/i.test(k),
+    )
+    return k || ''
+  })
+
+  const bacaSesi = async () =>
+    page9.evaluate((kunci) => {
+      if (!kunci) return []
+      try {
+        const isi = JSON.parse(localStorage.getItem(kunci) || '[]')
+        const daftar = Array.isArray(isi) ? isi : isi.sessions || isi.sesi || []
+        return (Array.isArray(daftar) ? daftar : []).map((s) => ({
+          id: s && s.id,
+          token: (s && s.token) || '',
+        }))
+      } catch {
+        return []
+      }
+    }, kunciSesi)
+
+  // Buat TIGA percakapan yang masing-masing berisi satu pesan.
+  let klikBerhasil = 0
+  for (let i = 0; i < 3; i += 1) {
+    if (i > 0) {
+      const ada = await page9.evaluate(() => {
+        const tombol =
+          document.querySelector('.sb-new') ||
+          Array.from(document.querySelectorAll('button')).find((b) =>
+            /percakapan baru/i.test(b.textContent || ''),
+          )
+        if (tombol) tombol.click()
+        return Boolean(tombol)
+      })
+      if (ada) klikBerhasil += 1
+      await page9.waitForTimeout(400)
+    }
+    // Tanpa pesan, `newSession()` memakai ulang sesi kosong yang sama.
+    await kirim(page9, `halo ${i + 1}`, 120000).catch(() => {})
+    await page9.waitForTimeout(800)
+  }
+
+  cek('tombol "Percakapan Baru" bisa diklik', klikBerhasil === 2, `${klikBerhasil}/2`)
+
+  const daftarSesi = await bacaSesi()
+  const daftarToken = daftarSesi.map((s) => s.token).filter(Boolean)
+  const tokenAwal = daftarToken.slice()
+
+  cek(
+    'setiap sesi punya token sendiri',
+    daftarToken.length >= 3,
+    `jumlah token=${daftarToken.length} dari ${daftarSesi.length} sesi (kunci="${kunciSesi}")`,
+  )
+  cek(
+    'token sesi tidak ada yang sama (unik)',
+    new Set(daftarToken).size === daftarToken.length,
+    `${new Set(daftarToken).size} unik dari ${daftarToken.length}`,
+  )
+  cek(
+    'token berbentuk UUID v4 (acak, 122 bit)',
+    daftarToken.length > 0 &&
+      daftarToken.every((t) =>
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(t),
+      ),
+    daftarToken[0] || '(kosong)',
+  )
+  cek(
+    'token TIDAK memuat timestamp (bukan pola id lama)',
+    daftarToken.length > 0 && daftarToken.every((t) => !t.startsWith('s_')),
+    daftarToken[0] || '(kosong)',
+  )
+  cek(
+    'token tidak bisa diturunkan dari id sesi',
+    daftarSesi.every((s) => !s.token || !s.id || (!s.token.includes(s.id) && !s.id.includes(s.token))),
+    daftarSesi.map((s) => `${s.id}/${(s.token || '').slice(0, 8)}`).join(' | '),
+  )
+
+  // Token harus BERTAHAN setelah halaman dimuat ulang (tautan sesi tidak
+  // boleh berubah). Ini yang membuktikan tokennya stabil, bukan dibuat
+  // ulang setiap kali riwayat dibaca.
+  await page9.reload({ waitUntil: 'domcontentloaded' })
+  await page9.waitForSelector('.composer__input', { timeout: 20000 })
+  await page9.waitForTimeout(1200)
+  const tokenSetelahMuatUlang = (await bacaSesi()).map((s) => s.token).filter(Boolean)
+  cek(
+    'token sesi TETAP SAMA setelah halaman dimuat ulang',
+    tokenAwal.length > 0 && tokenAwal.every((t) => tokenSetelahMuatUlang.includes(t)),
+    `sebelum=${tokenAwal.length} sesudah=${tokenSetelahMuatUlang.length}`,
+  )
+
+  await sesi9.ctx.close()
   await resetAkun(SUB_A)
 }
 

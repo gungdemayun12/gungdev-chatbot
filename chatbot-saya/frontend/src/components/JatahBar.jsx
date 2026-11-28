@@ -1,5 +1,5 @@
 /**
- * JatahBar.jsx — satu kotak jatah bergaya "Plan limits".
+ * JatahBar.jsx — satu kotak batas pemakaian bergaya "Plan limits".
  *
  * Bentuknya mengikuti contoh yang diminta pemilik situs:
  *
@@ -20,7 +20,7 @@
  * -------------------------------------
  * Yang ditonjolkan adalah SISA (100% = masih penuh). Itu yang ingin
  * diketahui pengguna: "berapa lagi saya bisa chat?". Bilahnya juga
- * mengisi dari kiri sesuai sisa, sehingga bilah panjang = jatah banyak.
+ * mengisi dari kiri sesuai sisa, sehingga bilah panjang = sisa banyak.
  *
  * WARNA
  * -----
@@ -79,7 +79,7 @@ export default function JatahBar({
       resetTeks = 'Diperbarui sebentar lagi'
     }
   } else if (sisa > 0) {
-    // Masih ada sisa tetapi jendelanya sudah lewat: jatah tetap boleh
+    // Masih ada sisa tetapi jendelanya sudah lewat: batasnya tetap boleh
     // dipakai sampai pesan berikutnya memulai jendela baru.
     resetTeks = 'Siap dipakai'
   }
@@ -119,7 +119,7 @@ export default function JatahBar({
         <div
           className="jatah-bar__isi"
           // Isi minimum 2% saat masih ada sisa, supaya bilah tidak
-          // terlihat kosong padahal jatahnya tinggal sedikit.
+          // terlihat kosong padahal sisanya tinggal sedikit.
           style={{ width: `${sisa > 0 ? Math.max(2, sisa) : 0}%` }}
         />
       </div>
